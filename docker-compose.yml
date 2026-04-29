@@ -50,7 +50,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}
+      NEXT_PUBLIC_API_URL: http://13.234.82.78:8000/api
     depends_on:
       - backend
     deploy:
