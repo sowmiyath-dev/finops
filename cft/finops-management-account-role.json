@@ -1,0 +1,155 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "CloudFormation Template to allow FinOps CUR Portal (hosted in EC2) to access this Management Account CUR S3 bucket and AWS Organizations",
+
+  "Parameters": {
+    "RoleName": {
+      "Description": "Name of the IAM Role to be created",
+      "Type": "String",
+      "Default": "FinOpsCURPortal-CrossAcctRole"
+    },
+    "FinOpsHostAccountId": {
+      "Description": "AWS Account ID where the FinOps Portal EC2 is hosted (your portal account)",
+      "Type": "String",
+      "Default": "431309843953"
+    },
+    "CURBucketName": {
+      "Description": "Name of the S3 bucket where CUR reports are stored in this management account",
+      "Type": "String"
+    },
+    "ExternalId": {
+      "Description": "External ID for secure role assumption — copy this from the FinOps Portal onboard page",
+      "Type": "String"
+    }
+  },
+
+  "Resources": {
+
+    "FinOpsCURBucketReadPolicy": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "ManagedPolicyName": "FinOps-CUR-S3-ReadPolicy",
+        "Description": "Allows FinOps portal to read CUR report files from S3",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "CURBucketAccess",
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetObject",
+                "s3:ListBucket",
+                "s3:GetBucketLocation"
+              ],
+              "Resource": [
+                { "Fn::Sub": "arn:aws:s3:::${CURBucketName}" },
+                { "Fn::Sub": "arn:aws:s3:::${CURBucketName}/*" }
+              ]
+            }
+          ]
+        }
+      }
+    },
+
+    "FinOpsOrganizationsReadPolicy": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "ManagedPolicyName": "FinOps-Organizations-ReadPolicy",
+        "Description": "Allows FinOps portal to list all sub-accounts in the Organization",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "OrganizationsAccess",
+              "Effect": "Allow",
+              "Action": [
+                "organizations:ListAccounts",
+                "organizations:DescribeAccount",
+                "organizations:ListOrganizationalUnitsForParent",
+                "organizations:ListRoots",
+                "organizations:DescribeOrganization"
+              ],
+              "Resource": "*"
+            }
+          ]
+        }
+      }
+    },
+
+    "FinOpsSTSPolicy": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "ManagedPolicyName": "FinOps-STS-ReadPolicy",
+        "Description": "Allows FinOps portal to verify AWS identity",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "STSAccess",
+              "Effect": "Allow",
+              "Action": [
+                "sts:GetCallerIdentity"
+              ],
+              "Resource": "*"
+            }
+          ]
+        }
+      }
+    },
+
+    "FinOpsCrossAcctRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": { "Ref": "RoleName" },
+        "Description": "Cross Account Role for FinOps CUR Portal — allows portal to read CUR data and list Organization accounts",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Fn::Sub": "arn:aws:iam::${FinOpsHostAccountId}:root"
+                }
+              },
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "StringEquals": {
+                  "sts:ExternalId": { "Ref": "ExternalId" }
+                }
+              }
+            }
+          ]
+        },
+        "Path": "/",
+        "ManagedPolicyArns": [
+          { "Ref": "FinOpsCURBucketReadPolicy" },
+          { "Ref": "FinOpsOrganizationsReadPolicy" },
+          { "Ref": "FinOpsSTSPolicy" }
+        ]
+      }
+    }
+
+  },
+
+  "Outputs": {
+    "RoleARN": {
+      "Description": "Copy this Role ARN and paste it in the FinOps Portal when onboarding this Control Tower",
+      "Value": {
+        "Fn::GetAtt": ["FinOpsCrossAcctRole", "Arn"]
+      }
+    },
+    "RoleName": {
+      "Description": "IAM Role Name created in this account",
+      "Value": { "Ref": "RoleName" }
+    },
+    "TrustedAccount": {
+      "Description": "FinOps Portal host account that is allowed to assume this role",
+      "Value": { "Ref": "FinOpsHostAccountId" }
+    },
+    "Instructions": {
+      "Description": "Next steps after deploying this stack",
+      "Value": "1. Copy the RoleARN from above. 2. Go to FinOps Portal. 3. Click Add Control Tower. 4. Select IAM Role method. 5. Paste the Role ARN. 6. Enter the same ExternalId used here."
+    }
+  }
+}

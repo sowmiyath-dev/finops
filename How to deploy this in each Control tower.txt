@@ -1,0 +1,25 @@
+How to deploy this in each Control Tower management account:
+
+Step 1 — Go to AWS Console of the management account
+
+AWS Console → CloudFormation → Create Stack → Upload template file
+
+Copy
+Step 2 — Fill in the parameters:
+
+Parameter	Value
+RoleName	FinOpsCURPortal-CrossAcctRole (default)
+FinOpsHostAccountId	431309843953 (your EC2 host account)
+CURBucketName	e.g. rilcurmall
+ExternalId	Copy from FinOps Portal onboard page
+Step 3 — After stack creation, copy the RoleARN from Outputs tab
+
+Step 4 — Go to FinOps Portal → Add Control Tower → IAM Role → paste the Role ARN
+
+For all 7 Control Towers:
+
+Deploy this same CFT in each management account
+
+Change only CURBucketName for each CT
+
+FinOpsHostAccountId stays 431309843953 for all

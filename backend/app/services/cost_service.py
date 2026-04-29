@@ -1,8 +1,11 @@
+import io
+import gzip
 import json
+import csv
 import logging
 from datetime import date, timedelta
 from typing import Optional
-from app.services.aws_session import get_cost_explorer_client
+from app.services.aws_session import get_boto3_session
 from app.models.db_models import ControlTower
 
 logger = logging.getLogger(__name__)
@@ -18,190 +21,173 @@ def get_sync_date_range(days_back: int = 7) -> tuple[str, str]:
     return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
 
 
-def fetch_cost_by_account(ct: ControlTower, start_date: str, end_date: str) -> list[dict]:
-    """Fetch daily cost grouped by linked account + service + region + purchase type."""
-    ce = get_cost_explorer_client(ct)
+def _get_s3_client(ct: ControlTower):
+    session = get_boto3_session(ct)
+    return session.client("s3", region_name="us-east-1")
+
+
+def _get_latest_manifest(ct: ControlTower, billing_period: str) -> Optional[dict]:
+    """
+    Fetch the latest manifest JSON for a given billing period.
+    billing_period format: YYYYMMDD-YYYYMMDD  e.g. 20260401-20260501
+    """
+    s3 = _get_s3_client(ct)
+    bucket = ct.cur_s3_bucket
+    prefix = ct.cur_s3_prefix  # e.g. rilcurmall/rilcurmall26NN
+
+    manifest_key = f"{prefix}/{billing_period}/{prefix.split('/')[-1]}-Manifest.json"
+
+    try:
+        obj = s3.get_object(Bucket=bucket, Key=manifest_key)
+        manifest = json.loads(obj["Body"].read().decode("utf-8"))
+        logger.info(f"Loaded manifest: {manifest_key}")
+        return manifest
+    except Exception as e:
+        logger.warning(f"Could not load manifest {manifest_key}: {e}")
+        return None
+
+
+def _get_billing_periods_for_range(start_date: str, end_date: str) -> list[str]:
+    """
+    Returns list of billing period folder names that cover the given date range.
+    e.g. for April 2026 → ['20260401-20260501']
+    """
+    start = date.fromisoformat(start_date)
+    end = date.fromisoformat(end_date)
+
+    periods = set()
+    current = start
+    while current <= end:
+        # Billing period is first day of month to first day of next month
+        period_start = current.replace(day=1)
+        if period_start.month == 12:
+            period_end = period_start.replace(year=period_start.year + 1, month=1)
+        else:
+            period_end = period_start.replace(month=period_start.month + 1)
+
+        period_str = f"{period_start.strftime('%Y%m%d')}-{period_end.strftime('%Y%m%d')}"
+        periods.add(period_str)
+        # Move to next month
+        current = period_end
+
+    return sorted(list(periods))
+
+
+def _parse_cur_csv_gz(ct: ControlTower, report_key: str, start_date: str, end_date: str) -> list[dict]:
+    """Download and parse a single CUR CSV.GZ file from S3."""
+    s3 = _get_s3_client(ct)
     records = []
 
     try:
-        paginator_token = None
-        while True:
-            kwargs = dict(
-                TimePeriod={"Start": start_date, "End": end_date},
-                Granularity="DAILY",
-                Metrics=["BlendedCost", "UnblendedCost", "NetUnblendedCost", "AmortizedCost", "UsageQuantity"],
-                GroupBy=[
-                    {"Type": "DIMENSION", "Key": "LINKED_ACCOUNT"},
-                    {"Type": "DIMENSION", "Key": "SERVICE"},
-                    {"Type": "DIMENSION", "Key": "REGION"},
-                    {"Type": "DIMENSION", "Key": "PURCHASE_TYPE"},
-                ],
-            )
-            if paginator_token:
-                kwargs["NextPageToken"] = paginator_token
+        obj = s3.get_object(Bucket=ct.cur_s3_bucket, Key=report_key)
+        compressed = obj["Body"].read()
+        decompressed = gzip.decompress(compressed)
+        content = decompressed.decode("utf-8")
 
-            resp = ce.get_cost_and_usage(**kwargs)
+        reader = csv.DictReader(io.StringIO(content))
 
-            for time_result in resp.get("ResultsByTime", []):
-                day = time_result["TimePeriod"]["Start"]
-                for group in time_result.get("Groups", []):
-                    keys = group["Keys"]
-                    metrics = group["Metrics"]
-                    records.append({
-                        "date": day,
-                        "aws_account_id": keys[0] if len(keys) > 0 else "",
-                        "service": keys[1] if len(keys) > 1 else "Unknown",
-                        "region": keys[2] if len(keys) > 2 else "global",
-                        "purchase_type": keys[3] if len(keys) > 3 else "OnDemand",
-                        "blended_cost": float(metrics.get("BlendedCost", {}).get("Amount", 0)),
-                        "unblended_cost": float(metrics.get("UnblendedCost", {}).get("Amount", 0)),
-                        "net_unblended_cost": float(metrics.get("NetUnblendedCost", {}).get("Amount", 0)),
-                        "amortized_cost": float(metrics.get("AmortizedCost", {}).get("Amount", 0)),
-                        "usage_quantity": float(metrics.get("UsageQuantity", {}).get("Amount", 0)),
-                        "usage_unit": metrics.get("UsageQuantity", {}).get("Unit", ""),
-                        "resource_id": None,
-                        "usage_type": None,
-                        "operation": None,
-                        "tags": None,
-                    })
+        start = date.fromisoformat(start_date)
+        end = date.fromisoformat(end_date)
 
-            paginator_token = resp.get("NextPageToken")
-            if not paginator_token:
-                break
+        for row in reader:
+            try:
+                # Parse date from UsageStartDate
+                usage_start = row.get("lineItem/UsageStartDate", "")
+                if not usage_start:
+                    continue
+                row_date = date.fromisoformat(usage_start[:10])
+
+                # Filter by date range
+                if row_date < start or row_date > end:
+                    continue
+
+                # Skip zero cost rows
+                unblended = float(row.get("lineItem/UnblendedCost", 0) or 0)
+                blended = float(row.get("lineItem/BlendedCost", 0) or 0)
+                if unblended == 0 and blended == 0:
+                    continue
+
+                # Extract tag columns (resourceTags/user:*)
+                tags = {}
+                for col, val in row.items():
+                    if col.startswith("resourceTags/user:") and val:
+                        tag_key = col.replace("resourceTags/user:", "")
+                        tags[tag_key] = val
+
+                # Determine purchase type
+                line_item_type = row.get("lineItem/LineItemType", "")
+                pricing_term = row.get("pricing/term", "")
+                savings_arn = row.get("savingsPlan/SavingsPlanARN", "")
+                reservation_id = row.get("reservation/SubscriptionId", "")
+
+                if savings_arn:
+                    purchase_type = "SavingsPlan"
+                elif reservation_id:
+                    purchase_type = "Reserved"
+                elif line_item_type == "Spot":
+                    purchase_type = "Spot"
+                else:
+                    purchase_type = "OnDemand"
+
+                records.append({
+                    "date": row_date.isoformat(),
+                    "aws_account_id": row.get("lineItem/UsageAccountId", ""),
+                    "service": row.get("lineItem/ProductCode", row.get("product/ProductName", "Unknown")),
+                    "region": row.get("product/region", row.get("product/regionCode", "global")),
+                    "resource_id": row.get("lineItem/ResourceId") or None,
+                    "usage_type": row.get("lineItem/UsageType") or None,
+                    "operation": row.get("lineItem/Operation") or None,
+                    "blended_cost": blended,
+                    "unblended_cost": unblended,
+                    "net_unblended_cost": float(row.get("lineItem/NetUnblendedCost", 0) or 0),
+                    "amortized_cost": float(
+                        row.get("reservation/EffectiveCost", 0) or
+                        row.get("savingsPlan/SavingsPlanEffectiveCost", 0) or
+                        unblended
+                    ),
+                    "usage_quantity": float(row.get("lineItem/UsageAmount", 0) or 0),
+                    "usage_unit": row.get("pricing/unit", ""),
+                    "purchase_type": purchase_type,
+                    "tags": json.dumps(tags) if tags else None,
+                })
+
+            except Exception as row_err:
+                logger.debug(f"Skipping row due to error: {row_err}")
+                continue
+
+        logger.info(f"Parsed {len(records)} records from {report_key}")
 
     except Exception as e:
-        logger.error(f"fetch_cost_by_account failed for CT {ct.name}: {e}")
-        raise
+        logger.error(f"Failed to parse CUR file {report_key}: {e}")
 
     return records
 
 
-def fetch_resource_costs(ct: ControlTower, aws_account_id: str, start_date: str, end_date: str) -> list[dict]:
-    """Fetch resource-level costs for a specific account."""
-    ce = get_cost_explorer_client(ct)
-    records = []
+def fetch_cur_from_s3(ct: ControlTower, start_date: str, end_date: str) -> list[dict]:
+    """
+    Main function — fetches CUR data from S3 for the given date range.
+    Reads manifest to find latest CSV files, downloads and parses them.
+    """
+    if not ct.cur_s3_bucket or not ct.cur_s3_prefix:
+        raise ValueError(f"CUR S3 bucket/prefix not configured for Control Tower: {ct.name}")
 
-    try:
-        paginator_token = None
-        while True:
-            kwargs = dict(
-                TimePeriod={"Start": start_date, "End": end_date},
-                Granularity="DAILY",
-                Metrics=["UnblendedCost", "UsageQuantity"],
-                GroupBy=[
-                    {"Type": "DIMENSION", "Key": "RESOURCE_ID"},
-                    {"Type": "DIMENSION", "Key": "SERVICE"},
-                ],
-                Filter={"Dimensions": {"Key": "LINKED_ACCOUNT", "Values": [aws_account_id]}},
-            )
-            if paginator_token:
-                kwargs["NextPageToken"] = paginator_token
+    all_records = []
+    billing_periods = _get_billing_periods_for_range(start_date, end_date)
 
-            resp = ce.get_cost_and_usage_with_resources(**kwargs)
+    logger.info(f"Fetching CUR for CT {ct.name} | periods: {billing_periods} | range: {start_date} → {end_date}")
 
-            for time_result in resp.get("ResultsByTime", []):
-                day = time_result["TimePeriod"]["Start"]
-                for group in time_result.get("Groups", []):
-                    keys = group["Keys"]
-                    metrics = group["Metrics"]
-                    cost = float(metrics.get("UnblendedCost", {}).get("Amount", 0))
-                    if cost == 0:
-                        continue
-                    records.append({
-                        "date": day,
-                        "aws_account_id": aws_account_id,
-                        "resource_id": keys[0] if len(keys) > 0 else None,
-                        "service": keys[1] if len(keys) > 1 else "Unknown",
-                        "region": "global",
-                        "purchase_type": "OnDemand",
-                        "blended_cost": cost,
-                        "unblended_cost": cost,
-                        "net_unblended_cost": cost,
-                        "amortized_cost": cost,
-                        "usage_quantity": float(metrics.get("UsageQuantity", {}).get("Amount", 0)),
-                        "usage_unit": metrics.get("UsageQuantity", {}).get("Unit", ""),
-                        "usage_type": None,
-                        "operation": None,
-                        "tags": None,
-                    })
+    for period in billing_periods:
+        manifest = _get_latest_manifest(ct, period)
+        if not manifest:
+            logger.warning(f"No manifest found for period {period}, skipping")
+            continue
 
-            paginator_token = resp.get("NextPageToken")
-            if not paginator_token:
-                break
+        report_keys = manifest.get("reportKeys", [])
+        logger.info(f"Period {period}: found {len(report_keys)} CUR files")
 
-    except Exception as e:
-        logger.warning(f"fetch_resource_costs failed for account {aws_account_id}: {e}")
+        for key in report_keys:
+            records = _parse_cur_csv_gz(ct, key, start_date, end_date)
+            all_records.extend(records)
 
-    return records
-
-
-def fetch_tag_costs(ct: ControlTower, tag_key: str, start_date: str, end_date: str) -> list[dict]:
-    """Fetch costs grouped by a specific tag key."""
-    ce = get_cost_explorer_client(ct)
-    records = []
-
-    try:
-        paginator_token = None
-        while True:
-            kwargs = dict(
-                TimePeriod={"Start": start_date, "End": end_date},
-                Granularity="DAILY",
-                Metrics=["UnblendedCost", "UsageQuantity"],
-                GroupBy=[
-                    {"Type": "DIMENSION", "Key": "LINKED_ACCOUNT"},
-                    {"Type": "TAG", "Key": tag_key},
-                ],
-            )
-            if paginator_token:
-                kwargs["NextPageToken"] = paginator_token
-
-            resp = ce.get_cost_and_usage(**kwargs)
-
-            for time_result in resp.get("ResultsByTime", []):
-                day = time_result["TimePeriod"]["Start"]
-                for group in time_result.get("Groups", []):
-                    keys = group["Keys"]
-                    metrics = group["Metrics"]
-                    tag_val = keys[1].replace(f"{tag_key}$", "") if len(keys) > 1 else ""
-                    records.append({
-                        "date": day,
-                        "aws_account_id": keys[0] if len(keys) > 0 else "",
-                        "service": "All",
-                        "region": "global",
-                        "purchase_type": "OnDemand",
-                        "blended_cost": float(metrics.get("UnblendedCost", {}).get("Amount", 0)),
-                        "unblended_cost": float(metrics.get("UnblendedCost", {}).get("Amount", 0)),
-                        "net_unblended_cost": float(metrics.get("UnblendedCost", {}).get("Amount", 0)),
-                        "amortized_cost": float(metrics.get("UnblendedCost", {}).get("Amount", 0)),
-                        "usage_quantity": float(metrics.get("UsageQuantity", {}).get("Amount", 0)),
-                        "usage_unit": "",
-                        "resource_id": None,
-                        "usage_type": None,
-                        "operation": None,
-                        "tags": json.dumps({tag_key: tag_val}),
-                    })
-
-            paginator_token = resp.get("NextPageToken")
-            if not paginator_token:
-                break
-
-    except Exception as e:
-        logger.warning(f"fetch_tag_costs failed for tag {tag_key}: {e}")
-
-    return records
-
-
-def fetch_available_tag_keys(ct: ControlTower) -> list[str]:
-    """Return all cost allocation tag keys available in Cost Explorer."""
-    try:
-        ce = get_cost_explorer_client(ct)
-        end = date.today() - timedelta(days=COST_LAG_DAYS)
-        start = end - timedelta(days=30)
-        resp = ce.list_cost_allocation_tags(
-            Status="Active",
-            MaxResults=200,
-        )
-        return [t["TagKey"] for t in resp.get("CostAllocationTags", [])]
-    except Exception as e:
-        logger.warning(f"fetch_available_tag_keys failed: {e}")
-        return []
+    logger.info(f"Total CUR records fetched for CT {ct.name}: {len(all_records)}")
+    return all_records

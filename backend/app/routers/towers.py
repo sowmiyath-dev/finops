@@ -4,7 +4,6 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.models.database import get_db, AsyncSessionLocal
 from app.models.db_models import User, ControlTower, SubAccount, CostRecord, SyncLog
@@ -12,7 +11,7 @@ from app.models.schemas import OnboardKeys, OnboardRole, ControlTowerOut
 from app.services.auth_service import get_current_user
 from app.services.crypto_service import encrypt
 from app.services.aws_session import test_connectivity, list_org_accounts
-from app.services.cost_service import fetch_cost_by_account, get_sync_date_range
+from app.services.cost_service import fetch_cur_from_s3, get_sync_date_range
 from app.config import settings
 
 router = APIRouter(prefix="/towers", tags=["towers"])
@@ -27,18 +26,6 @@ _sync_semaphore = asyncio.Semaphore(3)
 
 async def _upsert_sub_accounts(db: AsyncSession, ct_id: str, accounts: list[dict]):
     for acc in accounts:
-        stmt = pg_insert(SubAccount).values(
-            id=str(uuid.uuid4()),
-            control_tower_id=ct_id,
-            aws_account_id=acc["aws_account_id"],
-            account_name=acc["account_name"],
-            is_active=True,
-        )
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["control_tower_id", "aws_account_id"] if False else [],
-            set_={"account_name": stmt.excluded.account_name, "is_active": True},
-        )
-        # simple upsert via select+insert
         existing = await db.execute(
             select(SubAccount).where(
                 SubAccount.control_tower_id == ct_id,
@@ -97,8 +84,8 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual"):
             async with AsyncSessionLocal() as db:
                 await _upsert_sub_accounts(db, ct_id, org_accounts)
 
-            # Step 2 — fetch cost data (last 7 days up to accurate boundary)
-            _sync_progress[ct_id]["message"] = "Fetching cost data"
+            # Step 2 — fetch CUR from S3
+            _sync_progress[ct_id]["message"] = "Fetching CUR from S3"
             _sync_progress[ct_id]["percent"] = 30
 
             start_date, end_date = get_sync_date_range(days_back=7)
@@ -108,20 +95,19 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual"):
                 ct = result.scalar_one_or_none()
 
             raw_records = await loop.run_in_executor(
-                _executor, fetch_cost_by_account, ct, start_date, end_date
+                _executor, fetch_cur_from_s3, ct, start_date, end_date
             )
 
             _sync_progress[ct_id]["message"] = "Storing records"
             _sync_progress[ct_id]["percent"] = 70
 
-            # Step 3 — map aws_account_id → sub_account row
+            # Step 3 — store records
             async with AsyncSessionLocal() as db:
                 sub_result = await db.execute(
                     select(SubAccount).where(SubAccount.control_tower_id == ct_id)
                 )
                 sub_map = {s.aws_account_id: s for s in sub_result.scalars().all()}
 
-                # Delete existing records for this date range to avoid duplicates
                 await db.execute(
                     delete(CostRecord).where(
                         CostRecord.control_tower_id == ct_id,
@@ -195,7 +181,35 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual"):
             _sync_progress[ct_id] = {"percent": 0, "status": "failed", "message": str(e)}
 
 
-# ── routes ────────────────────────────────────────────────────────────────────
+# ── static routes MUST be before /{ct_id} dynamic routes ─────────────────────
+
+@router.get("/generate-external-id")
+async def generate_external_id(user: User = Depends(get_current_user)):
+    """Generate an External ID to use in CFT before onboarding"""
+    return {
+        "external_id": str(uuid.uuid4()),
+        "instructions": [
+            "1. Copy this External ID",
+            "2. Deploy the CFT in your management account using this External ID",
+            "3. Copy the Role ARN from CFT Outputs",
+            "4. Come back and click Add Control Tower → IAM Role",
+            "5. Paste the Role ARN and this same External ID",
+        ],
+    }
+
+
+@router.get("/trust-policy")
+async def trust_policy(user: User = Depends(get_current_user)):
+    return {
+        "Version": "2012-10-17",
+        "Statement": [{
+            "Effect": "Allow",
+            "Principal": {"AWS": f"arn:aws:iam::{settings.PORTAL_ACCOUNT_ID}:root"},
+            "Action": "sts:AssumeRole",
+            "Condition": {"StringEquals": {"sts:ExternalId": "<use-generated-external-id>"}},
+        }],
+    }
+
 
 @router.post("/onboard/keys", response_model=ControlTowerOut, status_code=201)
 async def onboard_keys(payload: OnboardKeys, bg: BackgroundTasks, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
@@ -208,6 +222,8 @@ async def onboard_keys(payload: OnboardKeys, bg: BackgroundTasks, db: AsyncSessi
         auth_method="keys",
         access_key_id=payload.access_key_id,
         encrypted_secret_key=encrypt(payload.secret_access_key),
+        cur_s3_bucket=payload.cur_s3_bucket,
+        cur_s3_prefix=payload.cur_s3_prefix,
     )
     ok, aws_id = test_connectivity(temp)
     if not ok:
@@ -227,7 +243,7 @@ async def onboard_keys(payload: OnboardKeys, bg: BackgroundTasks, db: AsyncSessi
 async def onboard_role(payload: OnboardRole, bg: BackgroundTasks, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     if user.role == "viewer":
         raise HTTPException(status_code=403, detail="Viewers cannot onboard")
-    ext_id = str(uuid.uuid4())
+    ext_id = payload.external_id or str(uuid.uuid4())
     temp = ControlTower(
         user_id=user.id, name=payload.name,
         management_account_name=payload.management_account_name,
@@ -235,6 +251,8 @@ async def onboard_role(payload: OnboardRole, bg: BackgroundTasks, db: AsyncSessi
         auth_method="role",
         role_arn=payload.role_arn,
         external_id=ext_id,
+        cur_s3_bucket=payload.cur_s3_bucket,
+        cur_s3_prefix=payload.cur_s3_prefix,
     )
     ok, aws_id = test_connectivity(temp)
     if not ok:
@@ -257,12 +275,13 @@ async def list_towers(db: AsyncSession = Depends(get_db), user: User = Depends(g
     else:
         result = await db.execute(select(ControlTower).where(ControlTower.user_id == user.id))
     towers = result.scalars().all()
-    # eager load sub_accounts
     for t in towers:
         sub_result = await db.execute(select(SubAccount).where(SubAccount.control_tower_id == t.id))
         t.sub_accounts = sub_result.scalars().all()
     return towers
 
+
+# ── dynamic /{ct_id} routes AFTER all static routes ──────────────────────────
 
 @router.post("/{ct_id}/sync")
 async def sync_tower(ct_id: str, bg: BackgroundTasks, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
@@ -303,16 +322,3 @@ async def delete_tower(ct_id: str, db: AsyncSession = Depends(get_db), user: Use
         raise HTTPException(status_code=404, detail="Not found")
     await db.delete(ct)
     await db.commit()
-
-
-@router.get("/trust-policy")
-async def trust_policy(user: User = Depends(get_current_user)):
-    return {
-        "Version": "2012-10-17",
-        "Statement": [{
-            "Effect": "Allow",
-            "Principal": {"AWS": f"arn:aws:iam::{settings.PORTAL_ACCOUNT_ID}:root"},
-            "Action": "sts:AssumeRole",
-            "Condition": {"StringEquals": {"sts:ExternalId": "<shown-after-onboard>"}},
-        }],
-    }

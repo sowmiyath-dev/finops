@@ -35,6 +35,8 @@ class ControlTower(Base):
     encrypted_secret_key = Column(Text)
     role_arn = Column(String)
     external_id = Column(String, unique=True)
+    cur_s3_bucket = Column(String, nullable=True)         # CUR S3 bucket name
+    cur_s3_prefix = Column(String, nullable=True)         # CUR S3 path prefix e.g. rilcurmall/rilcurmall26NN
     is_active = Column(Boolean, default=False)
     last_synced_at = Column(DateTime(timezone=True), nullable=True)
     auto_sync_enabled = Column(Boolean, default=True)

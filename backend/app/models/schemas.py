@@ -62,11 +62,16 @@ class OnboardKeys(BaseModel):
     management_account_name: str
     access_key_id: str
     secret_access_key: str
+    cur_s3_bucket: str
+    cur_s3_prefix: str
 
 class OnboardRole(BaseModel):
     name: str
     management_account_name: str
     role_arn: str
+    external_id: Optional[str] = None
+    cur_s3_bucket: str
+    cur_s3_prefix: str
 
 class SubAccountOut(BaseModel):
     id: UUID
@@ -84,6 +89,8 @@ class ControlTowerOut(BaseModel):
     auth_method: str
     is_active: bool
     auto_sync_enabled: bool
+    cur_s3_bucket: Optional[str] = None
+    cur_s3_prefix: Optional[str] = None
     last_synced_at: Optional[datetime] = None
     external_id: Optional[str] = None
     sub_accounts: list[SubAccountOut] = []
