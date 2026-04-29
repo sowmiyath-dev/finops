@@ -13,7 +13,6 @@ env/
 
 # Environment files
 backend/.env
-frontend/.env.local
 .env
 
 # Node
