@@ -9,7 +9,7 @@ from app.models.database import get_db
 from app.models.db_models import User, ControlTower, SubAccount, CostRecord, SyncLog
 from app.models.schemas import ReportFilter
 from app.services.auth_service import get_current_user
-from app.services.cost_service import COST_LAG_DAYS, fetch_available_tag_keys
+from app.services.cost_service import COST_LAG_DAYS
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
