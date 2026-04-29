@@ -14,7 +14,11 @@ app = FastAPI(title="FinOps CUR Portal", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://13.234.82.78:3000",
+        "http://13.234.82.78",
+        "*",
+    ],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
