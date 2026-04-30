@@ -156,8 +156,8 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual"):
                         update(SyncLog).where(SyncLog.id == sync_log_id).values(
                             status="completed",
                             records_synced=len(rows_to_insert),
-                            date_range_start=start_date,
-                            date_range_end=end_date,
+                            date_range_start=date.fromisoformat(start_date),
+                            date_range_end=date.fromisoformat(end_date),
                             finished_at=datetime.now(timezone.utc),
                         )
                     )
