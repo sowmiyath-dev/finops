@@ -4,7 +4,6 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
-import Navbar from "@/components/Navbar";
 import DateRangePicker, { DateRange, getLast30 } from "@/components/DateRangePicker";
 import Link from "next/link";
 import { ChevronRight, Download, Search, ChevronDown, ChevronUp, BarChart2 } from "lucide-react";
@@ -141,7 +140,7 @@ export default function AccountDetailPage() {
     }`;
 
   return (
-    <div className="flex">
+    <div className="flex h-full">
 
         {/* ── Left Navigation ── */}
         <aside className="w-64 min-h-screen bg-white border-r border-gray-300 flex-shrink-0">
@@ -417,7 +416,6 @@ export default function AccountDetailPage() {
             </div>
           )}
         </main>
-      </div>
     </div>
   );
 }

@@ -63,7 +63,7 @@ export default function CTDetailPage() {
   };
 
   return (
-    <div className="flex">
+    <div className="flex h-full">
 
         {/* ── Left Navigation (AWS-style) ── */}
         <aside className="w-64 min-h-screen bg-white border-r border-gray-300 flex-shrink-0">
@@ -269,7 +269,6 @@ export default function CTDetailPage() {
             </>
           )}
         </main>
-      </div>
     </div>
   );
 }
