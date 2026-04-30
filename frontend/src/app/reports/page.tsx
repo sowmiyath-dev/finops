@@ -464,6 +464,8 @@ function ReportsContent() {
                             <>
                               <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-black">Resource ID</th>
                               <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-black">Service</th>
+                              <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-black">Account</th>
+                              <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-black">Region</th>
                             </>
                           )}
                           {groupBy === "tag" && (
@@ -492,6 +494,8 @@ function ReportsContent() {
                               <>
                                 <td className="px-5 py-3 text-xs font-mono font-semibold text-black max-w-xs truncate">{row.resource_id}</td>
                                 <td className="px-5 py-3 text-sm font-semibold text-black">{row.service}</td>
+                                <td className="px-5 py-3 text-xs font-semibold text-black">{row.account_name || row.aws_account_id}</td>
+                                <td className="px-5 py-3 text-xs font-semibold text-black">{row.region || "—"}</td>
                               </>
                             )}
                             {groupBy === "tag" && (

@@ -137,33 +137,44 @@ async def resource_wise(f: ReportFilter, db: AsyncSession = Depends(get_db), use
     metric_col = METRIC_MAP.get(f.metric, CostRecord.unblended_cost)
     conditions = _build_filters(f, ct_ids)
     conditions.append(CostRecord.resource_id.isnot(None))
+    conditions.append(CostRecord.resource_id != "")
 
-    group_cols = [CostRecord.resource_id, CostRecord.service, CostRecord.aws_account_id]
-    if f.granularity == "daily":
-        group_cols.append(CostRecord.date)
-
+    # Always group by resource_id + service + account only
+    # Sum all usage types and all days into one total per resource
     stmt = (
-        select(*group_cols, func.sum(metric_col).label("cost"))
+        select(
+            CostRecord.resource_id,
+            CostRecord.service,
+            CostRecord.aws_account_id,
+            CostRecord.account_name,
+            CostRecord.region,
+            func.sum(metric_col).label("cost"),
+        )
         .where(and_(*conditions))
-        .group_by(*group_cols)
+        .group_by(
+            CostRecord.resource_id,
+            CostRecord.service,
+            CostRecord.aws_account_id,
+            CostRecord.account_name,
+            CostRecord.region,
+        )
         .order_by(func.sum(metric_col).desc())
         .limit(500)
     )
     result = await db.execute(stmt)
     rows = result.all()
 
-    data = []
-    for row in rows:
-        item = {
+    return [
+        {
             "resource_id": row.resource_id,
             "service": row.service,
             "aws_account_id": row.aws_account_id,
+            "account_name": row.account_name or "",
+            "region": row.region or "",
             "cost": float(row.cost or 0),
         }
-        if f.granularity == "daily":
-            item["date"] = str(row.date)
-        data.append(item)
-    return data
+        for row in rows
+    ]
 
 
 # ── Tag-wise report ───────────────────────────────────────────────────────────
