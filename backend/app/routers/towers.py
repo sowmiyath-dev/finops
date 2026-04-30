@@ -3,7 +3,7 @@ from datetime import datetime, timezone, date, timedelta
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete
+from sqlalchemy import select, update, delete, func
 
 from app.models.database import get_db, AsyncSessionLocal
 from app.models.db_models import User, ControlTower, SubAccount, CostRecord, SyncLog
@@ -11,7 +11,7 @@ from app.models.schemas import OnboardKeys, OnboardRole, ControlTowerOut, SubAcc
 from app.services.auth_service import get_current_user
 from app.services.crypto_service import encrypt
 from app.services.aws_session import test_connectivity, list_org_accounts
-from app.services.cost_service import fetch_cur_from_s3, get_sync_date_range
+from app.services.cost_service import fetch_cur_from_s3, get_sync_date_range, get_full_year_date_range
 from app.config import settings
 
 router = APIRouter(prefix="/towers", tags=["towers"])
@@ -85,14 +85,28 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual"):
                 await _upsert_sub_accounts(db, ct_id, org_accounts)
 
             # Step 2 — fetch CUR from S3
+            # Use full year range if no existing data, otherwise last 7 days
             _sync_progress[ct_id]["message"] = "Fetching CUR from S3"
             _sync_progress[ct_id]["percent"] = 30
-
-            start_date, end_date = get_sync_date_range(days_back=7)
 
             async with AsyncSessionLocal() as db:
                 result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
                 ct = result.scalar_one_or_none()
+
+                # Check if any existing cost records
+                count_result = await db.execute(
+                    select(func.count()).where(CostRecord.control_tower_id == ct_id)
+                )
+                existing_count = count_result.scalar() or 0
+
+            if existing_count == 0:
+                # First sync — fetch full year
+                start_date, end_date = get_full_year_date_range()
+                logger.info(f"First sync for CT {ct_id} — fetching full year: {start_date} → {end_date}")
+            else:
+                # Subsequent sync — fetch last 7 days
+                start_date, end_date = get_sync_date_range(days_back=7)
+                logger.info(f"Incremental sync for CT {ct_id} — fetching last 7 days: {start_date} → {end_date}")
 
             raw_records = await loop.run_in_executor(
                 _executor, fetch_cur_from_s3, ct, start_date, end_date

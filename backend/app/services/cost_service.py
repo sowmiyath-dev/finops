@@ -21,6 +21,13 @@ def get_sync_date_range(days_back: int = 7) -> tuple[str, str]:
     return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
 
 
+def get_full_year_date_range() -> tuple[str, str]:
+    """Returns Jan 1 of current year to today - 2 days."""
+    end = date.today() - timedelta(days=COST_LAG_DAYS)
+    start = date(end.year, 1, 1)
+    return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+
+
 def _get_s3_client(ct: ControlTower):
     session = get_boto3_session(ct)
     return session.client("s3", region_name="us-east-1")
