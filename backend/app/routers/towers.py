@@ -7,7 +7,7 @@ from sqlalchemy import select, update, delete
 
 from app.models.database import get_db, AsyncSessionLocal
 from app.models.db_models import User, ControlTower, SubAccount, CostRecord, SyncLog
-from app.models.schemas import OnboardKeys, OnboardRole, ControlTowerOut
+from app.models.schemas import OnboardKeys, OnboardRole, ControlTowerOut, SubAccountOut
 from app.services.auth_service import get_current_user
 from app.services.crypto_service import encrypt
 from app.services.aws_session import test_connectivity, list_org_accounts
@@ -293,10 +293,24 @@ async def list_towers(db: AsyncSession = Depends(get_db), user: User = Depends(g
     else:
         result = await db.execute(select(ControlTower).where(ControlTower.user_id == user.id))
     towers = result.scalars().all()
+
+    response = []
     for t in towers:
         sub_result = await db.execute(select(SubAccount).where(SubAccount.control_tower_id == t.id))
-        t.sub_accounts = sub_result.scalars().all()
-    return towers
+        subs = sub_result.scalars().all()
+        response.append(ControlTowerOut(
+            id=t.id, name=t.name,
+            management_account_id=t.management_account_id,
+            management_account_name=t.management_account_name,
+            auth_method=t.auth_method, is_active=t.is_active,
+            auto_sync_enabled=t.auto_sync_enabled,
+            last_synced_at=t.last_synced_at,
+            external_id=t.external_id,
+            cur_s3_bucket=t.cur_s3_bucket,
+            cur_s3_prefix=t.cur_s3_prefix,
+            sub_accounts=[SubAccountOut(id=s.id, aws_account_id=s.aws_account_id, account_name=s.account_name, is_active=s.is_active) for s in subs],
+        ))
+    return response
 
 
 # ── dynamic /{ct_id} routes AFTER all static routes ──────────────────────────
