@@ -26,7 +26,7 @@ const GROUP_BY = [
 ];
 
 const inputCls = "w-full border rounded-md px-3 py-2 text-sm focus:outline-none transition bg-white text-gray-800 border-gray-300 focus:border-blue-600 focus:ring-2 focus:ring-blue-100";
-const labelCls = "block text-xs font-semibold mb-1.5 uppercase tracking-wide";
+const labelCls = "block text-xs font-semibold mb-1.5 uppercase tracking-wide text-gray-700";
 
 function MultiSelect({ label, options, selected, onChange }: {
   label: string; options: string[]; selected: string[]; onChange: (v: string[]) => void;
@@ -34,20 +34,18 @@ function MultiSelect({ label, options, selected, onChange }: {
   const toggle = (v: string) => onChange(selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v]);
   return (
     <div>
-      <label className={labelCls} style={{ color: "var(--text-secondary)" }}>{label}</label>
+      <label className={labelCls}>{label}</label>
       <div className="max-h-36 overflow-y-auto rounded-md border p-2 space-y-0.5"
-        style={{ borderColor: "var(--border)", background: "#fafbfc" }}>
+        style={{ borderColor: "#d1d9e6", background: "#fafbfc" }}>
         {options.length === 0 && (
-          <p className="text-xs px-1 py-1" style={{ color: "var(--text-muted)" }}>No options</p>
+          <p className="text-xs px-1 py-1 text-gray-500">No options</p>
         )}
         {options.map((o) => (
-          <label key={o} className="flex items-center gap-2 px-1 py-1 rounded cursor-pointer transition"
-            style={{ fontSize: "12px" }}
-            onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = "var(--bg-hover)"}
-            onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = "transparent"}>
+          <label key={o} className="flex items-center gap-2 px-1 py-1 rounded cursor-pointer transition hover:bg-blue-50"
+            style={{ fontSize: "12px" }}>
             <input type="checkbox" checked={selected.includes(o)} onChange={() => toggle(o)}
               className="w-3 h-3 rounded" style={{ accentColor: "var(--primary)" }} />
-            <span className="truncate" style={{ color: "var(--text-primary)" }}>
+            <span className="truncate text-gray-800">
               {o.length > 24 ? o.slice(0, 24) + "…" : o}
             </span>
           </label>
@@ -57,7 +55,7 @@ function MultiSelect({ label, options, selected, onChange }: {
         <div className="flex flex-wrap gap-1 mt-1.5">
           {selected.map((s) => (
             <span key={s} className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border"
-              style={{ background: "#e8f0fe", color: "var(--primary)", borderColor: "#c5d5f0" }}>
+              style={{ background: "#e8f0fe", color: "#0f2d5e", borderColor: "#c5d5f0" }}>
               {s.length > 18 ? s.slice(0, 18) + "…" : s}
               <button onClick={() => toggle(s)}><X className="w-2.5 h-2.5" /></button>
             </span>
@@ -214,9 +212,9 @@ function ReportsContent() {
         {/* Page header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold" style={{ color: "var(--text-primary)" }}>Cost Reports</h1>
-            <p className="text-sm mt-0.5" style={{ color: "var(--text-secondary)" }}>
-              {boundary && <>Data accurate up to <strong style={{ color: "var(--text-primary)" }}>{boundary.accurate_until}</strong> · Daily sync at 10:30 AM UTC</>}
+            <h1 className="text-2xl font-bold text-gray-900">Cost Reports</h1>
+            <p className="text-sm mt-0.5 text-gray-600">
+              {boundary && <>Data accurate up to <strong className="text-gray-900">{boundary.accurate_until}</strong> · Daily sync at 10:30 AM UTC</>}
             </p>
           </div>
           <button onClick={handleExport} disabled={exporting || !activeFilter}
@@ -240,14 +238,11 @@ function ReportsContent() {
           {/* Filter Panel */}
           <div className="lg:col-span-1">
             <div className="card p-5 space-y-4 sticky top-20">
-              <div className="flex items-center justify-between pb-3" style={{ borderBottom: "1px solid var(--border)" }}>
-                <div className="flex items-center gap-2 text-sm font-bold" style={{ color: "var(--text-primary)" }}>
+              <div className="flex items-center justify-between pb-3" style={{ borderBottom: "1px solid #d1d9e6" }}>
+                <div className="flex items-center gap-2 text-sm font-bold text-gray-900">
                   <Filter className="w-4 h-4" style={{ color: "var(--primary)" }} /> Filters
                 </div>
-                <button onClick={resetFilters} className="text-xs font-medium transition"
-                  style={{ color: "var(--text-muted)" }}
-                  onMouseEnter={e => (e.currentTarget.style.color = "var(--danger)")}
-                  onMouseLeave={e => (e.currentTarget.style.color = "var(--text-muted)")}>
+                <button onClick={resetFilters} className="text-xs font-medium text-gray-500 hover:text-red-600 transition">
                   Reset all
                 </button>
               </div>
@@ -353,9 +348,9 @@ function ReportsContent() {
 
             {!activeFilter && (
               <div className="card p-16 text-center">
-                <Filter className="w-10 h-10 mx-auto mb-3" style={{ color: "var(--text-muted)" }} />
-                <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                  Configure your filters and click <strong style={{ color: "var(--primary)" }}>Apply Filters</strong> to generate a report.
+                <Filter className="w-10 h-10 mx-auto mb-3 text-gray-400" />
+                <p className="text-sm text-gray-600">
+                  Configure your filters and click <strong className="text-gray-900">Apply Filters</strong> to generate a report.
                 </p>
               </div>
             )}
@@ -377,7 +372,7 @@ function ReportsContent() {
                       <div className="stat-card-value">
                         ${(summaryData.total_cost || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
-                      <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                      <div className="text-xs mt-1 text-gray-500">
                         {startDate} → {endDate}
                       </div>
                     </div>
@@ -386,7 +381,7 @@ function ReportsContent() {
                       <div className="text-base font-bold truncate" style={{ color: "var(--accent)" }}>
                         {summaryData.top_services?.[0]?.service || "—"}
                       </div>
-                      <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                      <div className="text-xs mt-1 text-gray-500">
                         ${(summaryData.top_services?.[0]?.cost || 0).toFixed(2)}
                       </div>
                     </div>
@@ -425,68 +420,66 @@ function ReportsContent() {
                 {/* Data table */}
                 <div className="card overflow-hidden">
                   <div className="px-5 py-3 flex items-center justify-between"
-                    style={{ borderBottom: "1px solid var(--border)", background: "#f8fafc" }}>
-                    <span className="text-sm font-bold capitalize" style={{ color: "var(--text-primary)" }}>
+                    style={{ borderBottom: "1px solid #d1d9e6", background: "#f8fafc" }}>
+                    <span className="text-sm font-bold capitalize text-gray-900">
                       {groupBy}-wise Cost Breakdown
                     </span>
-                    <span className="text-xs" style={{ color: "var(--text-muted)" }}>{reportData.length} rows</span>
+                    <span className="text-xs text-gray-500">{reportData.length} rows</span>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full">
                       <thead>
-                        <tr style={{ background: "#f8fafc", borderBottom: "2px solid var(--border)" }}>
+                        <tr style={{ background: "#f8fafc", borderBottom: "2px solid #d1d9e6" }}>
                           {groupBy === "account" && (
                             <>
-                              <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>Account</th>
-                              <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>Account ID</th>
+                              <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-600">Account</th>
+                              <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-600">Account ID</th>
                             </>
                           )}
-                          {groupBy === "service" && <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>Service</th>}
+                          {groupBy === "service" && <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-600">Service</th>}
                           {groupBy === "resource" && (
                             <>
-                              <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>Resource ID</th>
-                              <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>Service</th>
+                              <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-600">Resource ID</th>
+                              <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-600">Service</th>
                             </>
                           )}
                           {groupBy === "tag" && (
                             <>
-                              <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>Tag Key</th>
-                              <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>Tag Value</th>
+                              <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-600">Tag Key</th>
+                              <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-600">Tag Value</th>
                             </>
                           )}
-                          {granularity === "daily" && <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>Date</th>}
-                          <th className="text-right px-5 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>Cost (USD)</th>
+                          {granularity === "daily" && <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-600">Date</th>}
+                          <th className="text-right px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-600">Cost (USD)</th>
                         </tr>
                       </thead>
                       <tbody>
                         {reportData.slice(0, 200).map((row: any, i: number) => (
-                          <tr key={i} className="transition"
-                            style={{ borderBottom: "1px solid #f0f4f8" }}
-                            onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = "var(--bg-hover)"}
-                            onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = "transparent"}>
+                          <tr key={i} className="transition hover:bg-blue-50"
+                            style={{ borderBottom: "1px solid #f0f4f8" }}>
                             {groupBy === "account" && (
                               <>
-                                <td className="px-5 py-3 text-sm font-medium" style={{ color: "var(--text-primary)" }}>{row.account_name || "—"}</td>
-                                <td className="px-5 py-3 text-xs font-mono" style={{ color: "var(--text-secondary)" }}>{row.aws_account_id}</td>
+                                <td className="px-5 py-3 text-sm font-medium text-gray-900">{row.account_name || "—"}</td>
+                                <td className="px-5 py-3 text-xs font-mono text-gray-600">{row.aws_account_id}</td>
                               </>
                             )}
                             {groupBy === "service" && (
-                              <td className="px-5 py-3 text-sm font-medium" style={{ color: "var(--text-primary)" }}>{row.service}</td>
+                              <td className="px-5 py-3 text-sm font-medium text-gray-900">{row.service}</td>
                             )}
                             {groupBy === "resource" && (
                               <>
-                                <td className="px-5 py-3 text-xs font-mono max-w-xs truncate" style={{ color: "var(--text-primary)" }}>{row.resource_id}</td>
-                                <td className="px-5 py-3 text-sm" style={{ color: "var(--text-secondary)" }}>{row.service}</td>
+                                <td className="px-5 py-3 text-xs font-mono max-w-xs truncate text-gray-900">{row.resource_id}</td>
+                                <td className="px-5 py-3 text-sm text-gray-600">{row.service}</td>
                               </>
                             )}
                             {groupBy === "tag" && (
                               <>
-                                <td className="px-5 py-3 text-sm" style={{ color: "var(--text-secondary)" }}>{row.tag_key}</td>
-                                <td className="px-5 py-3 text-sm font-medium" style={{ color: "var(--text-primary)" }}>{row.tag_value || "(untagged)"}</td>
+                                <td className="px-5 py-3 text-sm text-gray-600">{row.tag_key}</td>
+                                <td className="px-5 py-3 text-sm font-medium text-gray-900">{row.tag_value || "(untagged)"}</td>
                               </>
                             )}
                             {granularity === "daily" && (
-                              <td className="px-5 py-3 text-xs font-mono" style={{ color: "var(--text-secondary)" }}>{row.date}</td>
+                              <td className="px-5 py-3 text-xs font-mono text-gray-600">{row.date}</td>
                             )}
                             <td className="px-5 py-3 text-right text-sm font-bold font-mono" style={{ color: "var(--primary)" }}>
                               ${row.cost.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
@@ -496,7 +489,7 @@ function ReportsContent() {
                       </tbody>
                     </table>
                     {reportData.length > 200 && (
-                      <div className="px-5 py-3 text-xs border-t" style={{ color: "var(--text-muted)", borderColor: "var(--border)" }}>
+                      <div className="px-5 py-3 text-xs text-gray-500 border-t" style={{ borderColor: "#d1d9e6" }}>
                         Showing 200 of {reportData.length} rows. Export CSV to get all data.
                       </div>
                     )}

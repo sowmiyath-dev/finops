@@ -113,23 +113,23 @@ export default function SyncLogsPage() {
                       {l.records_synced?.toLocaleString() ?? "—"}
                     </td>
 
-                    <td className="px-4 py-3 text-xs font-mono" style={{ color: "var(--text-secondary)" }}>
+                    <td className="px-4 py-3 text-xs font-mono" style={{ color: "#374151" }}>
                       {l.date_range_start && l.date_range_end
                         ? `${l.date_range_start} → ${l.date_range_end}`
                         : "—"}
                     </td>
 
-                    <td className="px-4 py-3 text-xs" style={{ color: "var(--text-secondary)" }}>
+                    <td className="px-4 py-3 text-xs font-medium" style={{ color: "#374151" }}>
                       {l.finished_at && l.started_at
                         ? `${Math.round((new Date(l.finished_at).getTime() - new Date(l.started_at).getTime()) / 1000)}s`
                         : "—"}
                     </td>
 
-                    <td className="px-4 py-3 text-xs" style={{ color: "var(--text-secondary)" }}>
+                    <td className="px-4 py-3 text-xs" style={{ color: "#374151" }}>
                       {new Date(l.started_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
                     </td>
 
-                    <td className="px-4 py-3 text-xs" style={{ color: "var(--text-secondary)" }}>
+                    <td className="px-4 py-3 text-xs" style={{ color: "#374151" }}>
                       {l.finished_at
                         ? new Date(l.finished_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })
                         : "—"}
