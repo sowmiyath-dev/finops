@@ -43,7 +43,7 @@ class ControlTower(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
     owner = relationship("User", back_populates="control_towers")
     sub_accounts = relationship("SubAccount", back_populates="control_tower", cascade="all, delete")
-    sync_logs = relationship("SyncLog", back_populates="control_tower", cascade="all, delete")
+    sync_logs = relationship("SyncLog", back_populates="control_tower", cascade="all, delete", lazy="raise")
 
 class SubAccount(Base):
     __tablename__ = "sub_accounts"
@@ -57,7 +57,7 @@ class SubAccount(Base):
     account_name = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
     control_tower = relationship("ControlTower", back_populates="sub_accounts")
-    cost_records = relationship("CostRecord", back_populates="sub_account", cascade="all, delete")
+    cost_records = relationship("CostRecord", back_populates="sub_account", cascade="all, delete", lazy="raise")
 
 class CostRecord(Base):
     __tablename__ = "cost_records"
@@ -88,7 +88,7 @@ class CostRecord(Base):
     purchase_type = Column(String)                        # OnDemand | Reserved | SavingsPlan | Spot
     tags = Column(Text)                                   # JSON string {"Environment":"prod","Project":"alpha"}
     synced_at = Column(DateTime(timezone=True), default=utcnow)
-    sub_account = relationship("SubAccount", back_populates="cost_records")
+    sub_account = relationship("SubAccount", back_populates="cost_records", lazy="raise")
 
 class SyncLog(Base):
     __tablename__ = "sync_logs"
