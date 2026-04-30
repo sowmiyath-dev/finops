@@ -234,8 +234,11 @@ async def onboard_keys(payload: OnboardKeys, bg: BackgroundTasks, db: AsyncSessi
     await db.commit()
     await db.refresh(temp)
     bg.add_task(_do_sync, str(temp.id), "manual")
-    result = await db.execute(select(ControlTower).where(ControlTower.id == temp.id))
+    result = await db.execute(
+        select(ControlTower).where(ControlTower.id == temp.id)
+    )
     ct = result.scalar_one()
+    ct.sub_accounts = []
     return ct
 
 
@@ -263,8 +266,11 @@ async def onboard_role(payload: OnboardRole, bg: BackgroundTasks, db: AsyncSessi
     await db.commit()
     await db.refresh(temp)
     bg.add_task(_do_sync, str(temp.id), "manual")
-    result = await db.execute(select(ControlTower).where(ControlTower.id == temp.id))
+    result = await db.execute(
+        select(ControlTower).where(ControlTower.id == temp.id)
+    )
     ct = result.scalar_one()
+    ct.sub_accounts = []
     return ct
 
 
