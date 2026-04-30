@@ -40,6 +40,12 @@ def _build_filters(f: ReportFilter, user_ct_ids: list[str]):
         conditions.append(CostRecord.region.in_(f.regions))
     if f.purchase_types:
         conditions.append(CostRecord.purchase_type.in_(f.purchase_types))
+    if f.charge_types:
+        conditions.append(CostRecord.line_item_type.in_(f.charge_types))
+    if f.marketplace_only is True:
+        conditions.append(CostRecord.is_marketplace == True)
+    elif f.marketplace_only is False:
+        conditions.append(CostRecord.is_marketplace == False)
     if f.tag_key and f.tag_value:
         conditions.append(CostRecord.tags.contains(f.tag_key))
     return conditions
@@ -363,6 +369,18 @@ async def get_sync_logs(limit: int = 100, db: AsyncSession = Depends(get_db), us
         .limit(limit)
     )
     return result.scalars().all()
+
+
+@router.get("/meta/charge-types")
+async def get_charge_types(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    ct_ids = await _get_user_ct_ids(db, user)
+    result = await db.execute(
+        select(CostRecord.line_item_type).where(
+            CostRecord.control_tower_id.in_(ct_ids),
+            CostRecord.line_item_type.isnot(None)
+        ).distinct()
+    )
+    return sorted([r[0] for r in result.all() if r[0]])
 
 
 @router.get("/data-boundary")

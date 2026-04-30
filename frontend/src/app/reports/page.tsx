@@ -99,6 +99,12 @@ function ReportsContent() {
     enabled: !!token,
   });
 
+  const { data: chargeTypes = [] } = useQuery({
+    queryKey: ["charge-types"],
+    queryFn: () => api.get("/reports/meta/charge-types").then((r) => r.data),
+    enabled: !!token,
+  });
+
   const allAccounts = towers.flatMap((t: any) =>
     (t.sub_accounts || []).map((s: any) => ({ ...s, ct_name: t.name }))
   );
@@ -117,6 +123,8 @@ function ReportsContent() {
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [selectedRegions, setSelectedRegions] = useState<string[]>([]);
   const [selectedPurchaseTypes, setSelectedPurchaseTypes] = useState<string[]>([]);
+  const [selectedChargeTypes, setSelectedChargeTypes] = useState<string[]>([]);
+  const [marketplaceOnly, setMarketplaceOnly] = useState<string>("all"); // all | yes | no
   const [metric, setMetric] = useState("unblended_cost");
   const [groupBy, setGroupBy] = useState("account");
   const [granularity, setGranularity] = useState("daily");
@@ -148,6 +156,8 @@ function ReportsContent() {
     services: selectedServices.length ? selectedServices : null,
     regions: selectedRegions.length ? selectedRegions : null,
     purchase_types: selectedPurchaseTypes.length ? selectedPurchaseTypes : null,
+    charge_types: selectedChargeTypes.length ? selectedChargeTypes : null,
+    marketplace_only: marketplaceOnly === "yes" ? true : marketplaceOnly === "no" ? false : null,
     tag_key: tagKey || null,
     tag_value: tagValue || null,
     start_date: startDate,
@@ -161,7 +171,7 @@ function ReportsContent() {
 
   const resetFilters = () => {
     setSelectedCTs([]); setSelectedAccounts([]); setSelectedServices([]);
-    setSelectedRegions([]); setSelectedPurchaseTypes([]);
+    setSelectedRegions([]); setSelectedPurchaseTypes([]); setSelectedChargeTypes([]); setMarketplaceOnly("all");
     setTagKey(""); setTagValue("");
     setMetric("unblended_cost"); setGroupBy("account"); setGranularity("daily");
     if (boundary) applyQuickRange("30d", boundary.accurate_until);
@@ -308,6 +318,32 @@ function ReportsContent() {
               <MultiSelect label="Services" options={services} selected={selectedServices} onChange={setSelectedServices} />
               <MultiSelect label="Regions" options={regions} selected={selectedRegions} onChange={setSelectedRegions} />
               <MultiSelect label="Purchase Types" options={["OnDemand", "Reserved", "SavingsPlan", "Spot"]} selected={selectedPurchaseTypes} onChange={setSelectedPurchaseTypes} />
+
+              {/* Charge Type */}
+              <MultiSelect
+                label="Charge Type"
+                options={chargeTypes.length > 0 ? chargeTypes : ["Usage","SavingsPlanCoveredUsage","RIFee","DiscountedUsage","Credit","Tax","Fee","Refund"]}
+                selected={selectedChargeTypes}
+                onChange={setSelectedChargeTypes}
+              />
+
+              {/* Marketplace */}
+              <div>
+                <label className={labelCls}>Marketplace</label>
+                <div className="flex gap-1">
+                  {(["all", "yes", "no"] as const).map((v) => (
+                    <button key={v} onClick={() => setMarketplaceOnly(v)}
+                      className={`flex-1 py-1.5 text-xs font-bold rounded-md border transition capitalize ${
+                        marketplaceOnly === v
+                          ? "bg-blue-900 text-white border-blue-900"
+                          : "bg-white text-black border-gray-400 hover:border-blue-900 hover:text-blue-900"
+                      }`}>
+                      {v === "all" ? "All" : v === "yes" ? "Only" : "Exclude"}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-black mt-1">AWS Marketplace charges</p>
+              </div>
 
               {groupBy === "tag" && (
                 <div className="space-y-2">

@@ -79,6 +79,8 @@ class CostRecord(Base):
     usage_quantity = Column(Numeric(18, 6), default=0)
     usage_unit = Column(String)
     purchase_type = Column(String)
+    line_item_type = Column(String)        # Usage | SavingsPlanCoveredUsage | RIFee | DiscountedUsage | Credit | Tax | Fee | Refund
+    is_marketplace = Column(Boolean, default=False)  # True if AWS Marketplace charge
     tags = Column(Text)
     synced_at = Column(DateTime(timezone=True), default=utcnow)
 

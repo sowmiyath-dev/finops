@@ -122,8 +122,7 @@ def _parse_cur_csv_gz(ct: ControlTower, report_key: str, start_date: str, end_da
                         tags[tag_key] = val
 
                 # Determine purchase type
-                line_item_type = row.get("lineItem/LineItemType", "")
-                pricing_term = row.get("pricing/term", "")
+                line_item_type = row.get("lineItem/LineItemType", "Usage")
                 savings_arn = row.get("savingsPlan/SavingsPlanARN", "")
                 reservation_id = row.get("reservation/SubscriptionId", "")
 
@@ -135,6 +134,15 @@ def _parse_cur_csv_gz(ct: ControlTower, report_key: str, start_date: str, end_da
                     purchase_type = "Spot"
                 else:
                     purchase_type = "OnDemand"
+
+                # Detect marketplace
+                legal_entity = row.get("lineItem/LegalEntity", "")
+                bill_entity = row.get("bill/BillingEntity", "")
+                is_marketplace = (
+                    "marketplace" in legal_entity.lower() or
+                    "marketplace" in bill_entity.lower() or
+                    line_item_type == "Marketplace"
+                )
 
                 records.append({
                     "date": row_date,
@@ -155,6 +163,8 @@ def _parse_cur_csv_gz(ct: ControlTower, report_key: str, start_date: str, end_da
                     "usage_quantity": float(row.get("lineItem/UsageAmount", 0) or 0),
                     "usage_unit": row.get("pricing/unit", ""),
                     "purchase_type": purchase_type,
+                    "line_item_type": line_item_type,
+                    "is_marketplace": is_marketplace,
                     "tags": json.dumps(tags) if tags else None,
                 })
 

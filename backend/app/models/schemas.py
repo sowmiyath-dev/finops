@@ -127,14 +127,16 @@ class SyncLogOut(BaseModel):
 # ── Cost Report Filters ───────────────────────────────────────────────────────
 class ReportFilter(BaseModel):
     control_tower_ids: Optional[list[str]] = None
-    account_ids: Optional[list[str]] = None          # aws_account_id list
+    account_ids: Optional[list[str]] = None
     services: Optional[list[str]] = None
     regions: Optional[list[str]] = None
     purchase_types: Optional[list[str]] = None
+    charge_types: Optional[list[str]] = None       # Usage | SavingsPlanCoveredUsage | RIFee | DiscountedUsage | Credit | Tax | Fee | Refund
+    marketplace_only: Optional[bool] = None        # True = marketplace only, False = exclude marketplace
     tag_key: Optional[str] = None
     tag_value: Optional[str] = None
-    start_date: str                                   # YYYY-MM-DD
+    start_date: str
     end_date: str
-    granularity: str = "daily"                        # daily | monthly
-    metric: str = "unblended_cost"                    # unblended_cost | blended_cost | amortized_cost | net_unblended_cost
-    group_by: str = "account"                         # account | service | resource | tag
+    granularity: str = "daily"
+    metric: str = "unblended_cost"
+    group_by: str = "account"

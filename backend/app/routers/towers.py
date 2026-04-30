@@ -153,6 +153,8 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual"):
                         usage_quantity=r["usage_quantity"],
                         usage_unit=r.get("usage_unit"),
                         purchase_type=r.get("purchase_type"),
+                        line_item_type=r.get("line_item_type"),
+                        is_marketplace=r.get("is_marketplace", False),
                         tags=r.get("tags"),
                     ))
 
