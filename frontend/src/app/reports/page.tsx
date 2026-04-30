@@ -25,8 +25,8 @@ const GROUP_BY = [
   { value: "tag",      label: "Tag-wise" },
 ];
 
-const inputCls = "w-full border rounded-md px-3 py-2 text-sm focus:outline-none transition bg-white text-gray-800 border-gray-300 focus:border-blue-600 focus:ring-2 focus:ring-blue-100";
-const labelCls = "block text-xs font-semibold mb-1.5 uppercase tracking-wide text-gray-700";
+const inputCls = "w-full border border-gray-400 rounded-md px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-blue-900 focus:ring-2 focus:ring-blue-100 transition";
+const labelCls = "block text-xs font-bold mb-1.5 uppercase tracking-wide text-black";
 
 function MultiSelect({ label, options, selected, onChange }: {
   label: string; options: string[]; selected: string[]; onChange: (v: string[]) => void;
@@ -35,17 +35,14 @@ function MultiSelect({ label, options, selected, onChange }: {
   return (
     <div>
       <label className={labelCls}>{label}</label>
-      <div className="max-h-36 overflow-y-auto rounded-md border p-2 space-y-0.5"
-        style={{ borderColor: "#d1d9e6", background: "#fafbfc" }}>
-        {options.length === 0 && (
-          <p className="text-xs px-1 py-1 text-gray-500">No options</p>
-        )}
+      <div className="max-h-36 overflow-y-auto rounded-md border border-gray-400 p-2 space-y-0.5 bg-white">
+        {options.length === 0 && <p className="text-xs px-1 py-1 text-black">No options</p>}
         {options.map((o) => (
-          <label key={o} className="flex items-center gap-2 px-1 py-1 rounded cursor-pointer transition hover:bg-blue-50"
+          <label key={o} className="flex items-center gap-2 px-1 py-1 rounded cursor-pointer hover:bg-blue-50 transition"
             style={{ fontSize: "12px" }}>
             <input type="checkbox" checked={selected.includes(o)} onChange={() => toggle(o)}
-              className="w-3 h-3 rounded" style={{ accentColor: "var(--primary)" }} />
-            <span className="truncate text-gray-800">
+              className="w-3 h-3 rounded accent-blue-900" />
+            <span className="truncate text-black font-medium">
               {o.length > 24 ? o.slice(0, 24) + "…" : o}
             </span>
           </label>
@@ -54,8 +51,7 @@ function MultiSelect({ label, options, selected, onChange }: {
       {selected.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-1.5">
           {selected.map((s) => (
-            <span key={s} className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border"
-              style={{ background: "#e8f0fe", color: "#0f2d5e", borderColor: "#c5d5f0" }}>
+            <span key={s} className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border border-blue-900 bg-blue-100 text-blue-900 font-semibold">
               {s.length > 18 ? s.slice(0, 18) + "…" : s}
               <button onClick={() => toggle(s)}><X className="w-2.5 h-2.5" /></button>
             </span>
@@ -204,32 +200,38 @@ function ReportsContent() {
     finally { setExporting(false); }
   };
 
+  const qBtnCls = (active: boolean) =>
+    `flex-1 py-1.5 text-xs font-bold rounded-md border transition ${
+      active
+        ? "bg-blue-900 text-white border-blue-900"
+        : "bg-white text-black border-gray-400 hover:border-blue-900 hover:text-blue-900"
+    }`;
+
   return (
-    <div className="min-h-screen bg-mesh">
+    <div className="min-h-screen" style={{ background: "#f1f4f9" }}>
       <Navbar />
       <div className="max-w-7xl mx-auto px-6 py-8">
 
-        {/* Page header */}
-        <div className="flex items-center justify-between mb-6">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-5">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Cost Reports</h1>
-            <p className="text-sm mt-0.5 text-gray-600">
-              {boundary && <>Data accurate up to <strong className="text-gray-900">{boundary.accurate_until}</strong> · Daily sync at 10:30 AM UTC</>}
+            <h1 className="text-2xl font-bold text-black">Cost Reports</h1>
+            <p className="text-sm mt-0.5 text-black">
+              {boundary && <>Data accurate up to <strong>{boundary.accurate_until}</strong> · Daily sync at 10:30 AM UTC</>}
             </p>
           </div>
           <button onClick={handleExport} disabled={exporting || !activeFilter}
-            className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-white rounded-md transition disabled:opacity-40"
-            style={{ background: "var(--success)" }}>
+            className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white rounded-md transition disabled:opacity-40 bg-green-800 hover:bg-green-900">
             <Download className="w-4 h-4" />
             {exporting ? "Exporting..." : "Export CSV"}
           </button>
         </div>
 
-        {/* Data boundary notice */}
+        {/* Boundary notice */}
         {boundary && (
-          <div className="alert-info flex items-center gap-2 mb-6">
+          <div className="flex items-center gap-2 mb-5 px-4 py-3 rounded-lg border border-blue-300 bg-blue-50 text-blue-900 text-sm font-semibold">
             <AlertCircle className="w-4 h-4 flex-shrink-0" />
-            Cost data is accurate up to <strong>{boundary.accurate_until}</strong>. Daily sync runs at <strong>10:30 AM UTC</strong>.
+            Cost data is accurate up to <strong>{boundary.accurate_until}</strong>. Daily sync at <strong>10:30 AM UTC</strong>.
           </div>
         )}
 
@@ -237,28 +239,23 @@ function ReportsContent() {
 
           {/* Filter Panel */}
           <div className="lg:col-span-1">
-            <div className="card p-5 space-y-4 sticky top-20">
-              <div className="flex items-center justify-between pb-3" style={{ borderBottom: "1px solid #d1d9e6" }}>
-                <div className="flex items-center gap-2 text-sm font-bold text-gray-900">
-                  <Filter className="w-4 h-4" style={{ color: "var(--primary)" }} /> Filters
+            <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5 space-y-4 sticky top-20">
+              <div className="flex items-center justify-between pb-3 border-b border-gray-300">
+                <div className="flex items-center gap-2 text-sm font-bold text-black">
+                  <Filter className="w-4 h-4 text-blue-900" /> Filters
                 </div>
-                <button onClick={resetFilters} className="text-xs font-medium text-gray-500 hover:text-red-600 transition">
+                <button onClick={resetFilters} className="text-xs font-bold text-black hover:text-red-700 transition">
                   Reset all
                 </button>
               </div>
 
               {/* Quick range */}
               <div>
-                <label className={labelCls} style={{ color: "var(--text-secondary)" }}>Quick Range</label>
+                <label className={labelCls}>Quick Range</label>
                 <div className="flex gap-1">
                   {["7d", "30d", "90d"].map((r) => (
                     <button key={r} onClick={() => boundary && applyQuickRange(r, boundary.accurate_until)}
-                      className="flex-1 py-1.5 text-xs font-semibold rounded-md border transition"
-                      style={{
-                        borderColor: quickRange === r ? "var(--primary)" : "var(--border)",
-                        background: quickRange === r ? "#e8f0fe" : "white",
-                        color: quickRange === r ? "var(--primary)" : "var(--text-secondary)",
-                      }}>
+                      className={qBtnCls(quickRange === r)}>
                       {r}
                     </button>
                   ))}
@@ -268,18 +265,18 @@ function ReportsContent() {
               {/* Date range */}
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className={labelCls} style={{ color: "var(--text-secondary)" }}>Start</label>
+                  <label className={labelCls}>Start</label>
                   <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={inputCls} />
                 </div>
                 <div>
-                  <label className={labelCls} style={{ color: "var(--text-secondary)" }}>End</label>
+                  <label className={labelCls}>End</label>
                   <input type="date" value={endDate} max={boundary?.accurate_until} onChange={(e) => setEndDate(e.target.value)} className={inputCls} />
                 </div>
               </div>
 
               {/* Group by */}
               <div>
-                <label className={labelCls} style={{ color: "var(--text-secondary)" }}>Group By</label>
+                <label className={labelCls}>Group By</label>
                 <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)} className={inputCls}>
                   {GROUP_BY.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
                 </select>
@@ -287,7 +284,7 @@ function ReportsContent() {
 
               {/* Metric */}
               <div>
-                <label className={labelCls} style={{ color: "var(--text-secondary)" }}>Cost Metric</label>
+                <label className={labelCls}>Cost Metric</label>
                 <select value={metric} onChange={(e) => setMetric(e.target.value)} className={inputCls}>
                   {METRICS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
                 </select>
@@ -295,16 +292,11 @@ function ReportsContent() {
 
               {/* Granularity */}
               <div>
-                <label className={labelCls} style={{ color: "var(--text-secondary)" }}>Granularity</label>
+                <label className={labelCls}>Granularity</label>
                 <div className="flex gap-1">
                   {["daily", "monthly"].map((g) => (
                     <button key={g} onClick={() => setGranularity(g)}
-                      className="flex-1 py-1.5 text-xs font-semibold rounded-md border transition capitalize"
-                      style={{
-                        borderColor: granularity === g ? "var(--primary)" : "var(--border)",
-                        background: granularity === g ? "#e8f0fe" : "white",
-                        color: granularity === g ? "var(--primary)" : "var(--text-secondary)",
-                      }}>
+                      className={`${qBtnCls(granularity === g)} capitalize`}>
                       {g}
                     </button>
                   ))}
@@ -320,24 +312,21 @@ function ReportsContent() {
               {groupBy === "tag" && (
                 <div className="space-y-2">
                   <div>
-                    <label className={labelCls} style={{ color: "var(--text-secondary)" }}>Tag Key</label>
+                    <label className={labelCls}>Tag Key</label>
                     <select value={tagKey} onChange={(e) => setTagKey(e.target.value)} className={inputCls}>
                       <option value="">Select tag key</option>
                       {tagKeys.map((k: string) => <option key={k} value={k}>{k}</option>)}
                     </select>
                   </div>
                   <div>
-                    <label className={labelCls} style={{ color: "var(--text-secondary)" }}>Tag Value</label>
+                    <label className={labelCls}>Tag Value</label>
                     <input value={tagValue} onChange={(e) => setTagValue(e.target.value)} className={inputCls} placeholder="e.g. production" />
                   </div>
                 </div>
               )}
 
               <button onClick={applyFilters}
-                className="w-full py-2.5 text-sm font-semibold text-white rounded-md transition flex items-center justify-center gap-2"
-                style={{ background: "var(--primary)" }}
-                onMouseEnter={e => (e.currentTarget.style.background = "var(--primary-light)")}
-                onMouseLeave={e => (e.currentTarget.style.background = "var(--primary)")}>
+                className="w-full py-2.5 text-sm font-bold text-white rounded-md transition flex items-center justify-center gap-2 bg-blue-900 hover:bg-blue-800">
                 <RefreshCw className="w-4 h-4" /> Apply Filters
               </button>
             </div>
@@ -347,18 +336,17 @@ function ReportsContent() {
           <div className="lg:col-span-3 space-y-5">
 
             {!activeFilter && (
-              <div className="card p-16 text-center">
-                <Filter className="w-10 h-10 mx-auto mb-3 text-gray-400" />
-                <p className="text-sm text-gray-600">
-                  Configure your filters and click <strong className="text-gray-900">Apply Filters</strong> to generate a report.
+              <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-16 text-center">
+                <Filter className="w-10 h-10 mx-auto mb-3 text-black" />
+                <p className="text-sm text-black font-medium">
+                  Configure your filters and click <strong>Apply Filters</strong> to generate a report.
                 </p>
               </div>
             )}
 
             {activeFilter && isLoading && (
-              <div className="card p-16 flex items-center justify-center">
-                <div className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin"
-                  style={{ borderColor: "var(--primary)", borderTopColor: "transparent" }} />
+              <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-16 flex items-center justify-center">
+                <div className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin border-blue-900" />
               </div>
             )}
 
@@ -367,44 +355,46 @@ function ReportsContent() {
                 {/* Summary cards */}
                 {summaryData && (
                   <div className="grid grid-cols-3 gap-4">
-                    <div className="stat-card">
-                      <div className="stat-card-label">Total Cost</div>
-                      <div className="stat-card-value">
-                        ${(summaryData.total_cost || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {[
+                      {
+                        label: "Total Cost",
+                        value: `$${(summaryData.total_cost || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                        sub: `${startDate} → ${endDate}`,
+                        color: "#0f2d5e",
+                      },
+                      {
+                        label: "Top Service",
+                        value: summaryData.top_services?.[0]?.service || "—",
+                        sub: `$${(summaryData.top_services?.[0]?.cost || 0).toFixed(2)}`,
+                        color: "#ec7211",
+                      },
+                      {
+                        label: "Records",
+                        value: reportData.length.toLocaleString(),
+                        sub: "matching rows",
+                        color: "#1d8348",
+                      },
+                    ].map((card) => (
+                      <div key={card.label} className="bg-white rounded-lg border border-gray-300 shadow-sm p-5">
+                        <div className="text-xs font-bold uppercase tracking-wide text-black mb-1">{card.label}</div>
+                        <div className="text-2xl font-bold truncate" style={{ color: card.color }}>{card.value}</div>
+                        <div className="text-xs font-semibold text-black mt-1">{card.sub}</div>
                       </div>
-                      <div className="text-xs mt-1 text-gray-500">
-                        {startDate} → {endDate}
-                      </div>
-                    </div>
-                    <div className="stat-card">
-                      <div className="stat-card-label">Top Service</div>
-                      <div className="text-base font-bold truncate" style={{ color: "var(--accent)" }}>
-                        {summaryData.top_services?.[0]?.service || "—"}
-                      </div>
-                      <div className="text-xs mt-1 text-gray-500">
-                        ${(summaryData.top_services?.[0]?.cost || 0).toFixed(2)}
-                      </div>
-                    </div>
-                    <div className="stat-card">
-                      <div className="stat-card-label">Records</div>
-                      <div className="stat-card-value" style={{ color: "var(--success)" }}>
-                        {reportData.length.toLocaleString()}
-                      </div>
-                    </div>
+                    ))}
                   </div>
                 )}
 
-                {/* Daily trend chart */}
+                {/* Chart */}
                 {summaryData?.daily_trend?.length > 0 && (
-                  <div className="card p-5">
-                    <h3 className="text-sm font-bold mb-4" style={{ color: "var(--text-primary)" }}>Daily Cost Trend</h3>
+                  <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5">
+                    <h3 className="text-sm font-bold text-black mb-4">Daily Cost Trend</h3>
                     <ResponsiveContainer width="100%" height={200}>
                       <BarChart data={summaryData.daily_trend}>
-                        <XAxis dataKey="date" tick={{ fill: "#8a9ab0", fontSize: 10 }} tickFormatter={(v) => v.slice(5)} />
-                        <YAxis tick={{ fill: "#8a9ab0", fontSize: 10 }} tickFormatter={(v) => `$${v}`} />
+                        <XAxis dataKey="date" tick={{ fill: "#000000", fontSize: 10, fontWeight: 600 }} tickFormatter={(v) => v.slice(5)} />
+                        <YAxis tick={{ fill: "#000000", fontSize: 10, fontWeight: 600 }} tickFormatter={(v) => `$${v}`} />
                         <Tooltip
-                          contentStyle={{ background: "white", border: "1px solid var(--border)", borderRadius: 6, boxShadow: "var(--shadow-md)" }}
-                          labelStyle={{ color: "var(--text-primary)", fontWeight: 600 }}
+                          contentStyle={{ background: "white", border: "1px solid #374151", borderRadius: 6 }}
+                          labelStyle={{ color: "#000000", fontWeight: 700 }}
                           formatter={(v: any) => [`$${Number(v).toFixed(2)}`, "Cost"]}
                         />
                         <Bar dataKey="cost" radius={[4, 4, 0, 0]}>
@@ -418,70 +408,66 @@ function ReportsContent() {
                 )}
 
                 {/* Data table */}
-                <div className="card overflow-hidden">
-                  <div className="px-5 py-3 flex items-center justify-between"
-                    style={{ borderBottom: "1px solid #d1d9e6", background: "#f8fafc" }}>
-                    <span className="text-sm font-bold capitalize text-gray-900">
-                      {groupBy}-wise Cost Breakdown
-                    </span>
-                    <span className="text-xs text-gray-500">{reportData.length} rows</span>
+                <div className="bg-white rounded-lg border border-gray-300 shadow-sm overflow-hidden">
+                  <div className="px-5 py-3 flex items-center justify-between bg-gray-100 border-b border-gray-300">
+                    <span className="text-sm font-bold text-black capitalize">{groupBy}-wise Cost Breakdown</span>
+                    <span className="text-xs font-bold text-black">{reportData.length} rows</span>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full">
                       <thead>
-                        <tr style={{ background: "#f8fafc", borderBottom: "2px solid #d1d9e6" }}>
+                        <tr className="bg-gray-100 border-b-2 border-gray-300">
                           {groupBy === "account" && (
                             <>
-                              <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-600">Account</th>
-                              <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-600">Account ID</th>
+                              <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-black">Account</th>
+                              <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-black">Account ID</th>
                             </>
                           )}
-                          {groupBy === "service" && <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-600">Service</th>}
+                          {groupBy === "service" && <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-black">Service</th>}
                           {groupBy === "resource" && (
                             <>
-                              <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-600">Resource ID</th>
-                              <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-600">Service</th>
+                              <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-black">Resource ID</th>
+                              <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-black">Service</th>
                             </>
                           )}
                           {groupBy === "tag" && (
                             <>
-                              <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-600">Tag Key</th>
-                              <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-600">Tag Value</th>
+                              <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-black">Tag Key</th>
+                              <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-black">Tag Value</th>
                             </>
                           )}
-                          {granularity === "daily" && <th className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-600">Date</th>}
-                          <th className="text-right px-5 py-3 text-xs font-semibold uppercase tracking-wider text-gray-600">Cost (USD)</th>
+                          {granularity === "daily" && <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-black">Date</th>}
+                          <th className="text-right px-5 py-3 text-xs font-bold uppercase tracking-wider text-black">Cost (USD)</th>
                         </tr>
                       </thead>
                       <tbody>
                         {reportData.slice(0, 200).map((row: any, i: number) => (
-                          <tr key={i} className="transition hover:bg-blue-50"
-                            style={{ borderBottom: "1px solid #f0f4f8" }}>
+                          <tr key={i} className="border-b border-gray-200 hover:bg-blue-50 transition">
                             {groupBy === "account" && (
                               <>
-                                <td className="px-5 py-3 text-sm font-medium text-gray-900">{row.account_name || "—"}</td>
-                                <td className="px-5 py-3 text-xs font-mono text-gray-600">{row.aws_account_id}</td>
+                                <td className="px-5 py-3 text-sm font-semibold text-black">{row.account_name || "—"}</td>
+                                <td className="px-5 py-3 text-xs font-mono font-semibold text-black">{row.aws_account_id}</td>
                               </>
                             )}
                             {groupBy === "service" && (
-                              <td className="px-5 py-3 text-sm font-medium text-gray-900">{row.service}</td>
+                              <td className="px-5 py-3 text-sm font-semibold text-black">{row.service}</td>
                             )}
                             {groupBy === "resource" && (
                               <>
-                                <td className="px-5 py-3 text-xs font-mono max-w-xs truncate text-gray-900">{row.resource_id}</td>
-                                <td className="px-5 py-3 text-sm text-gray-600">{row.service}</td>
+                                <td className="px-5 py-3 text-xs font-mono font-semibold text-black max-w-xs truncate">{row.resource_id}</td>
+                                <td className="px-5 py-3 text-sm font-semibold text-black">{row.service}</td>
                               </>
                             )}
                             {groupBy === "tag" && (
                               <>
-                                <td className="px-5 py-3 text-sm text-gray-600">{row.tag_key}</td>
-                                <td className="px-5 py-3 text-sm font-medium text-gray-900">{row.tag_value || "(untagged)"}</td>
+                                <td className="px-5 py-3 text-sm font-semibold text-black">{row.tag_key}</td>
+                                <td className="px-5 py-3 text-sm font-semibold text-black">{row.tag_value || "(untagged)"}</td>
                               </>
                             )}
                             {granularity === "daily" && (
-                              <td className="px-5 py-3 text-xs font-mono text-gray-600">{row.date}</td>
+                              <td className="px-5 py-3 text-xs font-mono font-semibold text-black">{row.date}</td>
                             )}
-                            <td className="px-5 py-3 text-right text-sm font-bold font-mono" style={{ color: "var(--primary)" }}>
+                            <td className="px-5 py-3 text-right text-sm font-bold font-mono text-blue-900">
                               ${row.cost.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
                             </td>
                           </tr>
@@ -489,7 +475,7 @@ function ReportsContent() {
                       </tbody>
                     </table>
                     {reportData.length > 200 && (
-                      <div className="px-5 py-3 text-xs text-gray-500 border-t" style={{ borderColor: "#d1d9e6" }}>
+                      <div className="px-5 py-3 text-xs font-semibold text-black border-t border-gray-300">
                         Showing 200 of {reportData.length} rows. Export CSV to get all data.
                       </div>
                     )}
@@ -508,8 +494,7 @@ export default function ReportsPage() {
   return (
     <Suspense fallback={
       <div className="min-h-screen flex items-center justify-center" style={{ background: "#f1f4f9" }}>
-        <div className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin"
-          style={{ borderColor: "var(--primary)", borderTopColor: "transparent" }} />
+        <div className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin border-blue-900" />
       </div>
     }>
       <ReportsContent />
