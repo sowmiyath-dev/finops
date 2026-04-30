@@ -1,9 +1,9 @@
 import csv, io, json
 from datetime import date, timedelta
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, cast, String
+from sqlalchemy import select, func, and_, cast, Date
 
 from app.models.database import get_db
 from app.models.db_models import User, ControlTower, SubAccount, CostRecord, SyncLog
@@ -24,8 +24,8 @@ METRIC_MAP = {
 def _build_filters(f: ReportFilter, user_ct_ids: list[str]):
     """Build SQLAlchemy filter conditions from ReportFilter."""
     conditions = [
-        CostRecord.date >= f.start_date,
-        CostRecord.date <= f.end_date,
+        CostRecord.date >= cast(f.start_date, Date),
+        CostRecord.date <= cast(f.end_date, Date),
         CostRecord.control_tower_id.in_(user_ct_ids),
     ]
     if f.control_tower_ids:

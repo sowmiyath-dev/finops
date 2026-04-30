@@ -3,7 +3,7 @@ from datetime import datetime, timezone, date, timedelta
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete
+from sqlalchemy import select, update, delete, cast, Date
 
 from app.models.database import get_db, AsyncSessionLocal
 from app.models.db_models import User, ControlTower, SubAccount, CostRecord, SyncLog
@@ -111,8 +111,8 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual"):
                 await db.execute(
                     delete(CostRecord).where(
                         CostRecord.control_tower_id == ct_id,
-                        CostRecord.date >= start_date,
-                        CostRecord.date <= end_date,
+                        CostRecord.date >= cast(start_date, Date),
+                        CostRecord.date <= cast(end_date, Date),
                     )
                 )
 
