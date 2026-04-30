@@ -1,5 +1,5 @@
 "use client";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/authStore";
@@ -16,12 +16,19 @@ export default function SyncLogsPage() {
     if (user && user.role === "viewer") router.push("/dashboard");
   }, [token, user]);
 
+  const [refreshing, setRefreshing] = useState(false);
   const { data: logs = [], isLoading, refetch } = useQuery({
     queryKey: ["sync-logs"],
     queryFn: () => api.get("/reports/sync-logs?limit=100").then((r) => r.data),
     enabled: !!token,
     refetchInterval: 15000,
   });
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await refetch();
+    setRefreshing(false);
+  };
 
   return (
     <div className="min-h-screen bg-mesh">
@@ -32,9 +39,10 @@ export default function SyncLogsPage() {
             <h1 className="text-2xl font-bold text-white">Sync Logs</h1>
             <p className="text-slate-400 text-sm mt-0.5">History of all cost data sync operations</p>
           </div>
-          <button onClick={() => refetch()}
-            className="flex items-center gap-2 px-4 py-2 border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-white rounded-lg text-sm transition">
-            <RefreshCw className="w-4 h-4" /> Refresh
+          <button onClick={handleRefresh} disabled={refreshing}
+            className="flex items-center gap-2 px-4 py-2 border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-white rounded-lg text-sm transition disabled:opacity-50">
+            <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
+            {refreshing ? "Refreshing..." : "Refresh"}
           </button>
         </div>
 

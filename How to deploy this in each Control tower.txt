@@ -23,3 +23,6 @@ Deploy this same CFT in each management account
 Change only CURBucketName for each CT
 
 FinOpsHostAccountId stays 431309843953 for all
+
+D:\finops-cur-dashboard\work log\session-reference.md
+

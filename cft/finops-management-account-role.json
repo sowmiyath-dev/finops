@@ -11,7 +11,7 @@
     "FinOpsHostAccountId": {
       "Description": "AWS Account ID where the FinOps Portal EC2 is hosted (your portal account)",
       "Type": "String",
-      "Default": "431309843953"
+      "Default": "489600149487"
     },
     "CURBucketName": {
       "Description": "Name of the S3 bucket where CUR reports are stored in this management account",
@@ -101,7 +101,7 @@
       "Type": "AWS::IAM::Role",
       "Properties": {
         "RoleName": { "Ref": "RoleName" },
-        "Description": "Cross Account Role for FinOps CUR Portal — allows portal to read CUR data and list Organization accounts",
+        "Description": "Cross Account Role for FinOps CUR Portal to access CUR data and Organizations",
         "AssumeRolePolicyDocument": {
           "Version": "2012-10-17",
           "Statement": [
