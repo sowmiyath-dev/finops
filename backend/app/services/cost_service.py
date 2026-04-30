@@ -130,7 +130,7 @@ def _parse_cur_csv_gz(ct: ControlTower, report_key: str, start_date: str, end_da
                     purchase_type = "OnDemand"
 
                 records.append({
-                    "date": row_date.isoformat(),
+                    "date": row_date,
                     "aws_account_id": row.get("lineItem/UsageAccountId", ""),
                     "service": row.get("lineItem/ProductCode", row.get("product/ProductName", "Unknown")),
                     "region": row.get("product/region", row.get("product/regionCode", "global")),
