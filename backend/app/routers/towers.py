@@ -156,8 +156,16 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual"):
                         tags=r.get("tags"),
                     ))
 
-                if rows_to_insert:
-                    db.add_all(rows_to_insert)
+                # Insert in batches of 2000 to avoid memory issues
+                BATCH_SIZE = 2000
+                total_inserted = 0
+                for i in range(0, len(rows_to_insert), BATCH_SIZE):
+                    batch = rows_to_insert[i:i + BATCH_SIZE]
+                    db.add_all(batch)
+                    await db.flush()
+                    total_inserted += len(batch)
+                    _sync_progress[ct_id]["message"] = f"Storing records {total_inserted}/{len(rows_to_insert)}"
+                    logger.info(f"Inserted batch {i//BATCH_SIZE + 1}: {total_inserted} records so far")
 
                 await db.execute(
                     update(ControlTower)
@@ -169,7 +177,7 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual"):
                     await db.execute(
                         update(SyncLog).where(SyncLog.id == sync_log_id).values(
                             status="completed",
-                            records_synced=len(rows_to_insert),
+                            records_synced=total_inserted,
                             date_range_start=date.fromisoformat(start_date),
                             date_range_end=date.fromisoformat(end_date),
                             finished_at=datetime.now(timezone.utc),
@@ -178,7 +186,7 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual"):
                 await db.commit()
 
             _sync_progress[ct_id] = {"percent": 100, "status": "done", "message": "Completed"}
-            logger.info(f"Sync done for CT {ct_id}: {len(rows_to_insert)} records")
+            logger.info(f"Sync done for CT {ct_id}: {total_inserted} records")
 
         except Exception as e:
             logger.error(f"Sync failed for CT {ct_id}: {e}")
