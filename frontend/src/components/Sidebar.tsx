@@ -220,7 +220,7 @@ export default function Sidebar() {
     setPinned((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
-      localStorage.setItem("finoptix_pinned", JSON.stringify([...next]));
+      localStorage.setItem("finoptix_pinned", JSON.stringify(Array.from(next)));
       return next;
     });
   };
