@@ -234,12 +234,18 @@ async def onboard_keys(payload: OnboardKeys, bg: BackgroundTasks, db: AsyncSessi
     await db.commit()
     await db.refresh(temp)
     bg.add_task(_do_sync, str(temp.id), "manual")
-    result = await db.execute(
-        select(ControlTower).where(ControlTower.id == temp.id)
+    return ControlTowerOut(
+        id=temp.id, name=temp.name,
+        management_account_id=temp.management_account_id,
+        management_account_name=temp.management_account_name,
+        auth_method=temp.auth_method, is_active=temp.is_active,
+        auto_sync_enabled=temp.auto_sync_enabled,
+        last_synced_at=temp.last_synced_at,
+        external_id=temp.external_id,
+        cur_s3_bucket=temp.cur_s3_bucket,
+        cur_s3_prefix=temp.cur_s3_prefix,
+        sub_accounts=[],
     )
-    ct = result.scalar_one()
-    ct.sub_accounts = []
-    return ct
 
 
 @router.post("/onboard/role", response_model=ControlTowerOut, status_code=201)
@@ -266,12 +272,18 @@ async def onboard_role(payload: OnboardRole, bg: BackgroundTasks, db: AsyncSessi
     await db.commit()
     await db.refresh(temp)
     bg.add_task(_do_sync, str(temp.id), "manual")
-    result = await db.execute(
-        select(ControlTower).where(ControlTower.id == temp.id)
+    return ControlTowerOut(
+        id=temp.id, name=temp.name,
+        management_account_id=temp.management_account_id,
+        management_account_name=temp.management_account_name,
+        auth_method=temp.auth_method, is_active=temp.is_active,
+        auto_sync_enabled=temp.auto_sync_enabled,
+        last_synced_at=temp.last_synced_at,
+        external_id=temp.external_id,
+        cur_s3_bucket=temp.cur_s3_bucket,
+        cur_s3_prefix=temp.cur_s3_prefix,
+        sub_accounts=[],
     )
-    ct = result.scalar_one()
-    ct.sub_accounts = []
-    return ct
 
 
 @router.get("/", response_model=list[ControlTowerOut])
