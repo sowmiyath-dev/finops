@@ -9,7 +9,7 @@ import toast from "react-hot-toast";
 import Link from "next/link";
 import {
   Plus, RefreshCw, Trash2, ChevronRight, Clock, Building2,
-  Users, DollarSign, TrendingUp, AlertCircle,
+  Users, DollarSign, AlertCircle, CheckCircle, XCircle,
 } from "lucide-react";
 
 function SyncProgressBar({ ctId }: { ctId: string }) {
@@ -29,16 +29,14 @@ function SyncProgressBar({ ctId }: { ctId: string }) {
   if (!progress || progress.status === "idle" || progress.status === "done") return null;
 
   return (
-    <div className="mt-3 px-1">
-      <div className="flex justify-between text-xs text-slate-400 mb-1">
+    <div className="mt-3">
+      <div className="flex justify-between text-xs mb-1" style={{ color: "var(--text-secondary)" }}>
         <span>{progress.message}</span>
-        <span className="text-[#22d3ee] font-mono font-bold">{progress.percent}%</span>
+        <span className="font-semibold" style={{ color: "var(--primary)" }}>{progress.percent}%</span>
       </div>
-      <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden">
-        <div
-          className="h-full rounded-full bg-gradient-to-r from-[#7c3aed] to-[#06b6d4] transition-all duration-500"
-          style={{ width: `${progress.percent}%` }}
-        />
+      <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: "#e2e8f0" }}>
+        <div className="h-full rounded-full transition-all duration-500"
+          style={{ width: `${progress.percent}%`, background: "var(--primary)" }} />
       </div>
     </div>
   );
@@ -48,103 +46,94 @@ function ControlTowerCard({ ct, user, onSync, onDelete, onToggleAutoSync }: any)
   const router = useRouter();
 
   return (
-    <div className="card p-6 animate-slide-up">
+    <div className="card animate-slide-up">
       {/* Header */}
-      <div
-        className="flex items-start justify-between cursor-pointer"
-        onClick={() => router.push(`/dashboard/${ct.id}`)}
-      >
-        <div className="flex items-center gap-4">
-          <div className="relative">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#7c3aed]/20 to-[#06b6d4]/15 flex items-center justify-center text-lg font-bold text-[#c084fc]">
+      <div className="p-5 cursor-pointer" onClick={() => router.push(`/dashboard/${ct.id}`)}>
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-sm flex-shrink-0"
+              style={{ background: "var(--primary)" }}>
               {ct.name[0].toUpperCase()}
             </div>
-            {ct.is_active && (
-              <div className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-400 rounded-full border-2 border-[#080d1a] animate-pulse" />
-            )}
-          </div>
-          <div>
-            <div className="flex items-center gap-2 mb-0.5">
-              <span className="font-semibold text-white text-lg">{ct.name}</span>
-              {ct.auto_sync_enabled && (
-                <span className="text-xs px-2 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full">
-                  Auto-sync ON
-                </span>
+            <div>
+              <div className="flex items-center gap-2 mb-0.5">
+                <span className="font-semibold text-sm" style={{ color: "var(--text-primary)" }}>{ct.name}</span>
+                {ct.is_active ? (
+                  <span className="badge-success">Active</span>
+                ) : (
+                  <span className="badge-danger">Inactive</span>
+                )}
+                {ct.auto_sync_enabled && (
+                  <span className="badge-info">Auto-sync ON</span>
+                )}
+              </div>
+              <div className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                Management: <span className="font-mono">{ct.management_account_id}</span>
+                {" · "}{ct.management_account_name}
+              </div>
+              {ct.last_synced_at && (
+                <div className="flex items-center gap-1 mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
+                  <Clock className="w-3 h-3" />
+                  Last synced: {new Date(ct.last_synced_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
+                </div>
               )}
             </div>
-            <div className="text-xs text-slate-400">
-              Management: <span className="font-mono text-slate-300">{ct.management_account_id}</span>
-              {" · "}{ct.management_account_name}
-            </div>
-            {ct.last_synced_at && (
-              <div className="flex items-center gap-1 mt-1 text-xs text-slate-500">
-                <Clock className="w-3 h-3" />
-                Last synced: {new Date(ct.last_synced_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
-              </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+            {(user?.role === "owner" || user?.role === "editor") && (
+              <>
+                <button onClick={() => onSync(ct.id)} title="Sync now"
+                  className="p-2 rounded-md transition text-gray-400 hover:text-blue-600 hover:bg-blue-50">
+                  <RefreshCw className="w-4 h-4" />
+                </button>
+                <button onClick={() => onToggleAutoSync(ct.id, !ct.auto_sync_enabled)}
+                  title={ct.auto_sync_enabled ? "Disable auto-sync" : "Enable auto-sync"}
+                  className={`p-2 rounded-md transition ${ct.auto_sync_enabled ? "text-green-600 hover:bg-green-50" : "text-gray-400 hover:text-green-600 hover:bg-green-50"}`}>
+                  <Clock className="w-4 h-4" />
+                </button>
+                <button onClick={() => { if (confirm("Remove this Control Tower?")) onDelete(ct.id); }}
+                  title="Remove"
+                  className="p-2 rounded-md transition text-gray-400 hover:text-red-600 hover:bg-red-50">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </>
             )}
+            <ChevronRight className="w-4 h-4 ml-1" style={{ color: "var(--text-muted)" }} />
           </div>
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-          {(user?.role === "owner" || user?.role === "editor") && (
-            <>
-              <button
-                onClick={() => onSync(ct.id)}
-                title="Sync now"
-                className="p-2 hover:text-[#22d3ee] text-[#94a3c4] transition hover:bg-[#7c3aed]/10 rounded-lg"
-              >
-                <RefreshCw className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => onToggleAutoSync(ct.id, !ct.auto_sync_enabled)}
-                title={ct.auto_sync_enabled ? "Disable auto-sync" : "Enable auto-sync"}
-                className={`p-2 transition rounded-lg ${ct.auto_sync_enabled ? "text-emerald-400 hover:bg-[#7c3aed]/10" : "text-[#94a3c4] hover:text-emerald-400 hover:bg-[#7c3aed]/10"}`}
-              >
-                <Clock className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => { if (confirm("Remove this Control Tower?")) onDelete(ct.id); }}
-                title="Remove"
-                className="p-2 hover:text-[#fb7185] text-[#94a3c4] transition hover:bg-[#f43f5e]/10 rounded-lg"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </>
-          )}
-          <ChevronRight className="w-5 h-5 text-[#4a5578]" />
-        </div>
+        <SyncProgressBar ctId={ct.id} />
       </div>
 
-      {/* Sync progress */}
-      <SyncProgressBar ctId={ct.id} />
-
-      {/* Sub-accounts list */}
+      {/* Sub-accounts */}
       {ct.sub_accounts?.length > 0 && (
-        <div className="mt-4 border-t border-[#7c3aed]/10 pt-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Users className="w-3.5 h-3.5 text-[#94a3c4]" />
-            <span className="text-xs font-medium text-[#94a3c4] uppercase tracking-wide">
+        <div className="px-5 pb-5 border-t" style={{ borderColor: "var(--border)" }}>
+          <div className="flex items-center gap-1.5 mt-4 mb-3">
+            <Users className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} />
+            <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>
               Sub-accounts ({ct.sub_accounts.length})
             </span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
             {ct.sub_accounts.map((acc: any) => (
-              <Link
-                key={acc.id}
-                href={`/dashboard/${ct.id}/account/${acc.id}`}
-                className="flex items-center gap-2 px-3 py-2 bg-[#0d1424]/60 border border-[#7c3aed]/10 hover:border-[#7c3aed]/30 rounded-lg transition group"
-              >
-                <div className="w-6 h-6 rounded-lg bg-[#7c3aed]/15 flex items-center justify-center text-xs font-bold text-[#c084fc] flex-shrink-0">
+              <Link key={acc.id} href={`/dashboard/${ct.id}/account/${acc.id}`}
+                className="flex items-center gap-2 px-3 py-2 rounded-md border transition group"
+                style={{ borderColor: "var(--border)", background: "var(--bg-sidebar)" }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--primary)"; (e.currentTarget as HTMLElement).style.background = "var(--bg-hover)"; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--border)"; (e.currentTarget as HTMLElement).style.background = "var(--bg-sidebar)"; }}>
+                <div className="w-6 h-6 rounded flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+                  style={{ background: "var(--primary-light)" }}>
                   {acc.account_name[0].toUpperCase()}
                 </div>
                 <div className="min-w-0">
-                  <div className="text-xs font-medium text-white truncate group-hover:text-[#22d3ee] transition">
+                  <div className="text-xs font-medium truncate" style={{ color: "var(--text-primary)" }}>
                     {acc.account_name}
                   </div>
-                  <div className="text-[10px] font-mono text-[#4a5578]">{acc.aws_account_id}</div>
+                  <div className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>{acc.aws_account_id}</div>
                 </div>
-                <ChevronRight className="w-3 h-3 text-[#4a5578] ml-auto flex-shrink-0" />
+                <ChevronRight className="w-3 h-3 ml-auto flex-shrink-0" style={{ color: "var(--text-muted)" }} />
               </Link>
             ))}
           </div>
@@ -200,7 +189,8 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-mesh">
       <Navbar />
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-2 border-[#7c3aed] border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin"
+          style={{ borderColor: "var(--primary)", borderTopColor: "transparent" }} />
       </div>
     </div>
   );
@@ -208,21 +198,22 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-mesh">
       <Navbar />
-      <div className="max-w-7xl mx-auto px-6 py-10">
+      <div className="max-w-7xl mx-auto px-6 py-8">
 
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8 animate-slide-up">
+        {/* Page header */}
+        <div className="flex items-center justify-between mb-6 animate-slide-up">
           <div>
-            <h1 className="text-3xl font-bold gradient-text mb-1">Control Towers</h1>
-            <p className="text-[#94a3c4]">
+            <h1 className="text-2xl font-bold" style={{ color: "var(--text-primary)" }}>Control Towers</h1>
+            <p className="text-sm mt-0.5" style={{ color: "var(--text-secondary)" }}>
               {towers.length} control tower{towers.length !== 1 ? "s" : ""} · {totalAccounts} sub-accounts
             </p>
           </div>
           {(user?.role === "owner" || user?.role === "editor") && (
-            <Link
-              href="/onboard"
-              className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-[#7c3aed] to-[#a855f7] hover:from-[#6d28d9] hover:to-[#9333ea] text-white rounded-xl text-sm font-semibold transition-all shadow-lg hover:scale-105"
-            >
+            <Link href="/onboard"
+              className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-white rounded-md transition"
+              style={{ background: "var(--primary)" }}
+              onMouseEnter={e => (e.currentTarget.style.background = "var(--primary-light)")}
+              onMouseLeave={e => (e.currentTarget.style.background = "var(--primary)")}>
               <Plus className="w-4 h-4" /> Add Control Tower
             </Link>
           )}
@@ -230,40 +221,45 @@ export default function DashboardPage() {
 
         {/* Data boundary notice */}
         {boundary && (
-          <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl mb-6 text-sm text-amber-300 animate-slide-up">
+          <div className="alert-info flex items-center gap-2 mb-6 animate-slide-up">
             <AlertCircle className="w-4 h-4 flex-shrink-0" />
-            Cost data is accurate up to <strong className="text-amber-200">{boundary.accurate_until}</strong>.
-            Daily sync runs at <strong className="text-amber-200">10:30 AM UTC</strong>.
+            Cost data is accurate up to <strong>{boundary.accurate_until}</strong>.
+            Daily sync runs at <strong>10:30 AM UTC</strong>.
           </div>
         )}
 
         {/* Summary cards */}
         {towers.length > 0 && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8 animate-slide-up">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 animate-slide-up">
             {[
-              { label: "Control Towers", value: towers.length, icon: Building2, color: "text-[#c084fc]", bg: "bg-[#7c3aed]/10" },
-              { label: "Sub-accounts", value: totalAccounts, icon: Users, color: "text-[#22d3ee]", bg: "bg-[#06b6d4]/10" },
-              { label: "Active Syncs", value: towers.filter((t: any) => t.is_active).length, icon: RefreshCw, color: "text-emerald-400", bg: "bg-emerald-400/10" },
-              { label: "View Reports", value: "→", icon: DollarSign, color: "text-amber-400", bg: "bg-amber-400/10", href: "/reports" },
+              { label: "Control Towers", value: towers.length, icon: Building2, color: "var(--primary)" },
+              { label: "Sub-accounts", value: totalAccounts, icon: Users, color: "var(--info)" },
+              { label: "Active", value: towers.filter((t: any) => t.is_active).length, icon: CheckCircle, color: "var(--success)" },
+              { label: "View Reports", value: "→", icon: DollarSign, color: "var(--accent)", href: "/reports" },
             ].map((card: any) => (
               card.href ? (
-                <Link key={card.label} href={card.href}
-                  className="p-4 bg-slate-800/50 border border-[#7c3aed]/15 hover:border-[#7c3aed]/35 rounded-xl transition hover:scale-[1.02]">
+                <Link key={card.label} href={card.href} className="stat-card hover:shadow-md transition cursor-pointer">
                   <div className="flex items-center gap-3">
-                    <div className={`p-2 rounded-lg ${card.bg}`}><card.icon className={`w-5 h-5 ${card.color}`} /></div>
+                    <div className="w-9 h-9 rounded-lg flex items-center justify-center"
+                      style={{ background: `${card.color}15` }}>
+                      <card.icon className="w-5 h-5" style={{ color: card.color }} />
+                    </div>
                     <div>
-                      <div className={`text-2xl font-bold ${card.color}`}>{card.value}</div>
-                      <div className="text-xs text-slate-400">{card.label}</div>
+                      <div className="stat-card-label">{card.label}</div>
+                      <div className="stat-card-value text-xl" style={{ color: card.color }}>{card.value}</div>
                     </div>
                   </div>
                 </Link>
               ) : (
-                <div key={card.label} className="p-4 bg-slate-800/50 border border-[#7c3aed]/15 rounded-xl">
+                <div key={card.label} className="stat-card">
                   <div className="flex items-center gap-3">
-                    <div className={`p-2 rounded-lg ${card.bg}`}><card.icon className={`w-5 h-5 ${card.color}`} /></div>
+                    <div className="w-9 h-9 rounded-lg flex items-center justify-center"
+                      style={{ background: `${card.color}15` }}>
+                      <card.icon className="w-5 h-5" style={{ color: card.color }} />
+                    </div>
                     <div>
-                      <div className={`text-2xl font-bold ${card.color}`}>{card.value}</div>
-                      <div className="text-xs text-slate-400">{card.label}</div>
+                      <div className="stat-card-label">{card.label}</div>
+                      <div className="stat-card-value text-xl" style={{ color: card.color }}>{card.value}</div>
                     </div>
                   </div>
                 </div>
@@ -274,23 +270,27 @@ export default function DashboardPage() {
 
         {/* Control Tower cards */}
         {towers.length === 0 ? (
-          <div className="text-center py-24 border border-dashed border-[#7c3aed]/20 rounded-2xl bg-[#7c3aed]/5">
-            <div className="w-16 h-16 bg-[#7c3aed]/15 rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <Building2 className="w-8 h-8 text-[#c084fc]" />
+          <div className="card p-16 text-center">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
+              style={{ background: "#e8f0fe" }}>
+              <Building2 className="w-8 h-8" style={{ color: "var(--primary)" }} />
             </div>
-            <h3 className="text-lg font-semibold text-white mb-2">No Control Towers yet</h3>
-            <p className="text-[#94a3c4] mb-6">Add your first AWS Control Tower management account to start tracking costs.</p>
+            <h3 className="text-lg font-semibold mb-2" style={{ color: "var(--text-primary)" }}>No Control Towers yet</h3>
+            <p className="text-sm mb-6" style={{ color: "var(--text-secondary)" }}>
+              Add your first AWS Control Tower management account to start tracking costs.
+            </p>
             {(user?.role === "owner" || user?.role === "editor") && (
               <Link href="/onboard"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-[#7c3aed] to-[#06b6d4] text-white rounded-xl font-semibold transition hover:scale-105">
+                className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white rounded-md transition"
+                style={{ background: "var(--primary)" }}>
                 <Plus className="w-4 h-4" /> Add Control Tower
               </Link>
             )}
           </div>
         ) : (
-          <div className="grid gap-6">
+          <div className="grid gap-4">
             {towers.map((ct: any, i: number) => (
-              <div key={ct.id} style={{ animationDelay: `${i * 80}ms` }}>
+              <div key={ct.id} style={{ animationDelay: `${i * 60}ms` }}>
                 <ControlTowerCard
                   ct={ct}
                   user={user}

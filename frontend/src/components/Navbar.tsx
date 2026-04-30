@@ -15,21 +15,23 @@ export default function Navbar() {
   ];
 
   return (
-    <nav className="flex items-center justify-between px-6 py-3 border-b bg-[#080d1a]/90 border-[#7c3aed]/10 backdrop-blur-md sticky top-0 z-50">
+    <nav className="sticky top-0 z-50 flex items-center justify-between px-6 py-0 h-14"
+      style={{ background: "var(--bg-nav)", boxShadow: "var(--shadow-nav)" }}>
+
       {/* Brand */}
       <Link href="/dashboard" className="flex items-center gap-2.5 group">
-        <div className="w-8 h-8 bg-gradient-to-br from-[#7c3aed] to-[#06b6d4] rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center"
+          style={{ background: "var(--accent)" }}>
           <DollarSign className="w-4 h-4 text-white" />
         </div>
-        <span className="text-lg font-bold text-white">
-          <span className="text-[#22d3ee]">FinOps</span> CUR Portal
-        </span>
-        {user && (
-          <div className="hidden lg:flex flex-col leading-tight ml-1">
-            <span className="text-xs font-medium text-white">{user.full_name || user.email}</span>
-            <span className="text-[10px] text-[#94a3c4] capitalize">{user.role}</span>
-          </div>
-        )}
+        <div className="flex flex-col leading-tight">
+          <span className="text-white font-bold text-sm tracking-wide">FinOps CUR Portal</span>
+          {user && (
+            <span className="text-xs" style={{ color: "var(--text-nav-muted)" }}>
+              {user.full_name || user.email} · <span className="capitalize">{user.role}</span>
+            </span>
+          )}
+        </div>
       </Link>
 
       {/* Nav links */}
@@ -38,10 +40,10 @@ export default function Navbar() {
           const active = pathname === href || pathname.startsWith(href + "/");
           return (
             <Link key={href} href={href}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all border ${
+              className={`flex items-center gap-1.5 px-3 py-2 rounded text-sm font-medium transition-all ${
                 active
-                  ? "bg-[#7c3aed]/15 text-[#c084fc] border-[#7c3aed]/30"
-                  : "text-[#94a3c4] hover:text-white hover:bg-[#7c3aed]/8 border-transparent"
+                  ? "bg-white/15 text-white"
+                  : "text-white/70 hover:text-white hover:bg-white/10"
               }`}>
               <Icon className="w-3.5 h-3.5" />{label}
             </Link>
@@ -51,15 +53,18 @@ export default function Navbar() {
         {(user?.role === "owner" || user?.role === "editor") && (
           <>
             <Link href="/sync-logs"
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all border ${
+              className={`flex items-center gap-1.5 px-3 py-2 rounded text-sm font-medium transition-all ${
                 pathname === "/sync-logs"
-                  ? "bg-[#7c3aed]/15 text-[#c084fc] border-[#7c3aed]/30"
-                  : "text-[#94a3c4] hover:text-white hover:bg-[#7c3aed]/8 border-transparent"
+                  ? "bg-white/15 text-white"
+                  : "text-white/70 hover:text-white hover:bg-white/10"
               }`}>
               <ScrollText className="w-3.5 h-3.5" />Sync Logs
             </Link>
             <Link href="/onboard"
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-gradient-to-r from-[#7c3aed]/15 to-[#06b6d4]/10 hover:from-[#7c3aed]/25 hover:to-[#06b6d4]/20 text-[#c084fc] border border-[#7c3aed]/25 hover:border-[#7c3aed]/45 rounded-lg transition-all">
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold rounded transition-all text-white"
+              style={{ background: "var(--accent)" }}
+              onMouseEnter={e => (e.currentTarget.style.background = "var(--accent-hover)")}
+              onMouseLeave={e => (e.currentTarget.style.background = "var(--accent)")}>
               <Plus className="w-3.5 h-3.5" />Add Control Tower
             </Link>
           </>
@@ -67,7 +72,7 @@ export default function Navbar() {
 
         {user?.role === "owner" && (
           <Link href="/admin"
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-[#f43f5e]/10 hover:bg-[#f43f5e]/20 text-[#fb7185] border border-[#f43f5e]/25 rounded-lg transition-all">
+            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded transition-all text-white/70 hover:text-white hover:bg-white/10">
             <Shield className="w-3.5 h-3.5" />Admin
           </Link>
         )}
@@ -75,8 +80,9 @@ export default function Navbar() {
 
       {/* Logout */}
       <button onClick={() => { logout(); router.push("/"); }}
-        className="p-2 rounded-lg transition-all text-[#94a3c4] hover:text-[#fb7185] hover:bg-[#f43f5e]/10">
+        className="flex items-center gap-1.5 px-3 py-2 rounded text-sm transition-all text-white/70 hover:text-white hover:bg-white/10">
         <LogOut className="w-4 h-4" />
+        <span className="hidden lg:inline">Sign Out</span>
       </button>
     </nav>
   );

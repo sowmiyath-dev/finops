@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
-import { DollarSign } from "lucide-react";
+import { DollarSign, TrendingDown } from "lucide-react";
 
 function AuthForm() {
   const params = useSearchParams();
@@ -68,112 +68,188 @@ function AuthForm() {
     finally { setLoading(false); }
   };
 
-  const inputCls = "w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#7c3aed] transition";
+  const inputCls = "w-full border rounded-md px-3 py-2.5 text-sm focus:outline-none transition"
+    + " bg-white text-gray-900 border-gray-300 focus:border-blue-600 focus:ring-2 focus:ring-blue-100";
 
   return (
-    <div className="min-h-screen bg-[#080d1a] flex items-center justify-center px-4">
-      <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-br from-[#7c3aed] to-[#06b6d4] mb-4">
-            <DollarSign className="w-6 h-6 text-white" />
+    <div className="min-h-screen flex" style={{ background: "#f1f4f9" }}>
+      {/* Left panel */}
+      <div className="hidden lg:flex lg:w-1/2 flex-col justify-between p-12"
+        style={{ background: "var(--bg-nav)" }}>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+            style={{ background: "var(--accent)" }}>
+            <DollarSign className="w-5 h-5 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-white"><span className="text-[#22d3ee]">FinOps</span> CUR Portal</h1>
-          <p className="text-slate-400 mt-1 text-sm">AWS Control Tower Cost Management</p>
+          <span className="text-white font-bold text-xl">FinOps CUR Portal</span>
         </div>
 
-        <div className="bg-slate-800/60 border border-slate-700 rounded-2xl p-8">
+        <div>
+          <h1 className="text-4xl font-bold text-white mb-4 leading-tight">
+            AWS Cost Intelligence<br />
+            <span style={{ color: "var(--accent)" }}>at your fingertips</span>
+          </h1>
+          <p className="text-white/70 text-base mb-8">
+            Centralized cost visibility across all your AWS Control Tower accounts.
+            Sync CUR data, analyze spending, and export detailed reports.
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            {[
+              { label: "Control Towers", value: "7" },
+              { label: "Data Accuracy", value: "Daily" },
+              { label: "Report Types", value: "4+" },
+              { label: "Export Format", value: "CSV" },
+            ].map((item) => (
+              <div key={item.label} className="rounded-lg p-4" style={{ background: "rgba(255,255,255,0.08)" }}>
+                <div className="text-2xl font-bold text-white">{item.value}</div>
+                <div className="text-sm text-white/60">{item.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
 
-          {step === "credentials" && (
-            <>
-              <div className="flex rounded-lg bg-slate-900 p-1 mb-6">
-                {(["login", "signup"] as const).map((m) => (
-                  <button key={m} onClick={() => setMode(m)}
-                    className={`flex-1 py-2 text-sm font-medium rounded-md transition ${mode === m ? "bg-[#7c3aed] text-white" : "text-slate-400 hover:text-white"}`}>
-                    {m === "login" ? "Sign In" : "Sign Up"}
-                  </button>
-                ))}
-              </div>
-              <form onSubmit={handleCredentials} className="space-y-4">
-                {mode === "signup" && (
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-1">Full Name</label>
-                    <input value={fullName} onChange={(e) => setFullName(e.target.value)} className={inputCls} placeholder="John Doe" />
-                  </div>
-                )}
-                <div>
-                  <label className="block text-sm text-slate-400 mb-1">Email</label>
-                  <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} placeholder="you@company.com" />
-                </div>
-                <div>
-                  <label className="block text-sm text-slate-400 mb-1">Password</label>
-                  <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className={inputCls} placeholder="••••••••" />
-                </div>
-                <button type="submit" disabled={loading}
-                  className="w-full py-2.5 bg-[#7c3aed] hover:bg-[#6d28d9] disabled:opacity-50 text-white rounded-lg font-semibold transition mt-2">
-                  {loading ? "Please wait..." : mode === "login" ? "Sign In" : "Create Account"}
-                </button>
-              </form>
-            </>
-          )}
+        <p className="text-white/40 text-xs">
+          © 2026 FinOps CUR Portal. Enterprise AWS Cost Management.
+        </p>
+      </div>
 
-          {step === "mfa_setup" && (
-            <form onSubmit={handleMFASetup} className="space-y-5">
-              <div className="text-center">
-                <p className="text-xs text-slate-400 mb-4">Scan with <strong className="text-white">Google Authenticator</strong> or any TOTP app</p>
-                {qrBase64 && (
-                  <div className="inline-block p-3 bg-white rounded-xl mb-4">
-                    <img src={`data:image/png;base64,${qrBase64}`} alt="MFA QR" className="w-48 h-48" />
-                  </div>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Verification Code</label>
-                <input type="text" required maxLength={6} value={code}
-                  onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-                  className={`${inputCls} text-center tracking-[0.5em] font-mono`} placeholder="000000" autoFocus />
-              </div>
-              <button type="submit" disabled={loading || code.length !== 6}
-                className="w-full py-2.5 bg-[#7c3aed] hover:bg-[#6d28d9] disabled:opacity-50 text-white rounded-lg font-semibold transition">
-                {loading ? "Verifying..." : "Activate & Sign In"}
-              </button>
-              <button type="button" onClick={() => { setStep("credentials"); setCode(""); }}
-                className="w-full py-2 text-sm text-slate-500 hover:text-slate-300 transition">← Back</button>
-            </form>
-          )}
+      {/* Right panel */}
+      <div className="flex-1 flex items-center justify-center p-8">
+        <div className="w-full max-w-md">
 
-          {step === "mfa_validate" && (
-            <form onSubmit={handleMFAValidate} className="space-y-5">
-              <p className="text-xs text-slate-400 text-center">Enter the 6-digit code from your authenticator app</p>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Authenticator Code</label>
-                <input type="text" required maxLength={6} value={code}
-                  onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-                  className={`${inputCls} text-center tracking-[0.5em] font-mono`} placeholder="000000" autoFocus />
-              </div>
-              <button type="submit" disabled={loading || code.length !== 6}
-                className="w-full py-2.5 bg-[#7c3aed] hover:bg-[#6d28d9] disabled:opacity-50 text-white rounded-lg font-semibold transition">
-                {loading ? "Verifying..." : "Verify & Sign In"}
-              </button>
-              <button type="button" onClick={() => { setStep("credentials"); setCode(""); }}
-                className="w-full py-2 text-sm text-slate-500 hover:text-slate-300 transition">← Back</button>
-            </form>
-          )}
-
-          {step === "pending" && (
-            <div className="text-center space-y-4">
-              <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-amber-500/20 mb-2">
-                <svg className="w-7 h-7 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <h2 className="text-lg font-semibold text-white">Approval Pending</h2>
-              <p className="text-sm text-slate-400">Your account is awaiting admin approval.</p>
-              <button onClick={() => { setStep("credentials"); setEmail(""); setPassword(""); }}
-                className="w-full py-2 text-sm text-slate-400 hover:text-white border border-slate-700 hover:border-slate-500 rounded-lg transition">
-                ← Back to Sign In
-              </button>
+          {/* Mobile brand */}
+          <div className="lg:hidden flex items-center gap-2 mb-8">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center"
+              style={{ background: "var(--bg-nav)" }}>
+              <DollarSign className="w-4 h-4 text-white" />
             </div>
-          )}
+            <span className="font-bold text-lg" style={{ color: "var(--primary)" }}>FinOps CUR Portal</span>
+          </div>
+
+          <div className="bg-white rounded-xl border p-8" style={{ borderColor: "var(--border)", boxShadow: "var(--shadow-lg)" }}>
+
+            {step === "credentials" && (
+              <>
+                <h2 className="text-xl font-bold mb-1" style={{ color: "var(--text-primary)" }}>
+                  {mode === "login" ? "Sign in to your account" : "Create an account"}
+                </h2>
+                <p className="text-sm mb-6" style={{ color: "var(--text-secondary)" }}>
+                  {mode === "login" ? "Enter your credentials to continue" : "Fill in the details below"}
+                </p>
+
+                {/* Tabs */}
+                <div className="flex rounded-lg p-1 mb-6" style={{ background: "#f1f4f9" }}>
+                  {(["login", "signup"] as const).map((m) => (
+                    <button key={m} onClick={() => setMode(m)}
+                      className={`flex-1 py-2 text-sm font-semibold rounded-md transition ${
+                        mode === m ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"
+                      }`}>
+                      {m === "login" ? "Sign In" : "Sign Up"}
+                    </button>
+                  ))}
+                </div>
+
+                <form onSubmit={handleCredentials} className="space-y-4">
+                  {mode === "signup" && (
+                    <div>
+                      <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text-primary)" }}>Full Name</label>
+                      <input value={fullName} onChange={(e) => setFullName(e.target.value)} className={inputCls} placeholder="John Doe" />
+                    </div>
+                  )}
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text-primary)" }}>Email address</label>
+                    <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} placeholder="you@company.com" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text-primary)" }}>Password</label>
+                    <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className={inputCls} placeholder="••••••••" />
+                  </div>
+                  <button type="submit" disabled={loading}
+                    className="w-full py-2.5 text-sm font-semibold text-white rounded-md transition disabled:opacity-50 mt-2"
+                    style={{ background: loading ? "#6b7280" : "var(--primary)" }}>
+                    {loading ? "Please wait..." : mode === "login" ? "Sign In" : "Create Account"}
+                  </button>
+                </form>
+              </>
+            )}
+
+            {step === "mfa_setup" && (
+              <form onSubmit={handleMFASetup} className="space-y-5">
+                <div>
+                  <h2 className="text-xl font-bold mb-1" style={{ color: "var(--text-primary)" }}>Set up two-factor authentication</h2>
+                  <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                    Scan the QR code with <strong>Google Authenticator</strong> or any TOTP app
+                  </p>
+                </div>
+                {qrBase64 && (
+                  <div className="flex justify-center">
+                    <div className="p-3 bg-white border rounded-xl" style={{ borderColor: "var(--border)" }}>
+                      <img src={`data:image/png;base64,${qrBase64}`} alt="MFA QR" className="w-48 h-48" />
+                    </div>
+                  </div>
+                )}
+                <div>
+                  <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text-primary)" }}>Verification Code</label>
+                  <input type="text" required maxLength={6} value={code}
+                    onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+                    className={`${inputCls} text-center tracking-[0.5em] font-mono text-lg`}
+                    placeholder="000000" autoFocus />
+                </div>
+                <button type="submit" disabled={loading || code.length !== 6}
+                  className="w-full py-2.5 text-sm font-semibold text-white rounded-md transition disabled:opacity-50"
+                  style={{ background: "var(--primary)" }}>
+                  {loading ? "Verifying..." : "Activate & Sign In"}
+                </button>
+                <button type="button" onClick={() => { setStep("credentials"); setCode(""); }}
+                  className="w-full py-2 text-sm transition" style={{ color: "var(--text-secondary)" }}>← Back</button>
+              </form>
+            )}
+
+            {step === "mfa_validate" && (
+              <form onSubmit={handleMFAValidate} className="space-y-5">
+                <div>
+                  <h2 className="text-xl font-bold mb-1" style={{ color: "var(--text-primary)" }}>Two-factor authentication</h2>
+                  <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                    Enter the 6-digit code from your authenticator app
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text-primary)" }}>Authenticator Code</label>
+                  <input type="text" required maxLength={6} value={code}
+                    onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+                    className={`${inputCls} text-center tracking-[0.5em] font-mono text-lg`}
+                    placeholder="000000" autoFocus />
+                </div>
+                <button type="submit" disabled={loading || code.length !== 6}
+                  className="w-full py-2.5 text-sm font-semibold text-white rounded-md transition disabled:opacity-50"
+                  style={{ background: "var(--primary)" }}>
+                  {loading ? "Verifying..." : "Verify & Sign In"}
+                </button>
+                <button type="button" onClick={() => { setStep("credentials"); setCode(""); }}
+                  className="w-full py-2 text-sm transition" style={{ color: "var(--text-secondary)" }}>← Back</button>
+              </form>
+            )}
+
+            {step === "pending" && (
+              <div className="text-center space-y-4">
+                <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto"
+                  style={{ background: "var(--warning-bg)" }}>
+                  <svg className="w-7 h-7" style={{ color: "var(--warning)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <h2 className="text-lg font-bold" style={{ color: "var(--text-primary)" }}>Approval Pending</h2>
+                <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                  Your account is awaiting admin approval. You will be notified once approved.
+                </p>
+                <button onClick={() => { setStep("credentials"); setEmail(""); setPassword(""); }}
+                  className="w-full py-2.5 text-sm font-medium rounded-md border transition"
+                  style={{ borderColor: "var(--border)", color: "var(--text-secondary)" }}>
+                  ← Back to Sign In
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -182,7 +258,12 @@ function AuthForm() {
 
 export default function AuthPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-[#080d1a] flex items-center justify-center"><div className="w-8 h-8 border-2 border-[#7c3aed] border-t-transparent rounded-full animate-spin" /></div>}>
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "#f1f4f9" }}>
+        <div className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin"
+          style={{ borderColor: "var(--primary)", borderTopColor: "transparent" }} />
+      </div>
+    }>
       <AuthForm />
     </Suspense>
   );
