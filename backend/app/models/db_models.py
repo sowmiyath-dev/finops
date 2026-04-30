@@ -1,6 +1,5 @@
 from sqlalchemy import Column, String, DateTime, Text, Boolean, ForeignKey, Numeric, Integer, Date, Index
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime, timezone
 import uuid
@@ -18,10 +17,9 @@ class User(Base):
     full_name = Column(String)
     totp_secret = Column(String, nullable=True)
     mfa_enabled = Column(Boolean, default=False)
-    role = Column(String, default="viewer")               # owner | editor | viewer
+    role = Column(String, default="viewer")
     is_approved = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), default=utcnow)
-    control_towers = relationship("ControlTower", back_populates="owner", cascade="all, delete")
 
 class ControlTower(Base):
     __tablename__ = "control_towers"
@@ -30,20 +28,17 @@ class ControlTower(Base):
     name = Column(String, nullable=False)
     management_account_id = Column(String(12), nullable=False)
     management_account_name = Column(String, nullable=False)
-    auth_method = Column(String, nullable=False)          # keys | role
+    auth_method = Column(String, nullable=False)
     access_key_id = Column(String)
     encrypted_secret_key = Column(Text)
     role_arn = Column(String)
     external_id = Column(String, unique=True)
-    cur_s3_bucket = Column(String, nullable=True)         # CUR S3 bucket name
-    cur_s3_prefix = Column(String, nullable=True)         # CUR S3 path prefix e.g. rilcurmall/rilcurmall26NN
+    cur_s3_bucket = Column(String, nullable=True)
+    cur_s3_prefix = Column(String, nullable=True)
     is_active = Column(Boolean, default=False)
     last_synced_at = Column(DateTime(timezone=True), nullable=True)
     auto_sync_enabled = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
-    owner = relationship("User", back_populates="control_towers")
-    sub_accounts = relationship("SubAccount", back_populates="control_tower", cascade="all, delete")
-    sync_logs = relationship("SyncLog", back_populates="control_tower", cascade="all, delete", lazy="raise")
 
 class SubAccount(Base):
     __tablename__ = "sub_accounts"
@@ -56,8 +51,6 @@ class SubAccount(Base):
     aws_account_id = Column(String(12), nullable=False)
     account_name = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
-    control_tower = relationship("ControlTower", back_populates="sub_accounts")
-    cost_records = relationship("CostRecord", back_populates="sub_account", cascade="all, delete", lazy="raise")
 
 class CostRecord(Base):
     __tablename__ = "cost_records"
@@ -85,25 +78,23 @@ class CostRecord(Base):
     amortized_cost = Column(Numeric(14, 6), default=0)
     usage_quantity = Column(Numeric(18, 6), default=0)
     usage_unit = Column(String)
-    purchase_type = Column(String)                        # OnDemand | Reserved | SavingsPlan | Spot
-    tags = Column(Text)                                   # JSON string {"Environment":"prod","Project":"alpha"}
+    purchase_type = Column(String)
+    tags = Column(Text)
     synced_at = Column(DateTime(timezone=True), default=utcnow)
-    sub_account = relationship("SubAccount", back_populates="cost_records", lazy="raise")
 
 class SyncLog(Base):
     __tablename__ = "sync_logs"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     control_tower_id = Column(UUID(as_uuid=True), ForeignKey("control_towers.id", ondelete="CASCADE"), nullable=False)
     control_tower_name = Column(String, nullable=False)
-    triggered_by = Column(String, nullable=False)         # manual | scheduler
-    status = Column(String, nullable=False)               # started | completed | failed
+    triggered_by = Column(String, nullable=False)
+    status = Column(String, nullable=False)
     records_synced = Column(Integer, default=0)
     date_range_start = Column(Date, nullable=True)
     date_range_end = Column(Date, nullable=True)
     error_message = Column(Text, nullable=True)
     started_at = Column(DateTime(timezone=True), default=utcnow)
     finished_at = Column(DateTime(timezone=True), nullable=True)
-    control_tower = relationship("ControlTower", back_populates="sync_logs")
 
 class LoginAttempt(Base):
     __tablename__ = "login_attempts"
