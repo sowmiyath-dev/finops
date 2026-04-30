@@ -7,7 +7,7 @@ export default function Home() {
   const { token } = useAuthStore();
   const router = useRouter();
   useEffect(() => {
-    router.replace(token ? "/dashboard" : "/auth");
+    router.replace(token ? "/org" : "/auth");
   }, [token]);
-  return <div className="min-h-screen bg-[#080d1a]" />;
+  return <div className="min-h-screen" style={{ background: "#f1f4f9" }} />;
 }

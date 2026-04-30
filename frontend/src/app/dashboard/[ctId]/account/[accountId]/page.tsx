@@ -141,9 +141,7 @@ export default function AccountDetailPage() {
     }`;
 
   return (
-    <div className="min-h-screen" style={{ background: "#f1f4f9" }}>
-      <Navbar />
-      <div className="flex">
+    <div className="flex">
 
         {/* ── Left Navigation ── */}
         <aside className="w-64 min-h-screen bg-white border-r border-gray-300 flex-shrink-0">

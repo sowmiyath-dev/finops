@@ -115,3 +115,37 @@ class AuditLog(Base):
     resource = Column(String, nullable=True)
     ip_address = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class CustomTag(Base):
+    """Application-level custom tags — not linked to AWS resource tags."""
+    __tablename__ = "custom_tags"
+    __table_args__ = (
+        Index("ix_custom_tag_key", "tag_key"),
+    )
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tag_key = Column(String, nullable=False)       # e.g. "Project"
+    tag_value = Column(String, nullable=False)     # e.g. "Samil"
+    color = Column(String, default="#0f2d5e")      # display color
+    description = Column(String, nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class ResourceTagMapping(Base):
+    """Maps application custom tags to resource IDs across any cloud."""
+    __tablename__ = "resource_tag_mappings"
+    __table_args__ = (
+        Index("ix_rtm_resource", "resource_id"),
+        Index("ix_rtm_tag", "custom_tag_id"),
+        Index("ix_rtm_cloud", "cloud_provider"),
+    )
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    resource_id = Column(String, nullable=False)          # AWS resource ID / Azure resource ID
+    resource_name = Column(String, nullable=True)
+    cloud_provider = Column(String, nullable=False)       # aws | azure | gcp
+    aws_account_id = Column(String, nullable=True)
+    service = Column(String, nullable=True)
+    custom_tag_id = Column(UUID(as_uuid=True), ForeignKey("custom_tags.id", ondelete="CASCADE"), nullable=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)

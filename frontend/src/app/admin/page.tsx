@@ -56,8 +56,7 @@ export default function AdminPage() {
   const inputCls = "w-full border rounded-md px-3 py-2 text-sm focus:outline-none transition bg-white border-gray-300 focus:border-blue-600 focus:ring-2 focus:ring-blue-100";
 
   return (
-    <div className="min-h-screen bg-mesh">
-      <Navbar />
+    <div className="p-6">
       <div className="max-w-5xl mx-auto px-6 py-8">
 
         {/* Header */}

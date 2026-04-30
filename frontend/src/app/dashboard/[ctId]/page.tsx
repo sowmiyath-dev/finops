@@ -4,7 +4,6 @@ import { useParams, useRouter, usePathname } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
-import Navbar from "@/components/Navbar";
 import DateRangePicker, { DateRange, getLast30 } from "@/components/DateRangePicker";
 import Link from "next/link";
 import {
@@ -64,9 +63,7 @@ export default function CTDetailPage() {
   };
 
   return (
-    <div className="min-h-screen" style={{ background: "#f1f4f9" }}>
-      <Navbar />
-      <div className="flex">
+    <div className="flex">
 
         {/* ── Left Navigation (AWS-style) ── */}
         <aside className="w-64 min-h-screen bg-white border-r border-gray-300 flex-shrink-0">

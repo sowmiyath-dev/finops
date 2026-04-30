@@ -68,8 +68,7 @@ export default function OnboardPage() {
   const labelCls = "block text-sm font-medium mb-1.5";
 
   return (
-    <div className="min-h-screen bg-mesh">
-      <Navbar />
+    <div className="p-6">
       <div className="max-w-lg mx-auto px-6 py-10">
         <button onClick={() => router.back()}
           className="flex items-center gap-1.5 text-sm mb-6 transition"
