@@ -36,40 +36,40 @@ const NAV_ITEMS: NavItem[] = [
           { id: "dash-daily",   label: "Daily Cost",   icon: Clock,      href: "/org/dashboard/daily" },
         ],
       },
-    ],
-  },
-  {
-    id: "clouds",
-    label: "Clouds",
-    icon: Cloud,
-    children: [
       {
-        id: "aws",
-        label: "Amazon Web Services",
-        icon: Globe,
-        badge: "Active",
+        id: "clouds",
+        label: "Clouds",
+        icon: Cloud,
         children: [
-          { id: "aws-towers",  label: "Control Towers", icon: Building2,  href: "/dashboard" },
-          { id: "aws-reports", label: "Cost Reports",   icon: DollarSign, href: "/reports" },
-          { id: "aws-sync",    label: "Sync Logs",      icon: Clock,      href: "/sync-logs" },
-        ],
-      },
-      {
-        id: "azure",
-        label: "Microsoft Azure",
-        icon: Globe,
-        badge: "Coming Soon",
-        children: [
-          { id: "azure-overview", label: "Overview", icon: LayoutDashboard, href: "/clouds/azure" },
-        ],
-      },
-      {
-        id: "gcp",
-        label: "Google Cloud",
-        icon: Globe,
-        badge: "Coming Soon",
-        children: [
-          { id: "gcp-overview", label: "Overview", icon: LayoutDashboard, href: "/clouds/gcp" },
+          {
+            id: "aws",
+            label: "Amazon Web Services",
+            icon: Globe,
+            badge: "Active",
+            children: [
+              { id: "aws-towers",  label: "Control Towers", icon: Building2,  href: "/dashboard" },
+              { id: "aws-reports", label: "Cost Reports",   icon: DollarSign, href: "/reports" },
+              { id: "aws-sync",    label: "Sync Logs",      icon: Clock,      href: "/sync-logs" },
+            ],
+          },
+          {
+            id: "azure",
+            label: "Microsoft Azure",
+            icon: Globe,
+            badge: "Coming Soon",
+            children: [
+              { id: "azure-overview", label: "Overview", icon: LayoutDashboard, href: "/clouds/azure" },
+            ],
+          },
+          {
+            id: "gcp",
+            label: "Google Cloud",
+            icon: Globe,
+            badge: "Coming Soon",
+            children: [
+              { id: "gcp-overview", label: "Overview", icon: LayoutDashboard, href: "/clouds/gcp" },
+            ],
+          },
         ],
       },
     ],
