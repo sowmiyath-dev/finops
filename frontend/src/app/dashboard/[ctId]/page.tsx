@@ -6,20 +6,18 @@ import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
 import Navbar from "@/components/Navbar";
 import Link from "next/link";
-import { ArrowLeft, ChevronRight, DollarSign, TrendingUp, Users } from "lucide-react";
+import { ChevronRight, DollarSign, Users } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
-const COLORS = ["#7c3aed","#06b6d4","#10b981","#f59e0b","#f43f5e","#a855f7","#22d3ee"];
+const COLORS = ["#0f2d5e","#1a6fa8","#ec7211","#1d8348","#c0392b","#8e44ad","#2980b9"];
 
 export default function CTDetailPage() {
   const { ctId } = useParams<{ ctId: string }>();
   const { token } = useAuthStore();
   const router = useRouter();
+  const [days, setDays] = useState(30);
 
   useEffect(() => { if (!token) router.push("/auth"); }, [token]);
-
-  // default: last 30 days up to accurate boundary
-  const [days, setDays] = useState(30);
 
   const { data: boundary } = useQuery({
     queryKey: ["boundary"],
@@ -44,57 +42,59 @@ export default function CTDetailPage() {
 
   const { data: summary, isLoading } = useQuery({
     queryKey: ["ct-summary", ctId, startDate, endDate],
-    queryFn: () =>
-      api.post("/reports/summary", {
-        control_tower_ids: [ctId],
-        start_date: startDate,
-        end_date: endDate,
-        granularity: "daily",
-        metric: "unblended_cost",
-        group_by: "account",
-      }).then((r) => r.data),
+    queryFn: () => api.post("/reports/summary", {
+      control_tower_ids: [ctId],
+      start_date: startDate,
+      end_date: endDate,
+      granularity: "daily",
+      metric: "unblended_cost",
+      group_by: "account",
+    }).then((r) => r.data),
     enabled: !!token && !!ctId && !!boundary,
   });
 
-  if (!ct && !isLoading) return (
-    <div className="min-h-screen bg-mesh"><Navbar />
-      <div className="max-w-7xl mx-auto px-6 py-10">
-        <button onClick={() => router.back()} className="flex items-center gap-1.5 text-slate-400 hover:text-white text-sm mb-4"><ArrowLeft className="w-4 h-4" /> Back</button>
-        <p className="text-slate-400">Control Tower not found.</p>
-      </div>
-    </div>
-  );
+  const btnStyle = (active: boolean) => ({
+    borderColor: active ? "var(--primary)" : "var(--border)",
+    background: active ? "#e8f0fe" : "white",
+    color: active ? "var(--primary)" : "var(--text-secondary)",
+  });
 
   return (
     <div className="min-h-screen bg-mesh">
       <Navbar />
-      <div className="max-w-7xl mx-auto px-6 py-10">
+      <div className="max-w-7xl mx-auto px-6 py-8">
 
         {/* Breadcrumb */}
-        <div className="flex items-center gap-2 text-sm text-slate-400 mb-6">
-          <Link href="/dashboard" className="hover:text-white transition">Control Towers</Link>
-          <ChevronRight className="w-3.5 h-3.5" />
-          <span className="text-white font-medium">{ct?.name || "..."}</span>
+        <div className="flex items-center gap-2 text-sm mb-6">
+          <Link href="/dashboard" className="transition" style={{ color: "var(--text-secondary)" }}
+            onMouseEnter={e => (e.currentTarget.style.color = "var(--primary)")}
+            onMouseLeave={e => (e.currentTarget.style.color = "var(--text-secondary)")}>
+            Control Towers
+          </Link>
+          <ChevronRight className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} />
+          <span className="font-semibold" style={{ color: "var(--text-primary)" }}>{ct?.name || "..."}</span>
         </div>
 
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-white">{ct?.name}</h1>
-            <p className="text-slate-400 text-sm mt-0.5">
-              Management: <span className="font-mono text-slate-300">{ct?.management_account_id}</span>
+            <h1 className="text-2xl font-bold" style={{ color: "var(--text-primary)" }}>{ct?.name}</h1>
+            <p className="text-sm mt-0.5" style={{ color: "var(--text-secondary)" }}>
+              Management: <span className="font-mono">{ct?.management_account_id}</span>
               {" · "}{ct?.sub_accounts?.length || 0} sub-accounts
             </p>
           </div>
           <div className="flex items-center gap-2">
             {[7, 30, 90].map((d) => (
               <button key={d} onClick={() => setDays(d)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition ${days === d ? "bg-[#7c3aed]/20 text-[#c084fc] border-[#7c3aed]/40" : "text-slate-400 border-slate-700 hover:border-slate-500"}`}>
+                className="px-3 py-1.5 text-xs font-semibold rounded-md border transition"
+                style={btnStyle(days === d)}>
                 {d}d
               </button>
             ))}
             <Link href={`/reports?ct=${ctId}`}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[#7c3aed]/15 text-[#c084fc] border border-[#7c3aed]/30 rounded-lg hover:bg-[#7c3aed]/25 transition">
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md border transition text-white"
+              style={{ background: "var(--primary)", borderColor: "var(--primary)" }}>
               <DollarSign className="w-3.5 h-3.5" /> Full Report
             </Link>
           </div>
@@ -102,51 +102,54 @@ export default function CTDetailPage() {
 
         {isLoading ? (
           <div className="flex items-center justify-center h-40">
-            <div className="w-8 h-8 border-2 border-[#7c3aed] border-t-transparent rounded-full animate-spin" />
+            <div className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin"
+              style={{ borderColor: "var(--primary)", borderTopColor: "transparent" }} />
           </div>
         ) : (
           <>
             {/* Summary cards */}
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
-              <div className="card p-5">
-                <div className="text-xs text-slate-400 mb-1">Total Cost</div>
-                <div className="text-2xl font-bold text-[#22d3ee]">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+              <div className="stat-card">
+                <div className="stat-card-label">Total Cost</div>
+                <div className="stat-card-value">
                   ${(summary?.total_cost || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
-                <div className="text-xs text-slate-500 mt-1">{startDate} → {endDate}</div>
+                <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{startDate} → {endDate}</div>
               </div>
-              <div className="card p-5">
-                <div className="text-xs text-slate-400 mb-1">Top Service</div>
-                <div className="text-lg font-bold text-[#c084fc] truncate">
+              <div className="stat-card">
+                <div className="stat-card-label">Top Service</div>
+                <div className="text-base font-bold truncate" style={{ color: "var(--accent)" }}>
                   {summary?.top_services?.[0]?.service || "—"}
                 </div>
-                <div className="text-xs text-slate-500 mt-1">
+                <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
                   ${(summary?.top_services?.[0]?.cost || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })}
                 </div>
               </div>
-              <div className="card p-5">
-                <div className="text-xs text-slate-400 mb-1">Accounts</div>
-                <div className="text-2xl font-bold text-emerald-400">{ct?.sub_accounts?.length || 0}</div>
-                <div className="text-xs text-slate-500 mt-1">sub-accounts tracked</div>
+              <div className="stat-card">
+                <div className="stat-card-label">Sub-accounts</div>
+                <div className="stat-card-value" style={{ color: "var(--success)" }}>
+                  {ct?.sub_accounts?.length || 0}
+                </div>
+                <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>tracked accounts</div>
               </div>
             </div>
 
             {/* Daily trend chart */}
             {summary?.daily_trend?.length > 0 && (
-              <div className="card p-6 mb-8">
-                <h3 className="text-sm font-semibold text-white mb-4">Daily Cost Trend</h3>
+              <div className="card p-5 mb-6">
+                <h3 className="text-sm font-bold mb-4" style={{ color: "var(--text-primary)" }}>Daily Cost Trend</h3>
                 <ResponsiveContainer width="100%" height={200}>
                   <BarChart data={summary.daily_trend}>
-                    <XAxis dataKey="date" tick={{ fill: "#4a5578", fontSize: 10 }} tickFormatter={(v) => v.slice(5)} />
-                    <YAxis tick={{ fill: "#4a5578", fontSize: 10 }} tickFormatter={(v) => `$${v}`} />
+                    <XAxis dataKey="date" tick={{ fill: "#8a9ab0", fontSize: 10 }} tickFormatter={(v) => v.slice(5)} />
+                    <YAxis tick={{ fill: "#8a9ab0", fontSize: 10 }} tickFormatter={(v) => `$${v}`} />
                     <Tooltip
-                      contentStyle={{ background: "#0d1424", border: "1px solid rgba(124,58,237,0.3)", borderRadius: 8 }}
-                      labelStyle={{ color: "#94a3c4" }}
+                      contentStyle={{ background: "white", border: "1px solid var(--border)", borderRadius: 6, boxShadow: "var(--shadow-md)" }}
+                      labelStyle={{ color: "var(--text-primary)", fontWeight: 600 }}
                       formatter={(v: any) => [`$${Number(v).toFixed(2)}`, "Cost"]}
                     />
                     <Bar dataKey="cost" radius={[4, 4, 0, 0]}>
                       {summary.daily_trend.map((_: any, i: number) => (
-                        <Cell key={i} fill={COLORS[i % COLORS.length]} fillOpacity={0.8} />
+                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
                       ))}
                     </Bar>
                   </BarChart>
@@ -156,48 +159,60 @@ export default function CTDetailPage() {
 
             {/* Per-account table */}
             <div className="card overflow-hidden">
-              <div className="px-6 py-4 border-b border-[#7c3aed]/10 flex items-center gap-2">
-                <Users className="w-4 h-4 text-[#94a3c4]" />
-                <h3 className="text-sm font-semibold text-white">Account Cost Breakdown</h3>
+              <div className="px-5 py-4 flex items-center gap-2" style={{ borderBottom: "1px solid var(--border)", background: "#f8fafc" }}>
+                <Users className="w-4 h-4" style={{ color: "var(--text-secondary)" }} />
+                <h3 className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>Account Cost Breakdown</h3>
               </div>
               <table className="w-full">
                 <thead>
-                  <tr className="border-b border-slate-800 bg-slate-800/30">
+                  <tr style={{ background: "#f8fafc", borderBottom: "2px solid var(--border)" }}>
                     {["Account", "Account ID", "Cost (USD)", "% of Total", ""].map((h) => (
-                      <th key={h} className="text-left px-5 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">{h}</th>
+                      <th key={h} className="text-left px-5 py-3 text-xs font-semibold uppercase tracking-wider"
+                        style={{ color: "var(--text-secondary)" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {(summary?.per_account || []).map((acc: any, i: number) => {
+                  {(summary?.per_account || []).map((acc: any) => {
                     const pct = summary.total_cost > 0 ? (acc.cost / summary.total_cost) * 100 : 0;
                     const subAcc = ct?.sub_accounts?.find((s: any) => s.aws_account_id === acc.aws_account_id);
                     return (
-                      <tr key={acc.aws_account_id} className="border-b border-slate-800/50 hover:bg-[#7c3aed]/5 transition">
+                      <tr key={acc.aws_account_id} className="transition"
+                        style={{ borderBottom: "1px solid #f0f4f8" }}
+                        onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = "var(--bg-hover)"}
+                        onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = "transparent"}>
                         <td className="px-5 py-3">
                           <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-lg bg-[#7c3aed]/15 flex items-center justify-center text-xs font-bold text-[#c084fc]">
+                            <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+                              style={{ background: "var(--primary)" }}>
                               {(acc.account_name || "?")[0].toUpperCase()}
                             </div>
-                            <span className="text-sm text-white font-medium">{acc.account_name || "Unknown"}</span>
+                            <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+                              {acc.account_name || "Unknown"}
+                            </span>
                           </div>
                         </td>
-                        <td className="px-5 py-3 text-xs font-mono text-slate-400">{acc.aws_account_id}</td>
-                        <td className="px-5 py-3 text-sm font-semibold text-[#22d3ee]">
+                        <td className="px-5 py-3 text-xs font-mono" style={{ color: "var(--text-secondary)" }}>
+                          {acc.aws_account_id}
+                        </td>
+                        <td className="px-5 py-3 text-sm font-bold font-mono" style={{ color: "var(--primary)" }}>
                           ${acc.cost.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                         <td className="px-5 py-3">
                           <div className="flex items-center gap-2">
-                            <div className="w-20 h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                              <div className="h-full rounded-full bg-gradient-to-r from-[#7c3aed] to-[#06b6d4]" style={{ width: `${pct}%` }} />
+                            <div className="w-20 h-1.5 rounded-full overflow-hidden" style={{ background: "#e2e8f0" }}>
+                              <div className="h-full rounded-full" style={{ width: `${pct}%`, background: "var(--primary)" }} />
                             </div>
-                            <span className="text-xs text-slate-400">{pct.toFixed(1)}%</span>
+                            <span className="text-xs" style={{ color: "var(--text-secondary)" }}>{pct.toFixed(1)}%</span>
                           </div>
                         </td>
                         <td className="px-5 py-3">
                           {subAcc && (
                             <Link href={`/dashboard/${ctId}/account/${subAcc.id}`}
-                              className="text-xs text-[#c084fc] hover:text-[#a855f7] transition flex items-center gap-1">
+                              className="flex items-center gap-1 text-xs font-medium transition"
+                              style={{ color: "var(--primary)" }}
+                              onMouseEnter={e => (e.currentTarget.style.color = "var(--accent)")}
+                              onMouseLeave={e => (e.currentTarget.style.color = "var(--primary)")}>
                               Details <ChevronRight className="w-3 h-3" />
                             </Link>
                           )}
