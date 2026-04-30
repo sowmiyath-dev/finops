@@ -151,8 +151,12 @@ function ReportsContent() {
   };
 
   const buildFilter = () => ({
-    control_tower_ids: selectedCTs.length ? selectedCTs : null,
-    account_ids: selectedAccounts.length ? selectedAccounts : null,
+    control_tower_ids: selectedCTs.length
+      ? towers.filter((t: any) => selectedCTs.includes(t.name)).map((t: any) => t.id)
+      : null,
+    account_ids: selectedAccounts.length
+      ? selectedAccounts.map((a) => a.match(/\(([0-9]{12})\)/)?.[1] || a)
+      : null,
     services: selectedServices.length ? selectedServices : null,
     regions: selectedRegions.length ? selectedRegions : null,
     purchase_types: selectedPurchaseTypes.length ? selectedPurchaseTypes : null,
