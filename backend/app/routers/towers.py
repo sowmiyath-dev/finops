@@ -73,7 +73,7 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual"):
             # Step 1 — discover sub-accounts
             _sync_progress[ct_id]["message"] = "Discovering accounts"
             _sync_progress[ct_id]["percent"] = 10
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             async with AsyncSessionLocal() as db:
                 result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
