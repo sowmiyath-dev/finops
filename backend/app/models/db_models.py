@@ -117,6 +117,57 @@ class AuditLog(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
 
+# ── Verticals / Owners / Applications ───────────────────────────────────────
+
+class Vertical(Base):
+    """Business unit / vertical (e.g. Lending, Insurance, EBS, L&D)."""
+    __tablename__ = "verticals"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, nullable=False, unique=True)
+    description = Column(String, nullable=True)
+    color = Column(String, default="#0f2d5e")
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class Owner(Base):
+    """Team or person owning applications within a vertical."""
+    __tablename__ = "owners"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    vertical_id = Column(UUID(as_uuid=True), ForeignKey("verticals.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String, nullable=False)
+    email = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class Application(Base):
+    """Project / application grouping resources across clouds."""
+    __tablename__ = "applications"
+    __table_args__ = (Index("ix_app_owner", "owner_id"),)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id = Column(UUID(as_uuid=True), ForeignKey("owners.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    color = Column(String, default="#0f2d5e")
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class ApplicationResource(Base):
+    """Resources (any cloud) assigned to an application."""
+    __tablename__ = "application_resources"
+    __table_args__ = (
+        Index("ix_appres_app", "application_id"),
+        Index("ix_appres_resource", "resource_id"),
+    )
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    application_id = Column(UUID(as_uuid=True), ForeignKey("applications.id", ondelete="CASCADE"), nullable=False)
+    resource_id = Column(String, nullable=False)
+    resource_name = Column(String, nullable=True)
+    cloud_provider = Column(String, nullable=False, default="aws")  # aws | azure | gcp
+    aws_account_id = Column(String, nullable=True)
+    service = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
 class CustomTag(Base):
     """Application-level custom tags — not linked to AWS resource tags."""
     __tablename__ = "custom_tags"

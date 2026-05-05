@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.models.database import init_db, AsyncSessionLocal
 from app.models.db_models import ControlTower
-from app.routers import auth, towers, reports, admin, tags
+from app.routers import auth, towers, reports, admin, tags, verticals
 from sqlalchemy import select
 
 logging.basicConfig(level=logging.INFO)
@@ -25,6 +25,7 @@ app.include_router(towers.router, prefix="/api")
 app.include_router(reports.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 app.include_router(tags.router, prefix="/api")
+app.include_router(verticals.router, prefix="/api")
 
 _scheduler_tasks: set = set()
 

@@ -2,12 +2,16 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useAuthStore } from "@/store/authStore";
+import axios from "axios";
 import {
   Building2, Cloud, BarChart2, Tag, Bell, Settings,
   ChevronRight, ChevronDown, Pin, PinOff, Menu, X,
   Users, Mail, AlertTriangle, Zap, Globe, DollarSign,
-  LayoutDashboard, TrendingUp, Calendar, Clock,
+  LayoutDashboard, TrendingUp, Calendar, Clock, Layers,
 } from "lucide-react";
+
+const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 interface NavItem {
   id: string;
@@ -26,16 +30,7 @@ const NAV_ITEMS: NavItem[] = [
     icon: Building2,
     children: [
       { id: "org-overview", label: "Overview", icon: LayoutDashboard, href: "/org" },
-      {
-        id: "org-dashboard",
-        label: "Dashboards",
-        icon: BarChart2,
-        children: [
-          { id: "dash-monthly", label: "Monthly Cost", icon: Calendar, href: "/org/dashboard/monthly" },
-          { id: "dash-weekly",  label: "Weekly Cost",  icon: TrendingUp, href: "/org/dashboard/weekly" },
-          { id: "dash-daily",   label: "Daily Cost",   icon: Clock,      href: "/org/dashboard/daily" },
-        ],
-      },
+      { id: "org-dashboard", label: "Dashboards", icon: BarChart2, href: "/org/dashboard" },
       {
         id: "clouds",
         label: "Clouds",
@@ -72,6 +67,14 @@ const NAV_ITEMS: NavItem[] = [
           },
         ],
       },
+    ],
+  },
+  {
+    id: "verticals",
+    label: "Verticals",
+    icon: Layers,
+    children: [
+      { id: "verticals-all", label: "All Verticals", icon: LayoutDashboard, href: "/verticals" },
     ],
   },
   {
@@ -209,12 +212,43 @@ function NavItemRow({
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [pinned, setPinned] = useState<Set<string>>(new Set());
+  const [navItems, setNavItems] = useState<NavItem[]>(NAV_ITEMS);
+  const { token } = useAuthStore();
 
   // Load pinned from localStorage
   useEffect(() => {
     const saved = localStorage.getItem("finoptix_pinned");
     if (saved) setPinned(new Set(JSON.parse(saved)));
   }, []);
+
+  // Load verticals dynamically
+  useEffect(() => {
+    if (!token) return;
+    axios.get(`${API}/api/verticals/`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => {
+        const verts: { id: string; name: string }[] = res.data;
+        if (verts.length === 0) return;
+        setNavItems((prev) =>
+          prev.map((item) =>
+            item.id === "verticals"
+              ? {
+                  ...item,
+                  children: [
+                    { id: "verticals-all", label: "All Verticals", icon: LayoutDashboard, href: "/verticals" },
+                    ...verts.map((v) => ({
+                      id: `vertical-${v.id}`,
+                      label: v.name,
+                      icon: Layers,
+                      href: `/verticals/${v.id}`,
+                    })),
+                  ],
+                }
+              : item
+          )
+        );
+      })
+      .catch(() => {});
+  }, [token]);
 
   const togglePin = (id: string) => {
     setPinned((prev) => {
@@ -226,8 +260,8 @@ export default function Sidebar() {
   };
 
   // Pinned items shown at top
-  const pinnedItems = NAV_ITEMS.filter((item) => pinned.has(item.id));
-  const unpinnedItems = NAV_ITEMS.filter((item) => !pinned.has(item.id));
+  const pinnedItems = navItems.filter((item) => pinned.has(item.id));
+  const unpinnedItems = navItems.filter((item) => !pinned.has(item.id));
 
   return (
     <aside
