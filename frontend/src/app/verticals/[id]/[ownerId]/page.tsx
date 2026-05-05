@@ -10,11 +10,11 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
 } from "recharts";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api").replace(/\/api$/, "");
 
 const GRANULARITY_OPTIONS = [
-  { label: "Daily", value: "daily" },
-  { label: "Weekly", value: "weekly" },
+  { label: "Daily",   value: "daily" },
+  { label: "Weekly",  value: "weekly" },
   { label: "Monthly", value: "monthly" },
 ];
 
@@ -43,14 +43,12 @@ export default function OwnerDetailPage() {
   const [granularity, setGranularity] = useState("monthly");
   const [loading, setLoading] = useState(true);
 
-  // Add App modal
   const [showAddApp, setShowAddApp] = useState(false);
   const [newAppName, setNewAppName] = useState("");
   const [newAppDesc, setNewAppDesc] = useState("");
   const [newAppColor, setNewAppColor] = useState("#0f2d5e");
   const [saving, setSaving] = useState(false);
 
-  // Add Resource modal
   const [activeAppId, setActiveAppId] = useState<string | null>(null);
   const [activeAppName, setActiveAppName] = useState("");
   const [resources, setResources] = useState<AppResource[]>([]);
@@ -64,9 +62,9 @@ export default function OwnerDetailPage() {
     setLoading(true);
     try {
       const [vertsRes, ownersRes, costRes] = await Promise.all([
-        axios.get(`${API}/api/verticals/`, { headers }),
-        axios.get(`${API}/api/verticals/${verticalId}/owners`, { headers }),
-        axios.get(`${API}/api/verticals/${verticalId}/owners/${ownerId}/cost`, {
+        axios.get(`${BASE}/api/verticals/`, { headers }),
+        axios.get(`${BASE}/api/verticals/${verticalId}/owners`, { headers }),
+        axios.get(`${BASE}/api/verticals/${verticalId}/owners/${ownerId}/cost`, {
           headers, params: { granularity: gran },
         }),
       ]);
@@ -80,7 +78,7 @@ export default function OwnerDetailPage() {
     }
   };
 
-  useEffect(() => { load(); }, [verticalId, ownerId]);
+  useEffect(() => { load(); }, [verticalId, ownerId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleGranularity = (g: string) => { setGranularity(g); load(g); };
 
@@ -89,7 +87,7 @@ export default function OwnerDetailPage() {
     setSaving(true);
     try {
       await axios.post(
-        `${API}/api/verticals/${verticalId}/owners/${ownerId}/apps`,
+        `${BASE}/api/verticals/${verticalId}/owners/${ownerId}/apps`,
         { name: newAppName.trim(), description: newAppDesc.trim() || null, color: newAppColor },
         { headers }
       );
@@ -100,14 +98,14 @@ export default function OwnerDetailPage() {
 
   const deleteApp = async (appId: string) => {
     if (!confirm("Delete this application and all its resources?")) return;
-    await axios.delete(`${API}/api/verticals/apps/${appId}`, { headers });
+    await axios.delete(`${BASE}/api/verticals/apps/${appId}`, { headers });
     await load();
   };
 
   const openResources = async (appId: string, appName: string) => {
     setActiveAppId(appId);
     setActiveAppName(appName);
-    const res = await axios.get(`${API}/api/verticals/apps/${appId}/resources`, { headers });
+    const res = await axios.get(`${BASE}/api/verticals/apps/${appId}/resources`, { headers });
     setResources(res.data);
   };
 
@@ -116,29 +114,28 @@ export default function OwnerDetailPage() {
     setAddingResource(true);
     try {
       const ids = newResourceIds.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
-      await axios.post(`${API}/api/verticals/apps/${activeAppId}/resources`, {
+      await axios.post(`${BASE}/api/verticals/apps/${activeAppId}/resources`, {
         resource_ids: ids,
         cloud_provider: newCloud,
         aws_account_id: newAccountId.trim() || null,
         service: newService.trim() || null,
       }, { headers });
       setNewResourceIds(""); setNewAccountId(""); setNewService("");
-      const res = await axios.get(`${API}/api/verticals/apps/${activeAppId}/resources`, { headers });
+      const res = await axios.get(`${BASE}/api/verticals/apps/${activeAppId}/resources`, { headers });
       setResources(res.data);
       await load();
     } finally { setAddingResource(false); }
   };
 
   const removeResource = async (appId: string, resourceId: string) => {
-    await axios.delete(`${API}/api/verticals/apps/${appId}/resources/${encodeURIComponent(resourceId)}`, { headers });
-    const res = await axios.get(`${API}/api/verticals/apps/${appId}/resources`, { headers });
+    await axios.delete(`${BASE}/api/verticals/apps/${appId}/resources/${encodeURIComponent(resourceId)}`, { headers });
+    const res = await axios.get(`${BASE}/api/verticals/apps/${appId}/resources`, { headers });
     setResources(res.data);
     await load();
   };
 
   const totalCost = appCosts.reduce((s, a) => s + a.total_cost, 0);
 
-  // Build chart data
   const trendMap: Record<string, Record<string, number>> = {};
   appCosts.forEach((a) => {
     a.trend.forEach((t) => {
@@ -156,7 +153,6 @@ export default function OwnerDetailPage() {
 
   return (
     <div className="p-6">
-      {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-xs text-black mb-4">
         <button onClick={() => router.push("/verticals")} className="hover:text-blue-900">Verticals</button>
         <ChevronRight className="w-3 h-3 text-gray-400" />
@@ -165,7 +161,6 @@ export default function OwnerDetailPage() {
         <span className="font-bold text-black">{owner?.name}</span>
       </div>
 
-      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-base"
@@ -193,7 +188,6 @@ export default function OwnerDetailPage() {
         </div>
       </div>
 
-      {/* KPI */}
       <div className="grid grid-cols-2 gap-4 mb-6">
         <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5">
           <div className="flex items-center gap-2 mb-2">
@@ -213,7 +207,6 @@ export default function OwnerDetailPage() {
         </div>
       </div>
 
-      {/* Chart */}
       {chartData.length > 0 && (
         <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5 mb-6">
           <h2 className="text-sm font-bold text-black mb-4">
@@ -234,7 +227,6 @@ export default function OwnerDetailPage() {
         </div>
       )}
 
-      {/* Applications table */}
       <div className="bg-white rounded-lg border border-gray-300 shadow-sm">
         <div className="px-5 py-3 border-b border-gray-200">
           <h2 className="text-sm font-bold text-black">Applications</h2>
@@ -286,7 +278,6 @@ export default function OwnerDetailPage() {
         )}
       </div>
 
-      {/* Add Application Modal */}
       {showAddApp && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg border border-gray-300 shadow-lg w-full max-w-md p-6">
@@ -327,7 +318,6 @@ export default function OwnerDetailPage() {
         </div>
       )}
 
-      {/* Resources Modal */}
       {activeAppId && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg border border-gray-300 shadow-lg w-full max-w-2xl p-6 max-h-[80vh] overflow-y-auto">
@@ -335,8 +325,6 @@ export default function OwnerDetailPage() {
               <h3 className="text-sm font-bold text-black">Resources — {activeAppName}</h3>
               <button onClick={() => setActiveAppId(null)}><X className="w-4 h-4 text-black" /></button>
             </div>
-
-            {/* Add resources */}
             <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 mb-4">
               <p className="text-xs font-bold uppercase tracking-wide text-black mb-3">Add Resources</p>
               <div className="grid grid-cols-2 gap-3 mb-3">
@@ -366,15 +354,13 @@ export default function OwnerDetailPage() {
                 <label className="text-xs font-bold text-black block mb-1">Resource IDs (one per line or comma-separated)</label>
                 <textarea value={newResourceIds} onChange={(e) => setNewResourceIds(e.target.value)} rows={3}
                   className="w-full border border-gray-400 rounded-md px-3 py-2 text-sm font-mono text-black focus:border-blue-900 outline-none"
-                  placeholder="i-0abc123&#10;i-0def456" />
+                  placeholder={"i-0abc123\ni-0def456"} />
               </div>
               <button onClick={addResources} disabled={addingResource || !newResourceIds.trim()}
                 className="px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold rounded-md transition disabled:opacity-50">
                 {addingResource ? "Adding..." : "Add Resources"}
               </button>
             </div>
-
-            {/* Resource list */}
             {resources.length === 0 ? (
               <p className="text-xs text-black text-center py-4">No resources assigned yet</p>
             ) : (

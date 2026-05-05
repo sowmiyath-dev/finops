@@ -10,7 +10,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api").replace(/\/api$/, "");
 
 const GRANULARITY_OPTIONS = [
   { label: "Daily", value: "daily" },
@@ -45,9 +45,9 @@ export default function VerticalDetailPage() {
     setLoading(true);
     try {
       const [vertsRes, ownersRes, costRes] = await Promise.all([
-        axios.get(`${API}/api/verticals/`, { headers }),
-        axios.get(`${API}/api/verticals/${id}/owners`, { headers }),
-        axios.get(`${API}/api/verticals/${id}/cost`, { headers, params: { granularity: gran } }),
+        axios.get(`${BASE}/api/verticals/`, { headers }),
+        axios.get(`${BASE}/api/verticals/${id}/owners`, { headers }),
+        axios.get(`${BASE}/api/verticals/${id}/cost`, { headers, params: { granularity: gran } }),
       ]);
       const v = (vertsRes.data as any[]).find((x: any) => x.id === id);
       setVertical(v || null);
@@ -66,7 +66,7 @@ export default function VerticalDetailPage() {
     if (!newOwnerName.trim()) return;
     setSaving(true);
     try {
-      await axios.post(`${API}/api/verticals/${id}/owners`, { name: newOwnerName.trim(), email: newOwnerEmail.trim() || null }, { headers });
+      await axios.post(`${BASE}/api/verticals/${id}/owners`, { name: newOwnerName.trim(), email: newOwnerEmail.trim() || null }, { headers });
       setNewOwnerName(""); setNewOwnerEmail(""); setShowAddOwner(false);
       await load();
     } finally { setSaving(false); }
@@ -74,7 +74,7 @@ export default function VerticalDetailPage() {
 
   const deleteOwner = async (ownerId: string) => {
     if (!confirm("Delete this owner and all their applications?")) return;
-    await axios.delete(`${API}/api/verticals/${id}/owners/${ownerId}`, { headers });
+    await axios.delete(`${BASE}/api/verticals/${id}/owners/${ownerId}`, { headers });
     await load();
   };
 

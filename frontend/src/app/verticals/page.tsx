@@ -5,7 +5,7 @@ import axios from "axios";
 import { useAuthStore } from "@/store/authStore";
 import { Layers, Users, Box, DollarSign, ChevronRight, Plus, RefreshCw } from "lucide-react";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api").replace(/\/api$/, "");
 
 const VERTICAL_COLORS: Record<string, string> = {
   Lending: "#0f2d5e",
@@ -48,7 +48,7 @@ export default function VerticalsPage() {
     const g = gran ?? granularity;
     setLoading(true);
     try {
-      const vertsRes = await axios.get(`${API}/api/verticals/`, { headers: getHeaders() });
+      const vertsRes = await axios.get(`${BASE}/api/verticals/`, { headers: getHeaders() });
       const verts: VerticalItem[] = vertsRes.data;
       setVerticals(verts);
 
@@ -57,7 +57,7 @@ export default function VerticalsPage() {
         await Promise.all(
           verts.map(async (v) => {
             try {
-              const res = await axios.get(`${API}/api/verticals/${v.id}/cost`, {
+              const res = await axios.get(`${BASE}/api/verticals/${v.id}/cost`, {
                 headers: getHeaders(),
                 params: { granularity: g },
               });
@@ -84,7 +84,7 @@ export default function VerticalsPage() {
   const seed = async () => {
     setSeeding(true);
     try {
-      await axios.post(`${API}/api/verticals/seed`, {}, { headers: getHeaders() });
+      await axios.post(`${BASE}/api/verticals/seed`, {}, { headers: getHeaders() });
       await load(granularity);
     } catch (err: any) {
       console.error("Seed failed", err?.response?.data || err);
