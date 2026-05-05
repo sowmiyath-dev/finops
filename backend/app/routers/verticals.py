@@ -7,7 +7,7 @@ from datetime import date, timedelta
 
 from app.models.database import get_db
 from app.models.db_models import (
-    User, Vertical, Owner, Application, ApplicationResource, CostRecord, ResourceTagMapping
+    User, Vertical, Owner, Application, ApplicationResource, CostRecord
 )
 from app.services.auth_service import get_current_user
 
@@ -81,6 +81,28 @@ async def _cost_for_resources(
     )
     rows = (await db.execute(stmt)).all()
     return [{"period": str(r.period), "cost": float(r.cost or 0)} for r in rows]
+
+
+# ── Seed default verticals (must be before /{vertical_id} routes) ────────────
+
+@router.post("/seed", status_code=201)
+async def seed_verticals(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    """Seed the 4 default verticals if they don't exist."""
+    defaults = [
+        {"name": "Lending",   "color": "#0f2d5e"},
+        {"name": "Insurance", "color": "#1d8348"},
+        {"name": "EBS",       "color": "#ec7211"},
+        {"name": "L&D",       "color": "#8e44ad"},
+    ]
+    created = []
+    for d in defaults:
+        exists = (await db.execute(select(Vertical).where(Vertical.name == d["name"]))).scalar_one_or_none()
+        if not exists:
+            v = Vertical(name=d["name"], color=d["color"])
+            db.add(v)
+            created.append(d["name"])
+    await db.commit()
+    return {"seeded": created}
 
 
 # ── Vertical CRUD ─────────────────────────────────────────────────────────────
@@ -279,14 +301,6 @@ async def vertical_cost(
             )).scalars().all()
             all_resource_ids.extend(res)
 
-        # Also include resources tagged via custom tags where tag_key="Application" and tag_value=app.name
-        for app in apps:
-            tagged = (await db.execute(
-                select(ResourceTagMapping.resource_id)
-                .join(ResourceTagMapping.__table__)
-                .where(ResourceTagMapping.resource_id.isnot(None))
-            )).scalars().all()
-
         trend = await _cost_for_resources(db, list(set(all_resource_ids)), start, end, granularity)
         total = sum(p["cost"] for p in trend)
         result.append({
@@ -385,25 +399,4 @@ async def app_cost(
     }
 
 
-# ── Seed default verticals ────────────────────────────────────────────────────
 
-@router.post("/seed", status_code=201)
-async def seed_verticals(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    """Seed the 4 default verticals if they don't exist."""
-    if user.role not in ("owner", "editor"):
-        raise HTTPException(403)
-    defaults = [
-        {"name": "Lending", "color": "#0f2d5e"},
-        {"name": "Insurance", "color": "#1d8348"},
-        {"name": "EBS", "color": "#ec7211"},
-        {"name": "L&D", "color": "#8e44ad"},
-    ]
-    created = []
-    for d in defaults:
-        exists = (await db.execute(select(Vertical).where(Vertical.name == d["name"]))).scalar_one_or_none()
-        if not exists:
-            v = Vertical(name=d["name"], color=d["color"])
-            db.add(v)
-            created.append(d["name"])
-    await db.commit()
-    return {"seeded": created}
