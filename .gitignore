@@ -33,3 +33,6 @@ pgdata/
 
 # Local work log (not for GitHub)
 work log/
+
+# Local deployment notes
+How to deploy this in each Control tower.txt
