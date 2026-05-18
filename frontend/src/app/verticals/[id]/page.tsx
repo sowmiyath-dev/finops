@@ -39,6 +39,9 @@ export default function VerticalDetailPage() {
   const [costData, setCostData] = useState<OwnerCost[]>([]);
   const [taggedCount, setTaggedCount] = useState(0);
   const [granularity, setGranularity] = useState("monthly");
+  const [dateMode, setDateMode] = useState<"preset" | "custom">("preset");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
   const [loading, setLoading] = useState(true);
 
   // Add Owner modal
@@ -57,13 +60,16 @@ export default function VerticalDetailPage() {
   const [tagging, setTagging] = useState(false);
   const [serviceFilter, setServiceFilter] = useState("");
 
-  const load = async (gran = granularity) => {
+  const load = async (gran = granularity, start?: string, end?: string) => {
     setLoading(true);
     try {
+      const params: any = { granularity: gran };
+      if (start) params.start_date = start;
+      if (end) params.end_date = end;
       const [vertsRes, ownersRes, costRes] = await Promise.all([
         axios.get(`${BASE}/api/verticals/`, { headers }),
         axios.get(`${BASE}/api/verticals/${id}/owners`, { headers }),
-        axios.get(`${BASE}/api/verticals/${id}/cost`, { headers, params: { granularity: gran } }),
+        axios.get(`${BASE}/api/verticals/${id}/cost`, { headers, params }),
       ]);
       const v = (vertsRes.data as any[]).find((x: any) => x.id === id);
       setVertical(v || null);
@@ -77,7 +83,11 @@ export default function VerticalDetailPage() {
 
   useEffect(() => { load(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleGranularity = (g: string) => { setGranularity(g); load(g); };
+  const handleGranularity = (g: string) => { setGranularity(g); load(g, customStart || undefined, customEnd || undefined); };
+
+  const handleCustomDate = () => {
+    if (customStart && customEnd) load(granularity, customStart, customEnd);
+  };
 
   const addOwner = async () => {
     if (!newOwnerName.trim()) return;
@@ -229,7 +239,8 @@ export default function VerticalDetailPage() {
             <p className="text-xs text-black">{owners.length} owners · {assignedOwners.reduce((s, o) => s + o.app_count, 0)} applications</p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Granularity */}
           <div className="flex border border-gray-300 rounded-md overflow-hidden">
             {GRANULARITY_OPTIONS.map((g) => (
               <button key={g.value} onClick={() => handleGranularity(g.value)}
@@ -238,6 +249,34 @@ export default function VerticalDetailPage() {
               </button>
             ))}
           </div>
+
+          {/* Date mode toggle */}
+          <div className="flex border border-gray-300 rounded-md overflow-hidden">
+            <button onClick={() => { setDateMode("preset"); setCustomStart(""); setCustomEnd(""); load(granularity); }}
+              className={`px-3 py-2 text-xs font-bold transition ${dateMode === "preset" ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-gray-50"}`}>
+              Preset
+            </button>
+            <button onClick={() => setDateMode("custom")}
+              className={`px-3 py-2 text-xs font-bold transition ${dateMode === "custom" ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-gray-50"}`}>
+              Custom
+            </button>
+          </div>
+
+          {/* Custom date inputs */}
+          {dateMode === "custom" && (
+            <div className="flex items-center gap-2">
+              <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)}
+                className="border border-gray-400 rounded-md px-3 py-2 text-xs text-black focus:border-blue-900 outline-none" />
+              <span className="text-xs text-black font-semibold">to</span>
+              <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)}
+                className="border border-gray-400 rounded-md px-3 py-2 text-xs text-black focus:border-blue-900 outline-none" />
+              <button onClick={handleCustomDate} disabled={!customStart || !customEnd}
+                className="px-3 py-2 bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold rounded-md transition disabled:opacity-50">
+                Apply
+              </button>
+            </div>
+          )}
+
           <button onClick={openBulkTag}
             className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-md transition">
             <Tag className="w-3.5 h-3.5" /> Tag Resources by Account
