@@ -7,7 +7,8 @@ from datetime import date, timedelta
 
 from app.models.database import get_db
 from app.models.db_models import (
-    User, Vertical, Owner, Application, ApplicationResource, CostRecord
+    User, Vertical, Owner, Application, ApplicationResource, CostRecord,
+    CustomTag, ResourceTagMapping
 )
 from app.services.auth_service import get_current_user
 
@@ -37,6 +38,12 @@ class AppResourceAssign(BaseModel):
     service: Optional[str] = None
     resource_name: Optional[str] = None
 
+class BulkTagByAccount(BaseModel):
+    vertical_id: str
+    aws_account_id: str
+    resource_ids: list[str]
+    cloud_provider: str = "aws"
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -48,6 +55,18 @@ def _date_range(granularity: str) -> tuple[date, date]:
         return today - timedelta(weeks=12), today
     else:
         return today.replace(month=1, day=1), today
+
+
+async def _tagged_resource_ids_for_vertical(db: AsyncSession, vertical_name: str) -> list[str]:
+    rows = (await db.execute(
+        select(ResourceTagMapping.resource_id)
+        .join(CustomTag, ResourceTagMapping.custom_tag_id == CustomTag.id)
+        .where(
+            func.lower(CustomTag.tag_key) == "vertical",
+            func.lower(CustomTag.tag_value) == vertical_name.lower(),
+        )
+    )).scalars().all()
+    return list(set(rows))
 
 
 async def _cost_for_resources(
@@ -81,10 +100,8 @@ async def _cost_for_resources(
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# STATIC ROUTES FIRST — must come before any /{param} routes
+# STATIC ROUTES FIRST
 # ═════════════════════════════════════════════════════════════════════════════
-
-# ── Seed ─────────────────────────────────────────────────────────────────────
 
 @router.post("/seed", status_code=201)
 async def seed_verticals(
@@ -109,7 +126,62 @@ async def seed_verticals(
     return {"seeded": created}
 
 
-# ── Application-level routes (static prefix "apps") ──────────────────────────
+@router.post("/bulk-tag-account", status_code=201)
+async def bulk_tag_account(
+    payload: BulkTagByAccount,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Find or create Vertical=<name> tag and assign all given resource IDs to it."""
+    if user.role == "viewer":
+        raise HTTPException(403)
+
+    vertical = (await db.execute(
+        select(Vertical).where(Vertical.id == payload.vertical_id)
+    )).scalar_one_or_none()
+    if not vertical:
+        raise HTTPException(404, "Vertical not found")
+
+    # Find or create the CustomTag key=Vertical value=vertical.name
+    tag = (await db.execute(
+        select(CustomTag).where(
+            func.lower(CustomTag.tag_key) == "vertical",
+            func.lower(CustomTag.tag_value) == vertical.name.lower(),
+        )
+    )).scalar_one_or_none()
+
+    if not tag:
+        tag = CustomTag(
+            tag_key="Vertical",
+            tag_value=vertical.name,
+            color=vertical.color,
+            description=f"Auto-created for vertical {vertical.name}",
+            created_by=user.id,
+        )
+        db.add(tag)
+        await db.flush()
+
+    added = 0
+    for rid in payload.resource_ids:
+        exists = (await db.execute(
+            select(ResourceTagMapping).where(
+                ResourceTagMapping.resource_id == rid,
+                ResourceTagMapping.custom_tag_id == tag.id,
+            )
+        )).scalar_one_or_none()
+        if not exists:
+            db.add(ResourceTagMapping(
+                resource_id=rid,
+                cloud_provider=payload.cloud_provider,
+                aws_account_id=payload.aws_account_id,
+                custom_tag_id=tag.id,
+                created_by=user.id,
+            ))
+            added += 1
+
+    await db.commit()
+    return {"tagged": added, "tag": f"Vertical={vertical.name}", "account": payload.aws_account_id}
+
 
 @router.get("/apps/{app_id}/cost")
 async def app_cost(
@@ -242,10 +314,8 @@ async def delete_app(
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# DYNAMIC ROUTES — /{vertical_id} and below
+# DYNAMIC ROUTES
 # ═════════════════════════════════════════════════════════════════════════════
-
-# ── Vertical CRUD ─────────────────────────────────────────────────────────────
 
 @router.get("/")
 async def list_verticals(
@@ -263,7 +333,7 @@ async def create_vertical(
     user: User = Depends(get_current_user),
 ):
     if user.role == "viewer":
-        raise HTTPException(403, "Viewers cannot create verticals")
+        raise HTTPException(403)
     v = Vertical(name=payload.name, description=payload.description, color=payload.color)
     db.add(v)
     await db.commit()
@@ -283,12 +353,10 @@ async def delete_vertical(
         select(Vertical).where(Vertical.id == vertical_id)
     )).scalar_one_or_none()
     if not v:
-        raise HTTPException(404, "Vertical not found")
+        raise HTTPException(404)
     await db.delete(v)
     await db.commit()
 
-
-# ── Vertical cost ─────────────────────────────────────────────────────────────
 
 @router.get("/{vertical_id}/cost")
 async def vertical_cost(
@@ -305,11 +373,20 @@ async def vertical_cost(
     if end_date:
         end = date.fromisoformat(end_date)
 
+    vertical = (await db.execute(
+        select(Vertical).where(Vertical.id == vertical_id)
+    )).scalar_one_or_none()
+    if not vertical:
+        raise HTTPException(404)
+
+    tagged_ids = await _tagged_resource_ids_for_vertical(db, vertical.name)
     owners = (await db.execute(
         select(Owner).where(Owner.vertical_id == vertical_id).order_by(Owner.name)
     )).scalars().all()
 
     result = []
+    owner_resource_ids = set()
+
     for owner in owners:
         apps = (await db.execute(
             select(Application).where(Application.owner_id == owner.id)
@@ -323,21 +400,80 @@ async def vertical_cost(
             )).scalars().all()
             all_resource_ids.extend(res)
 
-        trend = await _cost_for_resources(db, list(set(all_resource_ids)), start, end, granularity)
+        owner_resource_ids.update(all_resource_ids)
+        merged = list(set(all_resource_ids))
+        trend = await _cost_for_resources(db, merged, start, end, granularity)
         total = sum(p["cost"] for p in trend)
         result.append({
             "owner_id": str(owner.id),
             "owner_name": owner.name,
             "app_count": len(apps),
-            "resource_count": len(set(all_resource_ids)),
+            "resource_count": len(merged),
             "total_cost": total,
             "trend": trend,
         })
 
-    return {"vertical_id": vertical_id, "granularity": granularity, "start": str(start), "end": str(end), "owners": result}
+    unassigned_ids = [r for r in tagged_ids if r not in owner_resource_ids]
+    if unassigned_ids:
+        trend = await _cost_for_resources(db, unassigned_ids, start, end, granularity)
+        total = sum(p["cost"] for p in trend)
+        result.append({
+            "owner_id": "unassigned",
+            "owner_name": "Unassigned (via Tag)",
+            "app_count": 0,
+            "resource_count": len(unassigned_ids),
+            "total_cost": total,
+            "trend": trend,
+        })
+
+    return {
+        "vertical_id": vertical_id,
+        "granularity": granularity,
+        "start": str(start),
+        "end": str(end),
+        "tagged_resource_count": len(tagged_ids),
+        "owners": result,
+    }
 
 
-# ── Owner CRUD ────────────────────────────────────────────────────────────────
+@router.get("/{vertical_id}/tagged-resources")
+async def vertical_tagged_resources(
+    vertical_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    vertical = (await db.execute(
+        select(Vertical).where(Vertical.id == vertical_id)
+    )).scalar_one_or_none()
+    if not vertical:
+        raise HTTPException(404)
+
+    rows = (await db.execute(
+        select(
+            ResourceTagMapping.resource_id,
+            ResourceTagMapping.resource_name,
+            ResourceTagMapping.cloud_provider,
+            ResourceTagMapping.aws_account_id,
+            ResourceTagMapping.service,
+        )
+        .join(CustomTag, ResourceTagMapping.custom_tag_id == CustomTag.id)
+        .where(
+            func.lower(CustomTag.tag_key) == "vertical",
+            func.lower(CustomTag.tag_value) == vertical.name.lower(),
+        )
+    )).all()
+
+    return [
+        {
+            "resource_id": r.resource_id,
+            "resource_name": r.resource_name,
+            "cloud_provider": r.cloud_provider,
+            "aws_account_id": r.aws_account_id,
+            "service": r.service,
+        }
+        for r in rows
+    ]
+
 
 @router.get("/{vertical_id}/owners")
 async def list_owners(
@@ -364,7 +500,7 @@ async def create_owner(
         select(Vertical).where(Vertical.id == vertical_id)
     )).scalar_one_or_none()
     if not v:
-        raise HTTPException(404, "Vertical not found")
+        raise HTTPException(404)
     o = Owner(vertical_id=vertical_id, name=payload.name, email=payload.email)
     db.add(o)
     await db.commit()
@@ -385,12 +521,10 @@ async def delete_owner(
         select(Owner).where(Owner.id == owner_id, Owner.vertical_id == vertical_id)
     )).scalar_one_or_none()
     if not o:
-        raise HTTPException(404, "Owner not found")
+        raise HTTPException(404)
     await db.delete(o)
     await db.commit()
 
-
-# ── Owner cost ────────────────────────────────────────────────────────────────
 
 @router.get("/{vertical_id}/owners/{owner_id}/cost")
 async def owner_cost(
@@ -433,8 +567,6 @@ async def owner_cost(
     return {"owner_id": owner_id, "granularity": granularity, "start": str(start), "end": str(end), "apps": result}
 
 
-# ── Application CRUD ──────────────────────────────────────────────────────────
-
 @router.get("/{vertical_id}/owners/{owner_id}/apps")
 async def list_apps(
     vertical_id: str,
@@ -462,7 +594,7 @@ async def create_app(
         select(Owner).where(Owner.id == owner_id)
     )).scalar_one_or_none()
     if not o:
-        raise HTTPException(404, "Owner not found")
+        raise HTTPException(404)
     a = Application(owner_id=owner_id, name=payload.name, description=payload.description, color=payload.color)
     db.add(a)
     await db.commit()

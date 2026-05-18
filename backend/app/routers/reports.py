@@ -394,6 +394,56 @@ async def get_charge_types(db: AsyncSession = Depends(get_db), user: User = Depe
     return sorted([r[0] for r in result.all() if r[0]])
 
 
+@router.get("/meta/resources-by-account")
+async def get_resources_by_account(
+    account_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get all distinct resource IDs for a given AWS account ID."""
+    ct_ids = await _get_user_ct_ids(db, user)
+    result = await db.execute(
+        select(
+            CostRecord.resource_id,
+            CostRecord.service,
+            CostRecord.region,
+        )
+        .where(
+            CostRecord.control_tower_id.in_(ct_ids),
+            CostRecord.aws_account_id == account_id,
+            CostRecord.resource_id.isnot(None),
+            CostRecord.resource_id != "",
+        )
+        .group_by(CostRecord.resource_id, CostRecord.service, CostRecord.region)
+        .order_by(CostRecord.service, CostRecord.resource_id)
+        .limit(2000)
+    )
+    rows = result.all()
+    return [
+        {"resource_id": r.resource_id, "service": r.service, "region": r.region or ""}
+        for r in rows
+    ]
+
+
+@router.get("/meta/accounts")
+async def get_accounts(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get all distinct account IDs and names."""
+    ct_ids = await _get_user_ct_ids(db, user)
+    result = await db.execute(
+        select(CostRecord.aws_account_id, CostRecord.account_name)
+        .where(CostRecord.control_tower_id.in_(ct_ids))
+        .group_by(CostRecord.aws_account_id, CostRecord.account_name)
+        .order_by(CostRecord.account_name)
+    )
+    return [
+        {"aws_account_id": r.aws_account_id, "account_name": r.account_name or r.aws_account_id}
+        for r in result.all()
+    ]
+
+
 @router.get("/data-boundary")
 async def data_boundary():
     """Returns the most recent date for which cost data is accurate."""
