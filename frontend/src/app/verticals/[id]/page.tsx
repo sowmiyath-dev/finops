@@ -38,6 +38,7 @@ export default function VerticalDetailPage() {
   const [owners, setOwners] = useState<Owner[]>([]);
   const [costData, setCostData] = useState<OwnerCost[]>([]);
   const [taggedCount, setTaggedCount] = useState(0);
+  const [taggedAccounts, setTaggedAccounts] = useState<{aws_account_id: string; account_name: string; resource_count: number}[]>([]);
   const [granularity, setGranularity] = useState("monthly");
   const [dateMode, setDateMode] = useState<"preset" | "custom">("preset");
   const [customStart, setCustomStart] = useState("");
@@ -66,16 +67,18 @@ export default function VerticalDetailPage() {
       const params: any = { granularity: gran };
       if (start) params.start_date = start;
       if (end) params.end_date = end;
-      const [vertsRes, ownersRes, costRes] = await Promise.all([
+      const [vertsRes, ownersRes, costRes, taggedAcctsRes] = await Promise.all([
         axios.get(`${BASE}/api/verticals/`, { headers }),
         axios.get(`${BASE}/api/verticals/${id}/owners`, { headers }),
         axios.get(`${BASE}/api/verticals/${id}/cost`, { headers, params }),
+        axios.get(`${BASE}/api/verticals/${id}/tagged-accounts`, { headers }),
       ]);
       const v = (vertsRes.data as any[]).find((x: any) => x.id === id);
       setVertical(v || null);
       setOwners(ownersRes.data);
       setCostData(costRes.data.owners || []);
       setTaggedCount(costRes.data.tagged_resource_count || 0);
+      setTaggedAccounts(taggedAcctsRes.data || []);
     } finally {
       setLoading(false);
     }
@@ -413,6 +416,41 @@ export default function VerticalDetailPage() {
           </table>
         )}
       </div>
+
+      {/* Tagged Accounts */}
+      {taggedAccounts.length > 0 && (
+        <div className="bg-white rounded-lg border border-gray-300 shadow-sm mt-6">
+          <div className="px-5 py-3 border-b border-gray-200 flex items-center gap-2">
+            <Tag className="w-4 h-4 text-orange-600" />
+            <h2 className="text-sm font-bold text-black">Tagged Accounts</h2>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-orange-100 text-orange-800 border border-orange-300 ml-1">
+              Vertical = {vertical?.name}
+            </span>
+          </div>
+          <table className="w-full">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                {["Account ID", "Account Name", "Tagged Resources"].map((h) => (
+                  <th key={h} className="text-left text-xs font-bold uppercase tracking-wider text-black px-5 py-3">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {taggedAccounts.map((a) => (
+                <tr key={a.aws_account_id} className="border-b border-gray-200 hover:bg-blue-50 transition">
+                  <td className="px-5 py-3 text-xs font-mono font-bold text-black">{a.aws_account_id}</td>
+                  <td className="px-5 py-3 text-sm font-semibold text-black">{a.account_name}</td>
+                  <td className="px-5 py-3">
+                    <span className="text-xs font-bold px-2 py-1 rounded bg-orange-100 text-orange-800 border border-orange-200">
+                      {a.resource_count} resources
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Add Owner Modal */}
       {showAddOwner && (

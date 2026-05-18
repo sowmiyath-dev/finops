@@ -99,6 +99,45 @@ async def _cost_for_resources(
     return [{"period": str(r.period), "cost": float(r.cost or 0)} for r in rows]
 
 
+async def _cost_for_resources_and_accounts(
+    db: AsyncSession,
+    resource_ids: list[str],
+    account_ids: list[str],
+    start: date,
+    end: date,
+    granularity: str,
+) -> list[dict]:
+    """Sum cost for given resource IDs PLUS all records for given account IDs.
+    This captures account-level charges (support, tax, credits) with no resource_id.
+    """
+    from sqlalchemy import or_
+    if not resource_ids and not account_ids:
+        return []
+    if granularity == "monthly":
+        period_expr = func.to_char(CostRecord.date, "YYYY-MM").label("period")
+    elif granularity == "weekly":
+        period_expr = func.to_char(func.date_trunc("week", CostRecord.date), "YYYY-MM-DD").label("period")
+    else:
+        period_expr = func.cast(CostRecord.date, CostRecord.date.type).label("period")
+
+    conditions = [CostRecord.date >= start, CostRecord.date <= end]
+    clauses = []
+    if resource_ids:
+        clauses.append(CostRecord.resource_id.in_(resource_ids))
+    if account_ids:
+        clauses.append(CostRecord.aws_account_id.in_(account_ids))
+    conditions.append(or_(*clauses))
+
+    stmt = (
+        select(period_expr, func.sum(CostRecord.unblended_cost).label("cost"))
+        .where(*conditions)
+        .group_by("period")
+        .order_by("period")
+    )
+    rows = (await db.execute(stmt)).all()
+    return [{"period": str(r.period), "cost": float(r.cost or 0)} for r in rows]
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # STATIC ROUTES FIRST
 # ═════════════════════════════════════════════════════════════════════════════
@@ -380,6 +419,20 @@ async def vertical_cost(
         raise HTTPException(404)
 
     tagged_ids = await _tagged_resource_ids_for_vertical(db, vertical.name)
+
+    # Get tagged account IDs so we can include account-level charges (null resource_id)
+    tagged_account_ids = list(set(
+        (await db.execute(
+            select(ResourceTagMapping.aws_account_id)
+            .join(CustomTag, ResourceTagMapping.custom_tag_id == CustomTag.id)
+            .where(
+                func.lower(CustomTag.tag_key) == "vertical",
+                func.lower(CustomTag.tag_value) == vertical.name.lower(),
+                ResourceTagMapping.aws_account_id.isnot(None),
+            )
+        )).scalars().all()
+    ))
+
     owners = (await db.execute(
         select(Owner).where(Owner.vertical_id == vertical_id).order_by(Owner.name)
     )).scalars().all()
@@ -413,9 +466,12 @@ async def vertical_cost(
             "trend": trend,
         })
 
+    # Unassigned: tagged resources not under any owner + account-level charges
     unassigned_ids = [r for r in tagged_ids if r not in owner_resource_ids]
-    if unassigned_ids:
-        trend = await _cost_for_resources(db, unassigned_ids, start, end, granularity)
+    if unassigned_ids or tagged_account_ids:
+        trend = await _cost_for_resources_and_accounts(
+            db, unassigned_ids, tagged_account_ids, start, end, granularity
+        )
         total = sum(p["cost"] for p in trend)
         result.append({
             "owner_id": "unassigned",
@@ -432,8 +488,59 @@ async def vertical_cost(
         "start": str(start),
         "end": str(end),
         "tagged_resource_count": len(tagged_ids),
+        "tagged_account_ids": tagged_account_ids,
         "owners": result,
     }
+
+
+@router.get("/{vertical_id}/tagged-accounts")
+async def vertical_tagged_accounts(
+    vertical_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """List all distinct accounts that have resources tagged to this vertical."""
+    vertical = (await db.execute(
+        select(Vertical).where(Vertical.id == vertical_id)
+    )).scalar_one_or_none()
+    if not vertical:
+        raise HTTPException(404)
+
+    rows = (await db.execute(
+        select(
+            ResourceTagMapping.aws_account_id,
+            func.count(ResourceTagMapping.id).label("resource_count"),
+        )
+        .join(CustomTag, ResourceTagMapping.custom_tag_id == CustomTag.id)
+        .where(
+            func.lower(CustomTag.tag_key) == "vertical",
+            func.lower(CustomTag.tag_value) == vertical.name.lower(),
+            ResourceTagMapping.aws_account_id.isnot(None),
+        )
+        .group_by(ResourceTagMapping.aws_account_id)
+        .order_by(ResourceTagMapping.aws_account_id)
+    )).all()
+
+    # Get account names from cost_records
+    account_names = {}
+    if rows:
+        acct_ids = [r.aws_account_id for r in rows]
+        name_rows = (await db.execute(
+            select(CostRecord.aws_account_id, CostRecord.account_name)
+            .where(CostRecord.aws_account_id.in_(acct_ids))
+            .group_by(CostRecord.aws_account_id, CostRecord.account_name)
+        )).all()
+        for nr in name_rows:
+            account_names[nr.aws_account_id] = nr.account_name
+
+    return [
+        {
+            "aws_account_id": r.aws_account_id,
+            "account_name": account_names.get(r.aws_account_id, r.aws_account_id),
+            "resource_count": r.resource_count,
+        }
+        for r in rows
+    ]
 
 
 @router.get("/{vertical_id}/tagged-resources")
