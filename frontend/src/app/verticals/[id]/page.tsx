@@ -26,7 +26,7 @@ interface OwnerCost {
   trend: { period: string; cost: number }[];
 }
 interface Account { aws_account_id: string; account_name: string; }
-interface Resource { resource_id: string; service: string; region: string; }
+interface Resource { resource_id: string; service: string; region: string; account_id?: string; }
 
 export default function VerticalDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -50,7 +50,7 @@ export default function VerticalDetailPage() {
   // Bulk tag modal
   const [showBulkTag, setShowBulkTag] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [selectedAccount, setSelectedAccount] = useState("");
+  const [selectedAccounts, setSelectedAccounts] = useState<Set<string>>(new Set());
   const [accountResources, setAccountResources] = useState<Resource[]>([]);
   const [selectedResources, setSelectedResources] = useState<Set<string>>(new Set());
   const [loadingResources, setLoadingResources] = useState(false);
@@ -101,7 +101,7 @@ export default function VerticalDetailPage() {
   // Bulk tag handlers
   const openBulkTag = async () => {
     setShowBulkTag(true);
-    setSelectedAccount("");
+    setSelectedAccounts(new Set());
     setAccountResources([]);
     setSelectedResources(new Set());
     setServiceFilter("");
@@ -109,19 +109,34 @@ export default function VerticalDetailPage() {
     setAccounts(res.data);
   };
 
-  const loadAccountResources = async (accountId: string) => {
-    if (!accountId) return;
+  const loadAccountResources = async (accountIds: Set<string>) => {
+    if (accountIds.size === 0) return;
     setLoadingResources(true);
     setSelectedResources(new Set());
     try {
-      const res = await axios.get(`${BASE}/api/reports/meta/resources-by-account`, {
-        headers,
-        params: { account_id: accountId },
-      });
-      setAccountResources(res.data);
+      const results = await Promise.all(
+        Array.from(accountIds).map((aid) =>
+          axios.get(`${BASE}/api/reports/meta/resources-by-account`, {
+            headers,
+            params: { account_id: aid },
+          }).then((r) => (r.data as Resource[]).map((res) => ({ ...res, account_id: aid })))
+        )
+      );
+      // Merge and deduplicate by resource_id
+      const merged = new Map<string, Resource>();
+      results.flat().forEach((r) => merged.set(r.resource_id, r));
+      setAccountResources(Array.from(merged.values()));
     } finally {
       setLoadingResources(false);
     }
+  };
+
+  const toggleAccount = (aid: string) => {
+    setSelectedAccounts((prev) => {
+      const next = new Set(prev);
+      next.has(aid) ? next.delete(aid) : next.add(aid);
+      return next;
+    });
   };
 
   const toggleResource = (rid: string) => {
@@ -140,16 +155,30 @@ export default function VerticalDetailPage() {
   const clearAll = () => setSelectedResources(new Set());
 
   const applyBulkTag = async () => {
-    if (!selectedAccount || selectedResources.size === 0) return;
+    if (selectedAccounts.size === 0 || selectedResources.size === 0) return;
     setTagging(true);
     try {
-      const res = await axios.post(`${BASE}/api/verticals/bulk-tag-account`, {
-        vertical_id: id,
-        aws_account_id: selectedAccount,
-        resource_ids: Array.from(selectedResources),
-        cloud_provider: "aws",
-      }, { headers });
-      alert(`✓ Tagged ${res.data.tagged} resources with Vertical=${vertical?.name}`);
+      // Group selected resources by their account_id
+      const byAccount = new Map<string, string[]>();
+      accountResources
+        .filter((r) => selectedResources.has(r.resource_id))
+        .forEach((r) => {
+          const aid = r.account_id || Array.from(selectedAccounts)[0];
+          if (!byAccount.has(aid)) byAccount.set(aid, []);
+          byAccount.get(aid)!.push(r.resource_id);
+        });
+
+      let totalTagged = 0;
+      for (const [aid, rids] of byAccount.entries()) {
+        const res = await axios.post(`${BASE}/api/verticals/bulk-tag-account`, {
+          vertical_id: id,
+          aws_account_id: aid,
+          resource_ids: rids,
+          cloud_provider: "aws",
+        }, { headers });
+        totalTagged += res.data.tagged;
+      }
+      alert(`✓ Tagged ${totalTagged} resources with Vertical=${vertical?.name}`);
       setShowBulkTag(false);
       await load();
     } catch (err: any) {
@@ -396,31 +425,50 @@ export default function VerticalDetailPage() {
               <button onClick={() => setShowBulkTag(false)}><X className="w-4 h-4 text-black" /></button>
             </div>
 
-            {/* Step 1: Select account */}
+            {/* Step 1: Select accounts */}
             <div className="mb-4 flex-shrink-0">
-              <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">Select Account</label>
-              <div className="flex gap-2">
-                <select
-                  value={selectedAccount}
-                  onChange={(e) => {
-                    setSelectedAccount(e.target.value);
-                    loadAccountResources(e.target.value);
-                  }}
-                  className="flex-1 border border-gray-400 rounded-md px-3 py-2 text-sm text-black focus:border-blue-900 outline-none"
-                >
-                  <option value="">— Select an account —</option>
-                  {accounts.map((a) => (
-                    <option key={a.aws_account_id} value={a.aws_account_id}>
-                      {a.account_name} ({a.aws_account_id})
-                    </option>
-                  ))}
-                </select>
-                {selectedAccount && (
-                  <button onClick={() => loadAccountResources(selectedAccount)}
-                    className="p-2 border border-gray-300 rounded-md hover:bg-gray-50 transition">
-                    <RefreshCw className={`w-4 h-4 text-black ${loadingResources ? "animate-spin" : ""}`} />
-                  </button>
-                )}
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-bold uppercase tracking-wide text-black">Select Accounts</label>
+                <div className="flex gap-2">
+                  <button onClick={() => setSelectedAccounts(new Set(accounts.map((a) => a.aws_account_id)))}
+                    className="text-xs font-bold text-blue-900 hover:underline">Select All</button>
+                  <span className="text-gray-300">|</span>
+                  <button onClick={() => { setSelectedAccounts(new Set()); setAccountResources([]); setSelectedResources(new Set()); }}
+                    className="text-xs font-bold text-black hover:underline">Clear</button>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 max-h-36 overflow-y-auto border border-gray-200 rounded-lg p-2 bg-gray-50">
+                {accounts.map((a) => {
+                  const checked = selectedAccounts.has(a.aws_account_id);
+                  return (
+                    <label key={a.aws_account_id}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer transition text-xs font-semibold ${
+                        checked ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-blue-50 border border-gray-200"
+                      }`}>
+                      <input type="checkbox" className="hidden"
+                        checked={checked}
+                        onChange={() => toggleAccount(a.aws_account_id)} />
+                      <div className={`w-3.5 h-3.5 rounded border flex-shrink-0 flex items-center justify-center ${
+                        checked ? "bg-white border-white" : "border-gray-400"
+                      }`}>
+                        {checked && <div className="w-2 h-2 rounded-sm bg-blue-900" />}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="truncate">{a.account_name}</div>
+                        <div className={`text-[10px] font-mono ${checked ? "text-white/70" : "text-gray-500"}`}>{a.aws_account_id}</div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+              <div className="flex justify-end mt-2">
+                <button
+                  onClick={() => loadAccountResources(selectedAccounts)}
+                  disabled={selectedAccounts.size === 0 || loadingResources}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold rounded-md transition disabled:opacity-50">
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingResources ? "animate-spin" : ""}`} />
+                  Load Resources ({selectedAccounts.size} account{selectedAccounts.size !== 1 ? "s" : ""})
+                </button>
               </div>
             </div>
 
@@ -494,7 +542,7 @@ export default function VerticalDetailPage() {
               </div>
             )}
 
-            {selectedAccount && !loadingResources && accountResources.length === 0 && (
+            {selectedAccounts.size > 0 && !loadingResources && accountResources.length === 0 && (
               <div className="text-center py-8 text-sm text-black">
                 No resources found for this account.
               </div>
