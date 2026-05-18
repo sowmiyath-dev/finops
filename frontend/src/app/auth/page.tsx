@@ -86,22 +86,22 @@ function AuthForm() {
 
         <div>
           <h1 className="text-4xl font-bold text-white mb-4 leading-tight">
-            AWS Cost Intelligence<br />
+            Multi-Cloud Cost Intelligence<br />
             <span style={{ color: "var(--accent)" }}>at your fingertips</span>
           </h1>
           <p className="text-white/70 text-base mb-8">
-            Centralized cost visibility across all your AWS Control Tower accounts.
-            Sync CUR data, analyze spending, and export detailed reports.
+            Centralized cost visibility across AWS, Azure, and Google Cloud.
+            Track spending by project, team, or application — all from one platform.
           </p>
           <div className="grid grid-cols-2 gap-4">
             {[
-              { label: "Control Towers", value: "7" },
-              { label: "Data Accuracy", value: "Daily" },
-              { label: "Report Types", value: "4+" },
+              { label: "Cloud Providers", value: "AWS · Azure · GCP" },
+              { label: "Cost Granularity", value: "Daily" },
+              { label: "Group By", value: "Project / Team" },
               { label: "Export Format", value: "CSV" },
             ].map((item) => (
               <div key={item.label} className="rounded-lg p-4" style={{ background: "rgba(255,255,255,0.08)" }}>
-                <div className="text-2xl font-bold text-white">{item.value}</div>
+                <div className="text-lg font-bold text-white">{item.value}</div>
                 <div className="text-sm text-white/60">{item.label}</div>
               </div>
             ))}
