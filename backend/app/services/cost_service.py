@@ -127,42 +127,39 @@ def _parse_cur_csv_gz(ct: ControlTower, report_key: str, start_date: str, end_da
     records = []
 
     try:
+        logger.info(f"Downloading {report_key}...")
         obj = s3.get_object(Bucket=ct.cur_s3_bucket, Key=report_key)
         compressed = obj["Body"].read()
+        logger.info(f"Downloaded {len(compressed)} bytes, decompressing...")
         decompressed = gzip.decompress(compressed)
-        content = decompressed.decode("utf-8")
-
-        reader = csv.DictReader(io.StringIO(content))
+        del compressed  # free memory immediately
+        logger.info(f"Decompressed to {len(decompressed)} bytes, parsing...")
 
         start = date.fromisoformat(start_date)
         end = date.fromisoformat(end_date)
 
+        reader = csv.DictReader(io.StringIO(decompressed.decode("utf-8")))
+        del decompressed  # free memory
+
         for row in reader:
             try:
-                # Parse date from UsageStartDate
                 usage_start = row.get("lineItem/UsageStartDate", "")
                 if not usage_start:
                     continue
                 row_date = date.fromisoformat(usage_start[:10])
-
-                # Filter by date range
                 if row_date < start or row_date > end:
                     continue
 
-                # Skip zero cost rows
                 unblended = float(row.get("lineItem/UnblendedCost", 0) or 0)
                 blended = float(row.get("lineItem/BlendedCost", 0) or 0)
                 if unblended == 0 and blended == 0:
                     continue
 
-                # Extract tag columns (resourceTags/user:*)
                 tags = {}
                 for col, val in row.items():
                     if col.startswith("resourceTags/user:") and val:
-                        tag_key = col.replace("resourceTags/user:", "")
-                        tags[tag_key] = val
+                        tags[col.replace("resourceTags/user:", "")] = val
 
-                # Determine purchase type
                 line_item_type = row.get("lineItem/LineItemType", "Usage")
                 savings_arn = row.get("savingsPlan/SavingsPlanARN", "")
                 reservation_id = row.get("reservation/SubscriptionId", "")
@@ -176,7 +173,6 @@ def _parse_cur_csv_gz(ct: ControlTower, report_key: str, start_date: str, end_da
                 else:
                     purchase_type = "OnDemand"
 
-                # Detect marketplace
                 legal_entity = row.get("lineItem/LegalEntity", "")
                 bill_entity = row.get("bill/BillingEntity", "")
                 is_marketplace = (
@@ -210,13 +206,13 @@ def _parse_cur_csv_gz(ct: ControlTower, report_key: str, start_date: str, end_da
                 })
 
             except Exception as row_err:
-                logger.debug(f"Skipping row due to error: {row_err}")
+                logger.debug(f"Skipping row: {row_err}")
                 continue
 
         logger.info(f"Parsed {len(records)} records from {report_key}")
 
     except Exception as e:
-        logger.error(f"Failed to parse CUR file {report_key}: {e}")
+        logger.error(f"Failed to parse CUR file {report_key}: {e}", exc_info=True)
 
     return records
 

@@ -147,11 +147,14 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual"):
                 # Process ONE FILE AT A TIME
                 for file_idx, report_key in enumerate(report_keys):
                     logger.info(f"Period {period} file {file_idx+1}/{len(report_keys)}: {report_key}")
-
-                    raw_records = await loop.run_in_executor(
-                        _executor, fetch_cur_single_file, ct,
-                        report_key, month_start.isoformat(), month_end.isoformat()
-                    )
+                    try:
+                        raw_records = await loop.run_in_executor(
+                            _executor, fetch_cur_single_file, ct,
+                            report_key, month_start.isoformat(), month_end.isoformat()
+                        )
+                    except Exception as file_err:
+                        logger.error(f"Failed to fetch file {report_key}: {file_err}", exc_info=True)
+                        continue
 
                     if not raw_records:
                         del raw_records
