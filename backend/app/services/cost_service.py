@@ -122,92 +122,87 @@ def _get_billing_periods_for_range(start_date: str, end_date: str) -> list[str]:
 
 
 def _parse_cur_csv_gz(ct: ControlTower, report_key: str, start_date: str, end_date: str) -> list[dict]:
-    """Download and parse a single CUR CSV.GZ file from S3."""
+    """Download and stream-parse a single CUR CSV.GZ file from S3."""
     s3 = _get_s3_client(ct)
     records = []
 
     try:
         logger.info(f"Downloading {report_key}...")
         obj = s3.get_object(Bucket=ct.cur_s3_bucket, Key=report_key)
-        compressed = obj["Body"].read()
-        logger.info(f"Downloaded {len(compressed)} bytes, decompressing...")
-        decompressed = gzip.decompress(compressed)
-        del compressed  # free memory immediately
-        logger.info(f"Decompressed to {len(decompressed)} bytes, parsing...")
 
         start = date.fromisoformat(start_date)
         end = date.fromisoformat(end_date)
 
-        reader = csv.DictReader(io.StringIO(decompressed.decode("utf-8")))
-        del decompressed  # free memory
+        # Stream decompress — never load full file into memory
+        with gzip.open(obj["Body"], mode="rt", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    usage_start = row.get("lineItem/UsageStartDate", "")
+                    if not usage_start:
+                        continue
+                    row_date = date.fromisoformat(usage_start[:10])
+                    if row_date < start or row_date > end:
+                        continue
 
-        for row in reader:
-            try:
-                usage_start = row.get("lineItem/UsageStartDate", "")
-                if not usage_start:
+                    unblended = float(row.get("lineItem/UnblendedCost", 0) or 0)
+                    blended = float(row.get("lineItem/BlendedCost", 0) or 0)
+                    if unblended == 0 and blended == 0:
+                        continue
+
+                    tags = {}
+                    for col, val in row.items():
+                        if col.startswith("resourceTags/user:") and val:
+                            tags[col.replace("resourceTags/user:", "")] = val
+
+                    line_item_type = row.get("lineItem/LineItemType", "Usage")
+                    savings_arn = row.get("savingsPlan/SavingsPlanARN", "")
+                    reservation_id = row.get("reservation/SubscriptionId", "")
+
+                    if savings_arn:
+                        purchase_type = "SavingsPlan"
+                    elif reservation_id:
+                        purchase_type = "Reserved"
+                    elif line_item_type == "Spot":
+                        purchase_type = "Spot"
+                    else:
+                        purchase_type = "OnDemand"
+
+                    legal_entity = row.get("lineItem/LegalEntity", "")
+                    bill_entity = row.get("bill/BillingEntity", "")
+                    is_marketplace = (
+                        "marketplace" in legal_entity.lower() or
+                        "marketplace" in bill_entity.lower() or
+                        line_item_type == "Marketplace"
+                    )
+
+                    records.append({
+                        "date": row_date,
+                        "aws_account_id": row.get("lineItem/UsageAccountId", ""),
+                        "service": row.get("lineItem/ProductCode", row.get("product/ProductName", "Unknown")),
+                        "region": row.get("product/region", row.get("product/regionCode", "global")),
+                        "resource_id": row.get("lineItem/ResourceId") or None,
+                        "usage_type": row.get("lineItem/UsageType") or None,
+                        "operation": row.get("lineItem/Operation") or None,
+                        "blended_cost": blended,
+                        "unblended_cost": unblended,
+                        "net_unblended_cost": float(row.get("lineItem/NetUnblendedCost", 0) or 0),
+                        "amortized_cost": float(
+                            row.get("reservation/EffectiveCost", 0) or
+                            row.get("savingsPlan/SavingsPlanEffectiveCost", 0) or
+                            unblended
+                        ),
+                        "usage_quantity": float(row.get("lineItem/UsageAmount", 0) or 0),
+                        "usage_unit": row.get("pricing/unit", ""),
+                        "purchase_type": purchase_type,
+                        "line_item_type": line_item_type,
+                        "is_marketplace": is_marketplace,
+                        "tags": json.dumps(tags) if tags else None,
+                    })
+
+                except Exception as row_err:
+                    logger.debug(f"Skipping row: {row_err}")
                     continue
-                row_date = date.fromisoformat(usage_start[:10])
-                if row_date < start or row_date > end:
-                    continue
-
-                unblended = float(row.get("lineItem/UnblendedCost", 0) or 0)
-                blended = float(row.get("lineItem/BlendedCost", 0) or 0)
-                if unblended == 0 and blended == 0:
-                    continue
-
-                tags = {}
-                for col, val in row.items():
-                    if col.startswith("resourceTags/user:") and val:
-                        tags[col.replace("resourceTags/user:", "")] = val
-
-                line_item_type = row.get("lineItem/LineItemType", "Usage")
-                savings_arn = row.get("savingsPlan/SavingsPlanARN", "")
-                reservation_id = row.get("reservation/SubscriptionId", "")
-
-                if savings_arn:
-                    purchase_type = "SavingsPlan"
-                elif reservation_id:
-                    purchase_type = "Reserved"
-                elif line_item_type == "Spot":
-                    purchase_type = "Spot"
-                else:
-                    purchase_type = "OnDemand"
-
-                legal_entity = row.get("lineItem/LegalEntity", "")
-                bill_entity = row.get("bill/BillingEntity", "")
-                is_marketplace = (
-                    "marketplace" in legal_entity.lower() or
-                    "marketplace" in bill_entity.lower() or
-                    line_item_type == "Marketplace"
-                )
-
-                records.append({
-                    "date": row_date,
-                    "aws_account_id": row.get("lineItem/UsageAccountId", ""),
-                    "service": row.get("lineItem/ProductCode", row.get("product/ProductName", "Unknown")),
-                    "region": row.get("product/region", row.get("product/regionCode", "global")),
-                    "resource_id": row.get("lineItem/ResourceId") or None,
-                    "usage_type": row.get("lineItem/UsageType") or None,
-                    "operation": row.get("lineItem/Operation") or None,
-                    "blended_cost": blended,
-                    "unblended_cost": unblended,
-                    "net_unblended_cost": float(row.get("lineItem/NetUnblendedCost", 0) or 0),
-                    "amortized_cost": float(
-                        row.get("reservation/EffectiveCost", 0) or
-                        row.get("savingsPlan/SavingsPlanEffectiveCost", 0) or
-                        unblended
-                    ),
-                    "usage_quantity": float(row.get("lineItem/UsageAmount", 0) or 0),
-                    "usage_unit": row.get("pricing/unit", ""),
-                    "purchase_type": purchase_type,
-                    "line_item_type": line_item_type,
-                    "is_marketplace": is_marketplace,
-                    "tags": json.dumps(tags) if tags else None,
-                })
-
-            except Exception as row_err:
-                logger.debug(f"Skipping row: {row_err}")
-                continue
 
         logger.info(f"Parsed {len(records)} records from {report_key}")
 
