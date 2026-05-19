@@ -69,8 +69,14 @@ def _get_latest_manifest(ct: ControlTower, billing_period: str) -> Optional[dict
             logger.warning(f"No manifest file found under {billing_prefix}")
             return None
 
-        # Use the latest manifest (sort descending)
-        manifest_key = sorted(manifest_keys)[-1]
+        # Prefer manifest inside a timestamp subfolder (latest timestamp = most complete data)
+        # Timestamp folders look like 20260405T022151Z
+        timestamped = [k for k in manifest_keys if len(k.split("/")) > 3]
+        if timestamped:
+            # Sort by timestamp folder name descending → pick latest
+            manifest_key = sorted(timestamped, key=lambda k: k.split("/")[-2])[-1]
+        else:
+            manifest_key = manifest_keys[0]
         logger.info(f"Found manifest: {manifest_key}")
 
         obj = s3.get_object(Bucket=bucket, Key=manifest_key)
