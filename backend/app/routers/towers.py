@@ -158,13 +158,13 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual"):
                         tags=r.get("tags"),
                     ))
 
-                # Insert in batches of 2000 to avoid memory issues
+                # Insert in batches of 2000 and commit each batch to avoid memory issues
                 BATCH_SIZE = 2000
                 total_inserted = 0
                 for i in range(0, len(rows_to_insert), BATCH_SIZE):
                     batch = rows_to_insert[i:i + BATCH_SIZE]
                     db.add_all(batch)
-                    await db.flush()
+                    await db.commit()
                     total_inserted += len(batch)
                     _sync_progress[ct_id]["message"] = f"Storing records {total_inserted}/{len(rows_to_insert)}"
                     logger.info(f"Inserted batch {i//BATCH_SIZE + 1}: {total_inserted} records so far")
