@@ -36,17 +36,50 @@ def _get_s3_client(ct: ControlTower):
 def _get_latest_manifest(ct: ControlTower, billing_period: str) -> Optional[dict]:
     s3 = _get_s3_client(ct)
     bucket = ct.cur_s3_bucket
-    prefix = ct.cur_s3_prefix.rstrip("/")  # strip trailing slash only
+    # prefix is like /daily-report/daily-report or rilcurmall/rilcurmall26NN
+    # report_name is the last segment
+    prefix = ct.cur_s3_prefix.rstrip("/")
+    report_name = prefix.split("/")[-1]
+    # base_path is everything before the report_name segment
+    # e.g. /daily-report/daily-report → base = /daily-report
+    parts = prefix.split("/")
+    if len(parts) >= 2 and parts[-1] == parts[-2]:
+        # prefix and report name are same word repeated — use parent as base
+        base_path = "/".join(parts[:-1])
+    else:
+        base_path = prefix
 
-    manifest_key = f"{prefix}/{billing_period}/{prefix.split('/')[-1]}-Manifest.json"
+    billing_prefix = f"{base_path}/{billing_period}/"
+
+    logger.info(f"Looking for manifest under: s3://{bucket}/{billing_prefix}")
 
     try:
+        # List objects under billing period to find timestamp subfolder or direct manifest
+        resp = s3.list_objects_v2(Bucket=bucket, Prefix=billing_prefix, MaxKeys=50)
+        contents = resp.get("Contents", [])
+
+        if not contents:
+            logger.warning(f"No objects found under {billing_prefix}")
+            return None
+
+        # Find the manifest file — could be direct or inside a timestamp subfolder
+        manifest_keys = [o["Key"] for o in contents if o["Key"].endswith("-Manifest.json")]
+
+        if not manifest_keys:
+            logger.warning(f"No manifest file found under {billing_prefix}")
+            return None
+
+        # Use the latest manifest (sort descending)
+        manifest_key = sorted(manifest_keys)[-1]
+        logger.info(f"Found manifest: {manifest_key}")
+
         obj = s3.get_object(Bucket=bucket, Key=manifest_key)
         manifest = json.loads(obj["Body"].read().decode("utf-8"))
         logger.info(f"Loaded manifest: {manifest_key}")
         return manifest
+
     except Exception as e:
-        logger.warning(f"Could not load manifest {manifest_key}: {e}")
+        logger.warning(f"Could not load manifest for period {billing_period}: {e}")
         return None
 
 
