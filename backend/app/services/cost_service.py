@@ -54,29 +54,35 @@ def _get_latest_manifest(ct: ControlTower, billing_period: str) -> Optional[dict
     logger.info(f"Looking for manifest under: s3://{bucket}/{billing_prefix}")
 
     try:
-        # List objects under billing period to find timestamp subfolder or direct manifest
-        resp = s3.list_objects_v2(Bucket=bucket, Prefix=billing_prefix, MaxKeys=50)
-        contents = resp.get("Contents", [])
+        # Use delimiter to list only timestamp subfolders — avoids 1000 object limit
+        resp = s3.list_objects_v2(
+            Bucket=bucket, Prefix=billing_prefix, Delimiter="/", MaxKeys=1000
+        )
+        subfolders = sorted(
+            [p["Prefix"] for p in resp.get("CommonPrefixes", [])],
+            reverse=True
+        )
 
-        if not contents:
-            logger.warning(f"No objects found under {billing_prefix}")
+        if not subfolders:
+            logger.warning(f"No subfolders found under {billing_prefix}")
             return None
 
-        # Find the manifest file — could be direct or inside a timestamp subfolder
-        manifest_keys = [o["Key"] for o in contents if o["Key"].endswith("-Manifest.json")]
+        # Pick latest timestamp subfolder (sorted descending = latest first)
+        latest_folder = subfolders[0]
+        logger.info(f"Latest timestamp folder: {latest_folder}")
+
+        # Get manifest from that folder
+        resp2 = s3.list_objects_v2(Bucket=bucket, Prefix=latest_folder, MaxKeys=50)
+        manifest_keys = [
+            o["Key"] for o in resp2.get("Contents", [])
+            if o["Key"].endswith("-Manifest.json")
+        ]
 
         if not manifest_keys:
-            logger.warning(f"No manifest file found under {billing_prefix}")
+            logger.warning(f"No manifest found in {latest_folder}")
             return None
 
-        # Prefer manifest inside a timestamp subfolder (latest timestamp = most complete data)
-        # Timestamp folders look like 20260405T022151Z
-        timestamped = [k for k in manifest_keys if len(k.split("/")) > 3]
-        if timestamped:
-            # Sort by timestamp folder name descending → pick latest
-            manifest_key = sorted(timestamped, key=lambda k: k.split("/")[-2])[-1]
-        else:
-            manifest_key = manifest_keys[0]
+        manifest_key = manifest_keys[0]
         logger.info(f"Found manifest: {manifest_key}")
 
         obj = s3.get_object(Bucket=bucket, Key=manifest_key)
