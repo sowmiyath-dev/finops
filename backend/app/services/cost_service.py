@@ -222,30 +222,35 @@ def _parse_cur_csv_gz(ct: ControlTower, report_key: str, start_date: str, end_da
 
 
 def fetch_cur_from_s3(ct: ControlTower, start_date: str, end_date: str) -> list[dict]:
-    """
-    Main function — fetches CUR data from S3 for the given date range.
-    Reads manifest to find latest CSV files, downloads and parses them.
-    """
     if not ct.cur_s3_bucket or not ct.cur_s3_prefix:
         raise ValueError(f"CUR S3 bucket/prefix not configured for Control Tower: {ct.name}")
-
     all_records = []
     billing_periods = _get_billing_periods_for_range(start_date, end_date)
-
-    logger.info(f"Fetching CUR for CT {ct.name} | periods: {billing_periods} | range: {start_date} → {end_date}")
-
+    logger.info(f"Fetching CUR for CT {ct.name} | periods: {billing_periods} | range: {start_date} \u2192 {end_date}")
     for period in billing_periods:
         manifest = _get_latest_manifest(ct, period)
         if not manifest:
             logger.warning(f"No manifest found for period {period}, skipping")
             continue
-
         report_keys = manifest.get("reportKeys", [])
         logger.info(f"Period {period}: found {len(report_keys)} CUR files")
-
         for key in report_keys:
             records = _parse_cur_csv_gz(ct, key, start_date, end_date)
             all_records.extend(records)
-
     logger.info(f"Total CUR records fetched for CT {ct.name}: {len(all_records)}")
     return all_records
+
+
+def get_report_keys_for_period(ct: ControlTower, period: str) -> list[str]:
+    """Return report keys for a billing period without downloading data."""
+    manifest = _get_latest_manifest(ct, period)
+    if not manifest:
+        return []
+    keys = manifest.get("reportKeys", [])
+    logger.info(f"Period {period}: found {len(keys)} CUR files")
+    return keys
+
+
+def fetch_cur_single_file(ct: ControlTower, report_key: str, start_date: str, end_date: str) -> list[dict]:
+    """Parse a single CUR file and return records."""
+    return _parse_cur_csv_gz(ct, report_key, start_date, end_date)
