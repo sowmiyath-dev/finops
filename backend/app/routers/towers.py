@@ -106,6 +106,24 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual"):
                 )
                 sub_map = {s.aws_account_id: s for s in sub_result.scalars().all()}
 
+            async def _get_or_create_sub(aws_account_id: str) -> SubAccount:
+                """Get existing sub-account or create one on the fly."""
+                if aws_account_id in sub_map:
+                    return sub_map[aws_account_id]
+                async with AsyncSessionLocal() as db:
+                    sub = SubAccount(
+                        control_tower_id=ct_id,
+                        aws_account_id=aws_account_id,
+                        account_name=aws_account_id,  # use ID as name until discovered
+                        is_active=True,
+                    )
+                    db.add(sub)
+                    await db.commit()
+                    await db.refresh(sub)
+                    sub_map[aws_account_id] = sub
+                    logger.info(f"Auto-created sub-account for {aws_account_id}")
+                    return sub
+
             # Step 4 — fetch and insert ONE FILE AT A TIME to avoid OOM
             from app.services.cost_service import _get_billing_periods_for_range
             billing_periods = _get_billing_periods_for_range(start_date, end_date)
@@ -165,9 +183,7 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual"):
                         async with AsyncSessionLocal() as db:
                             db_batch = []
                             for r in raw_batch:
-                                sub = sub_map.get(r["aws_account_id"])
-                                if not sub:
-                                    continue
+                                sub = await _get_or_create_sub(r["aws_account_id"])
                                 db_batch.append(CostRecord(
                                     control_tower_id=ct_id,
                                     sub_account_id=str(sub.id),
