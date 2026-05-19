@@ -50,15 +50,14 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual"):
     async with _sync_semaphore:
         _sync_progress[ct_id] = {"percent": 0, "status": "running", "message": "Initializing"}
         sync_log_id = None
-        start_time = datetime.now(timezone.utc)
 
         try:
+            # Create sync log
             async with AsyncSessionLocal() as db:
                 result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
                 ct = result.scalar_one_or_none()
                 if not ct:
                     return
-
                 sync_log = SyncLog(
                     control_tower_id=ct.id,
                     control_tower_name=ct.name,
@@ -78,103 +77,125 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual"):
             async with AsyncSessionLocal() as db:
                 result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
                 ct = result.scalar_one_or_none()
-
             org_accounts = await loop.run_in_executor(_executor, list_org_accounts, ct)
-
             async with AsyncSessionLocal() as db:
                 await _upsert_sub_accounts(db, ct_id, org_accounts)
 
-            # Step 2 — fetch CUR from S3
-            # Use full year range if no existing data, otherwise last 7 days
-            _sync_progress[ct_id]["message"] = "Fetching CUR from S3"
-            _sync_progress[ct_id]["percent"] = 30
-
+            # Step 2 — determine date range
+            _sync_progress[ct_id]["message"] = "Checking existing data"
+            _sync_progress[ct_id]["percent"] = 20
             async with AsyncSessionLocal() as db:
                 result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
                 ct = result.scalar_one_or_none()
-
-                # Check if any existing cost records
                 count_result = await db.execute(
                     select(func.count()).where(CostRecord.control_tower_id == ct_id)
                 )
                 existing_count = count_result.scalar() or 0
 
             if existing_count == 0:
-                # First sync — fetch full year
                 start_date, end_date = get_full_year_date_range()
-                logger.info(f"First sync for CT {ct_id} — fetching full year: {start_date} → {end_date}")
+                logger.info(f"First sync for CT {ct_id} — full year: {start_date} → {end_date}")
             else:
-                # Subsequent sync — fetch last 7 days
                 start_date, end_date = get_sync_date_range(days_back=7)
-                logger.info(f"Incremental sync for CT {ct_id} — fetching last 7 days: {start_date} → {end_date}")
+                logger.info(f"Incremental sync for CT {ct_id} — last 7 days: {start_date} → {end_date}")
 
-            raw_records = await loop.run_in_executor(
-                _executor, fetch_cur_from_s3, ct, start_date, end_date
-            )
-
-            _sync_progress[ct_id]["message"] = "Storing records"
-            _sync_progress[ct_id]["percent"] = 70
-
-            # Step 3 — store records
+            # Step 3 — load sub_map
             async with AsyncSessionLocal() as db:
                 sub_result = await db.execute(
                     select(SubAccount).where(SubAccount.control_tower_id == ct_id)
                 )
                 sub_map = {s.aws_account_id: s for s in sub_result.scalars().all()}
 
-                await db.execute(
-                    delete(CostRecord).where(
-                        CostRecord.control_tower_id == ct_id,
-                        CostRecord.date >= date.fromisoformat(start_date),
-                        CostRecord.date <= date.fromisoformat(end_date),
-                    )
+            # Step 4 — fetch and insert ONE MONTH AT A TIME to avoid OOM
+            from app.services.cost_service import _get_billing_periods_for_range
+            billing_periods = _get_billing_periods_for_range(start_date, end_date)
+            total_inserted = 0
+
+            for period_idx, period in enumerate(billing_periods):
+                p_start = date(int(period[:4]), int(period[4:6]), int(period[6:8]))
+                p_end_raw = date(int(period[9:13]), int(period[13:15]), int(period[15:17]))
+                month_start = max(p_start, date.fromisoformat(start_date))
+                month_end = min(p_end_raw - timedelta(days=1), date.fromisoformat(end_date))
+
+                _sync_progress[ct_id]["message"] = f"Syncing {period} ({period_idx+1}/{len(billing_periods)})"
+                _sync_progress[ct_id]["percent"] = 30 + int(60 * period_idx / len(billing_periods))
+
+                async with AsyncSessionLocal() as db:
+                    result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
+                    ct = result.scalar_one_or_none()
+
+                raw_records = await loop.run_in_executor(
+                    _executor, fetch_cur_from_s3, ct,
+                    month_start.isoformat(), month_end.isoformat()
                 )
 
-                rows_to_insert = []
-                for r in raw_records:
-                    sub = sub_map.get(r["aws_account_id"])
-                    if not sub:
-                        continue
-                    rows_to_insert.append(CostRecord(
-                        control_tower_id=ct_id,
-                        sub_account_id=str(sub.id),
-                        aws_account_id=r["aws_account_id"],
-                        account_name=sub.account_name,
-                        date=r["date"],
-                        service=r["service"],
-                        region=r.get("region"),
-                        resource_id=r.get("resource_id"),
-                        usage_type=r.get("usage_type"),
-                        operation=r.get("operation"),
-                        blended_cost=r["blended_cost"],
-                        unblended_cost=r["unblended_cost"],
-                        net_unblended_cost=r["net_unblended_cost"],
-                        amortized_cost=r["amortized_cost"],
-                        usage_quantity=r["usage_quantity"],
-                        usage_unit=r.get("usage_unit"),
-                        purchase_type=r.get("purchase_type"),
-                        line_item_type=r.get("line_item_type"),
-                        is_marketplace=r.get("is_marketplace", False),
-                        tags=r.get("tags"),
-                    ))
+                if not raw_records:
+                    logger.info(f"No records for period {period}, skipping")
+                    continue
 
-                # Insert in batches of 2000 and commit each batch to avoid memory issues
-                BATCH_SIZE = 2000
-                total_inserted = 0
-                for i in range(0, len(rows_to_insert), BATCH_SIZE):
-                    batch = rows_to_insert[i:i + BATCH_SIZE]
-                    db.add_all(batch)
+                logger.info(f"Period {period}: {len(raw_records)} records fetched, inserting...")
+
+                async with AsyncSessionLocal() as db:
+                    # Delete existing for this month
+                    await db.execute(
+                        delete(CostRecord).where(
+                            CostRecord.control_tower_id == ct_id,
+                            CostRecord.date >= month_start,
+                            CostRecord.date <= month_end,
+                        )
+                    )
                     await db.commit()
-                    total_inserted += len(batch)
-                    _sync_progress[ct_id]["message"] = f"Storing records {total_inserted}/{len(rows_to_insert)}"
-                    logger.info(f"Inserted batch {i//BATCH_SIZE + 1}: {total_inserted} records so far")
 
+                    # Build and insert in batches of 1000
+                    BATCH_SIZE = 1000
+                    batch = []
+                    for r in raw_records:
+                        sub = sub_map.get(r["aws_account_id"])
+                        if not sub:
+                            continue
+                        batch.append(CostRecord(
+                            control_tower_id=ct_id,
+                            sub_account_id=str(sub.id),
+                            aws_account_id=r["aws_account_id"],
+                            account_name=sub.account_name,
+                            date=r["date"],
+                            service=r["service"],
+                            region=r.get("region"),
+                            resource_id=r.get("resource_id"),
+                            usage_type=r.get("usage_type"),
+                            operation=r.get("operation"),
+                            blended_cost=r["blended_cost"],
+                            unblended_cost=r["unblended_cost"],
+                            net_unblended_cost=r["net_unblended_cost"],
+                            amortized_cost=r["amortized_cost"],
+                            usage_quantity=r["usage_quantity"],
+                            usage_unit=r.get("usage_unit"),
+                            purchase_type=r.get("purchase_type"),
+                            line_item_type=r.get("line_item_type"),
+                            is_marketplace=r.get("is_marketplace", False),
+                            tags=r.get("tags"),
+                        ))
+                        if len(batch) >= BATCH_SIZE:
+                            db.add_all(batch)
+                            await db.commit()
+                            total_inserted += len(batch)
+                            logger.info(f"Period {period}: {total_inserted} total inserted")
+                            batch = []
+                    if batch:
+                        db.add_all(batch)
+                        await db.commit()
+                        total_inserted += len(batch)
+                        logger.info(f"Period {period}: {total_inserted} total inserted")
+
+                del raw_records
+
+            # Step 5 — finalize
+            async with AsyncSessionLocal() as db:
                 await db.execute(
                     update(ControlTower)
                     .where(ControlTower.id == ct_id)
                     .values(last_synced_at=datetime.now(timezone.utc), is_active=True)
                 )
-
                 if sync_log_id:
                     await db.execute(
                         update(SyncLog).where(SyncLog.id == sync_log_id).values(
