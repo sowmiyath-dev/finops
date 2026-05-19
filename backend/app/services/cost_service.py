@@ -34,13 +34,9 @@ def _get_s3_client(ct: ControlTower):
 
 
 def _get_latest_manifest(ct: ControlTower, billing_period: str) -> Optional[dict]:
-    """
-    Fetch the latest manifest JSON for a given billing period.
-    billing_period format: YYYYMMDD-YYYYMMDD  e.g. 20260401-20260501
-    """
     s3 = _get_s3_client(ct)
     bucket = ct.cur_s3_bucket
-    prefix = ct.cur_s3_prefix  # e.g. rilcurmall/rilcurmall26NN
+    prefix = ct.cur_s3_prefix.strip("/")  # strip leading/trailing slashes
 
     manifest_key = f"{prefix}/{billing_period}/{prefix.split('/')[-1]}-Manifest.json"
 
