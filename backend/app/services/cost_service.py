@@ -36,7 +36,7 @@ def _get_s3_client(ct: ControlTower):
 def _get_latest_manifest(ct: ControlTower, billing_period: str) -> Optional[dict]:
     s3 = _get_s3_client(ct)
     bucket = ct.cur_s3_bucket
-    prefix = ct.cur_s3_prefix.strip("/")  # strip leading/trailing slashes
+    prefix = ct.cur_s3_prefix.rstrip("/")  # strip trailing slash only
 
     manifest_key = f"{prefix}/{billing_period}/{prefix.split('/')[-1]}-Manifest.json"
 
