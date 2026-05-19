@@ -11,7 +11,7 @@ from app.models.schemas import OnboardKeys, OnboardRole, ControlTowerOut, SubAcc
 from app.services.auth_service import get_current_user
 from app.services.crypto_service import encrypt
 from app.services.aws_session import test_connectivity, list_org_accounts
-from app.services.cost_service import fetch_cur_from_s3, get_sync_date_range, get_full_year_date_range, get_report_keys_for_period, fetch_cur_single_file
+from app.services.cost_service import fetch_cur_from_s3, get_sync_date_range, get_full_year_date_range, get_report_keys_for_period, fetch_cur_single_file, stream_cur_file_batches
 from app.config import settings
 
 router = APIRouter(prefix="/towers", tags=["towers"])
@@ -144,64 +144,59 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual"):
                     )
                     await db.commit()
 
-                # Process ONE FILE AT A TIME
+                # Process ONE FILE AT A TIME using streaming batches
                 for file_idx, report_key in enumerate(report_keys):
                     logger.info(f"Period {period} file {file_idx+1}/{len(report_keys)}: {report_key}")
                     try:
-                        raw_records = await loop.run_in_executor(
-                            _executor, fetch_cur_single_file, ct,
-                            report_key, month_start.isoformat(), month_end.isoformat()
+                        # stream_cur_file_batches is a generator — runs in executor per batch
+                        streamer = await loop.run_in_executor(
+                            _executor,
+                            lambda rk=report_key: list(stream_cur_file_batches(
+                                ct, rk, month_start.isoformat(), month_end.isoformat(), 5000
+                            ))
                         )
                     except Exception as file_err:
                         logger.error(f"Failed to fetch file {report_key}: {file_err}", exc_info=True)
                         continue
 
-                    if not raw_records:
-                        del raw_records
-                        continue
-
-                    async with AsyncSessionLocal() as db:
-                        BATCH_SIZE = 1000
-                        batch = []
-                        for r in raw_records:
-                            sub = sub_map.get(r["aws_account_id"])
-                            if not sub:
-                                continue
-                            batch.append(CostRecord(
-                                control_tower_id=ct_id,
-                                sub_account_id=str(sub.id),
-                                aws_account_id=r["aws_account_id"],
-                                account_name=sub.account_name,
-                                date=r["date"],
-                                service=r["service"],
-                                region=r.get("region"),
-                                resource_id=r.get("resource_id"),
-                                usage_type=r.get("usage_type"),
-                                operation=r.get("operation"),
-                                blended_cost=r["blended_cost"],
-                                unblended_cost=r["unblended_cost"],
-                                net_unblended_cost=r["net_unblended_cost"],
-                                amortized_cost=r["amortized_cost"],
-                                usage_quantity=r["usage_quantity"],
-                                usage_unit=r.get("usage_unit"),
-                                purchase_type=r.get("purchase_type"),
-                                line_item_type=r.get("line_item_type"),
-                                is_marketplace=r.get("is_marketplace", False),
-                                tags=r.get("tags"),
-                            ))
-                            if len(batch) >= BATCH_SIZE:
-                                db.add_all(batch)
+                    for raw_batch in streamer:
+                        if not raw_batch:
+                            continue
+                        async with AsyncSessionLocal() as db:
+                            db_batch = []
+                            for r in raw_batch:
+                                sub = sub_map.get(r["aws_account_id"])
+                                if not sub:
+                                    continue
+                                db_batch.append(CostRecord(
+                                    control_tower_id=ct_id,
+                                    sub_account_id=str(sub.id),
+                                    aws_account_id=r["aws_account_id"],
+                                    account_name=sub.account_name,
+                                    date=r["date"],
+                                    service=r["service"],
+                                    region=r.get("region"),
+                                    resource_id=r.get("resource_id"),
+                                    usage_type=r.get("usage_type"),
+                                    operation=r.get("operation"),
+                                    blended_cost=r["blended_cost"],
+                                    unblended_cost=r["unblended_cost"],
+                                    net_unblended_cost=r["net_unblended_cost"],
+                                    amortized_cost=r["amortized_cost"],
+                                    usage_quantity=r["usage_quantity"],
+                                    usage_unit=r.get("usage_unit"),
+                                    purchase_type=r.get("purchase_type"),
+                                    line_item_type=r.get("line_item_type"),
+                                    is_marketplace=r.get("is_marketplace", False),
+                                    tags=r.get("tags"),
+                                ))
+                            if db_batch:
+                                db.add_all(db_batch)
                                 await db.commit()
-                                total_inserted += len(batch)
+                                total_inserted += len(db_batch)
                                 logger.info(f"Period {period} file {file_idx+1}: {total_inserted} total inserted")
-                                batch = []
-                        if batch:
-                            db.add_all(batch)
-                            await db.commit()
-                            total_inserted += len(batch)
-                            logger.info(f"Period {period} file {file_idx+1}: {total_inserted} total inserted")
 
-                    del raw_records
+                    del streamer
 
             # Step 5 — finalize
             async with AsyncSessionLocal() as db:

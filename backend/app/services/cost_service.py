@@ -245,3 +245,99 @@ def get_report_keys_for_period(ct: ControlTower, period: str) -> list[str]:
 def fetch_cur_single_file(ct: ControlTower, report_key: str, start_date: str, end_date: str) -> list[dict]:
     """Parse a single CUR file and return records."""
     return _parse_cur_csv_gz(ct, report_key, start_date, end_date)
+
+
+def stream_cur_file_batches(ct: ControlTower, report_key: str, start_date: str, end_date: str, batch_size: int = 5000):
+    """Stream-parse a CUR file and yield batches of records to avoid memory buildup."""
+    s3 = _get_s3_client(ct)
+    start = date.fromisoformat(start_date)
+    end = date.fromisoformat(end_date)
+    batch = []
+
+    try:
+        logger.info(f"Streaming {report_key}...")
+        obj = s3.get_object(Bucket=ct.cur_s3_bucket, Key=report_key)
+
+        with gzip.open(obj["Body"], mode="rt", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    usage_start = row.get("lineItem/UsageStartDate", "")
+                    if not usage_start:
+                        continue
+                    row_date = date.fromisoformat(usage_start[:10])
+                    if row_date < start or row_date > end:
+                        continue
+
+                    unblended = float(row.get("lineItem/UnblendedCost", 0) or 0)
+                    blended = float(row.get("lineItem/BlendedCost", 0) or 0)
+                    if unblended == 0 and blended == 0:
+                        continue
+
+                    tags = {}
+                    for col, val in row.items():
+                        if col.startswith("resourceTags/user:") and val:
+                            tags[col.replace("resourceTags/user:", "")] = val
+
+                    line_item_type = row.get("lineItem/LineItemType", "Usage")
+                    savings_arn = row.get("savingsPlan/SavingsPlanARN", "")
+                    reservation_id = row.get("reservation/SubscriptionId", "")
+
+                    if savings_arn:
+                        purchase_type = "SavingsPlan"
+                    elif reservation_id:
+                        purchase_type = "Reserved"
+                    elif line_item_type == "Spot":
+                        purchase_type = "Spot"
+                    else:
+                        purchase_type = "OnDemand"
+
+                    legal_entity = row.get("lineItem/LegalEntity", "")
+                    bill_entity = row.get("bill/BillingEntity", "")
+                    is_marketplace = (
+                        "marketplace" in legal_entity.lower() or
+                        "marketplace" in bill_entity.lower() or
+                        line_item_type == "Marketplace"
+                    )
+
+                    batch.append({
+                        "date": row_date,
+                        "aws_account_id": row.get("lineItem/UsageAccountId", ""),
+                        "service": row.get("lineItem/ProductCode", row.get("product/ProductName", "Unknown")),
+                        "region": row.get("product/region", row.get("product/regionCode", "global")),
+                        "resource_id": row.get("lineItem/ResourceId") or None,
+                        "usage_type": row.get("lineItem/UsageType") or None,
+                        "operation": row.get("lineItem/Operation") or None,
+                        "blended_cost": blended,
+                        "unblended_cost": unblended,
+                        "net_unblended_cost": float(row.get("lineItem/NetUnblendedCost", 0) or 0),
+                        "amortized_cost": float(
+                            row.get("reservation/EffectiveCost", 0) or
+                            row.get("savingsPlan/SavingsPlanEffectiveCost", 0) or
+                            unblended
+                        ),
+                        "usage_quantity": float(row.get("lineItem/UsageAmount", 0) or 0),
+                        "usage_unit": row.get("pricing/unit", ""),
+                        "purchase_type": purchase_type,
+                        "line_item_type": line_item_type,
+                        "is_marketplace": is_marketplace,
+                        "tags": json.dumps(tags) if tags else None,
+                    })
+
+                    if len(batch) >= batch_size:
+                        yield batch
+                        batch = []
+
+                except Exception as row_err:
+                    logger.debug(f"Skipping row: {row_err}")
+                    continue
+
+        if batch:
+            yield batch
+
+        logger.info(f"Finished streaming {report_key}")
+
+    except Exception as e:
+        logger.error(f"Failed to stream CUR file {report_key}: {e}", exc_info=True)
+        if batch:
+            yield batch
