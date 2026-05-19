@@ -10,19 +10,19 @@ from app.models.db_models import ControlTower
 
 logger = logging.getLogger(__name__)
 
-# Cost data is accurate up to 2 days before today
 COST_LAG_DAYS = 2
+
+# Keep these line item types even if unblended+blended = 0
+_KEEP_ZERO_COST_TYPES = {"Tax", "Fee", "OCBLateFee", "Credit", "Refund", "BundledDiscount"}
 
 
 def get_sync_date_range(days_back: int = 7) -> tuple[str, str]:
-    """Returns (start, end) where end = today - 2 days (accurate data boundary)."""
     end = date.today() - timedelta(days=COST_LAG_DAYS)
     start = end - timedelta(days=days_back - 1)
     return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
 
 
 def get_full_year_date_range() -> tuple[str, str]:
-    """Returns Jan 1 of current year to today - 2 days."""
     end = date.today() - timedelta(days=COST_LAG_DAYS)
     start = date(end.year, 1, 1)
     return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
@@ -36,25 +36,17 @@ def _get_s3_client(ct: ControlTower):
 def _get_latest_manifest(ct: ControlTower, billing_period: str) -> Optional[dict]:
     s3 = _get_s3_client(ct)
     bucket = ct.cur_s3_bucket
-    # prefix is like /daily-report/daily-report or rilcurmall/rilcurmall26NN
-    # report_name is the last segment
     prefix = ct.cur_s3_prefix.rstrip("/")
-    report_name = prefix.split("/")[-1]
-    # base_path is everything before the report_name segment
-    # e.g. /daily-report/daily-report → base = /daily-report
     parts = prefix.split("/")
     if len(parts) >= 2 and parts[-1] == parts[-2]:
-        # prefix and report name are same word repeated — use parent as base
         base_path = "/".join(parts[:-1])
     else:
         base_path = prefix
 
     billing_prefix = f"{base_path}/{billing_period}/"
-
     logger.info(f"Looking for manifest under: s3://{bucket}/{billing_prefix}")
 
     try:
-        # Use delimiter to list only timestamp subfolders — avoids 1000 object limit
         resp = s3.list_objects_v2(
             Bucket=bucket, Prefix=billing_prefix, Delimiter="/", MaxKeys=1000
         )
@@ -67,11 +59,9 @@ def _get_latest_manifest(ct: ControlTower, billing_period: str) -> Optional[dict
             logger.warning(f"No subfolders found under {billing_prefix}")
             return None
 
-        # Pick latest timestamp subfolder (sorted descending = latest first)
         latest_folder = subfolders[0]
         logger.info(f"Latest timestamp folder: {latest_folder}")
 
-        # Get manifest from that folder
         resp2 = s3.list_objects_v2(Bucket=bucket, Prefix=latest_folder, MaxKeys=50)
         manifest_keys = [
             o["Key"] for o in resp2.get("Contents", [])
@@ -96,144 +86,130 @@ def _get_latest_manifest(ct: ControlTower, billing_period: str) -> Optional[dict
 
 
 def _get_billing_periods_for_range(start_date: str, end_date: str) -> list[str]:
-    """
-    Returns list of billing period folder names that cover the given date range.
-    e.g. for April 2026 → ['20260401-20260501']
-    """
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
-
     periods = set()
     current = start
     while current <= end:
-        # Billing period is first day of month to first day of next month
         period_start = current.replace(day=1)
         if period_start.month == 12:
             period_end = period_start.replace(year=period_start.year + 1, month=1)
         else:
             period_end = period_start.replace(month=period_start.month + 1)
-
         period_str = f"{period_start.strftime('%Y%m%d')}-{period_end.strftime('%Y%m%d')}"
         periods.add(period_str)
-        # Move to next month
         current = period_end
-
     return sorted(list(periods))
 
 
+def _parse_row(row: dict, start: date, end: date) -> Optional[dict]:
+    """Parse a single CUR row. Returns None if row should be skipped."""
+    usage_start = row.get("lineItem/UsageStartDate", "")
+    if not usage_start:
+        return None
+    row_date = date.fromisoformat(usage_start[:10])
+    if row_date < start or row_date > end:
+        return None
+
+    line_item_type = row.get("lineItem/LineItemType", "Usage")
+    unblended = float(row.get("lineItem/UnblendedCost", 0) or 0)
+    blended = float(row.get("lineItem/BlendedCost", 0) or 0)
+
+    # Skip zero-cost rows EXCEPT for Tax, Fee, OCBLateFee etc.
+    if unblended == 0 and blended == 0 and line_item_type not in _KEEP_ZERO_COST_TYPES:
+        return None
+
+    tags = {}
+    for col, val in row.items():
+        if col.startswith("resourceTags/user:") and val:
+            tags[col.replace("resourceTags/user:", "")] = val
+
+    savings_arn = row.get("savingsPlan/SavingsPlanARN", "")
+    reservation_id = row.get("reservation/SubscriptionId", "")
+
+    if savings_arn:
+        purchase_type = "SavingsPlan"
+    elif reservation_id:
+        purchase_type = "Reserved"
+    elif line_item_type == "Spot":
+        purchase_type = "Spot"
+    else:
+        purchase_type = "OnDemand"
+
+    legal_entity = row.get("lineItem/LegalEntity", "")
+    bill_entity = row.get("bill/BillingEntity", "")
+    is_marketplace = (
+        "marketplace" in legal_entity.lower() or
+        "marketplace" in bill_entity.lower() or
+        line_item_type == "Marketplace"
+    )
+
+    return {
+        "date": row_date,
+        "aws_account_id": row.get("lineItem/UsageAccountId", ""),
+        "service": row.get("lineItem/ProductCode", row.get("product/ProductName", "Unknown")),
+        "region": row.get("product/region", row.get("product/regionCode", "global")),
+        "resource_id": row.get("lineItem/ResourceId") or None,
+        "usage_type": row.get("lineItem/UsageType") or None,
+        "operation": row.get("lineItem/Operation") or None,
+        "blended_cost": blended,
+        "unblended_cost": unblended,
+        "net_unblended_cost": float(row.get("lineItem/NetUnblendedCost", 0) or 0),
+        "amortized_cost": float(
+            row.get("reservation/EffectiveCost", 0) or
+            row.get("savingsPlan/SavingsPlanEffectiveCost", 0) or
+            unblended
+        ),
+        "usage_quantity": float(row.get("lineItem/UsageAmount", 0) or 0),
+        "usage_unit": row.get("pricing/unit", ""),
+        "purchase_type": purchase_type,
+        "line_item_type": line_item_type,
+        "is_marketplace": is_marketplace,
+        "tags": json.dumps(tags) if tags else None,
+    }
+
+
 def _parse_cur_csv_gz(ct: ControlTower, report_key: str, start_date: str, end_date: str) -> list[dict]:
-    """Download and stream-parse a single CUR CSV.GZ file from S3."""
     s3 = _get_s3_client(ct)
     records = []
-
+    start = date.fromisoformat(start_date)
+    end = date.fromisoformat(end_date)
     try:
-        logger.info(f"Downloading {report_key}...")
         obj = s3.get_object(Bucket=ct.cur_s3_bucket, Key=report_key)
-
-        start = date.fromisoformat(start_date)
-        end = date.fromisoformat(end_date)
-
-        # Stream decompress — never load full file into memory
         with gzip.open(obj["Body"], mode="rt", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
+            for row in csv.DictReader(f):
                 try:
-                    usage_start = row.get("lineItem/UsageStartDate", "")
-                    if not usage_start:
-                        continue
-                    row_date = date.fromisoformat(usage_start[:10])
-                    if row_date < start or row_date > end:
-                        continue
-
-                    unblended = float(row.get("lineItem/UnblendedCost", 0) or 0)
-                    blended = float(row.get("lineItem/BlendedCost", 0) or 0)
-                    if unblended == 0 and blended == 0:
-                        continue
-
-                    tags = {}
-                    for col, val in row.items():
-                        if col.startswith("resourceTags/user:") and val:
-                            tags[col.replace("resourceTags/user:", "")] = val
-
-                    line_item_type = row.get("lineItem/LineItemType", "Usage")
-                    savings_arn = row.get("savingsPlan/SavingsPlanARN", "")
-                    reservation_id = row.get("reservation/SubscriptionId", "")
-
-                    if savings_arn:
-                        purchase_type = "SavingsPlan"
-                    elif reservation_id:
-                        purchase_type = "Reserved"
-                    elif line_item_type == "Spot":
-                        purchase_type = "Spot"
-                    else:
-                        purchase_type = "OnDemand"
-
-                    legal_entity = row.get("lineItem/LegalEntity", "")
-                    bill_entity = row.get("bill/BillingEntity", "")
-                    is_marketplace = (
-                        "marketplace" in legal_entity.lower() or
-                        "marketplace" in bill_entity.lower() or
-                        line_item_type == "Marketplace"
-                    )
-
-                    records.append({
-                        "date": row_date,
-                        "aws_account_id": row.get("lineItem/UsageAccountId", ""),
-                        "service": row.get("lineItem/ProductCode", row.get("product/ProductName", "Unknown")),
-                        "region": row.get("product/region", row.get("product/regionCode", "global")),
-                        "resource_id": row.get("lineItem/ResourceId") or None,
-                        "usage_type": row.get("lineItem/UsageType") or None,
-                        "operation": row.get("lineItem/Operation") or None,
-                        "blended_cost": blended,
-                        "unblended_cost": unblended,
-                        "net_unblended_cost": float(row.get("lineItem/NetUnblendedCost", 0) or 0),
-                        "amortized_cost": float(
-                            row.get("reservation/EffectiveCost", 0) or
-                            row.get("savingsPlan/SavingsPlanEffectiveCost", 0) or
-                            unblended
-                        ),
-                        "usage_quantity": float(row.get("lineItem/UsageAmount", 0) or 0),
-                        "usage_unit": row.get("pricing/unit", ""),
-                        "purchase_type": purchase_type,
-                        "line_item_type": line_item_type,
-                        "is_marketplace": is_marketplace,
-                        "tags": json.dumps(tags) if tags else None,
-                    })
-
-                except Exception as row_err:
-                    logger.debug(f"Skipping row: {row_err}")
-                    continue
-
+                    parsed = _parse_row(row, start, end)
+                    if parsed:
+                        records.append(parsed)
+                except Exception as e:
+                    logger.debug(f"Skipping row: {e}")
         logger.info(f"Parsed {len(records)} records from {report_key}")
-
     except Exception as e:
-        logger.error(f"Failed to parse CUR file {report_key}: {e}", exc_info=True)
-
+        logger.error(f"Failed to parse {report_key}: {e}", exc_info=True)
     return records
 
 
 def fetch_cur_from_s3(ct: ControlTower, start_date: str, end_date: str) -> list[dict]:
     if not ct.cur_s3_bucket or not ct.cur_s3_prefix:
-        raise ValueError(f"CUR S3 bucket/prefix not configured for Control Tower: {ct.name}")
+        raise ValueError(f"CUR S3 bucket/prefix not configured for CT: {ct.name}")
     all_records = []
     billing_periods = _get_billing_periods_for_range(start_date, end_date)
-    logger.info(f"Fetching CUR for CT {ct.name} | periods: {billing_periods} | range: {start_date} \u2192 {end_date}")
+    logger.info(f"Fetching CUR for CT {ct.name} | periods: {billing_periods} | range: {start_date} → {end_date}")
     for period in billing_periods:
         manifest = _get_latest_manifest(ct, period)
         if not manifest:
-            logger.warning(f"No manifest found for period {period}, skipping")
+            logger.warning(f"No manifest for period {period}, skipping")
             continue
         report_keys = manifest.get("reportKeys", [])
         logger.info(f"Period {period}: found {len(report_keys)} CUR files")
         for key in report_keys:
-            records = _parse_cur_csv_gz(ct, key, start_date, end_date)
-            all_records.extend(records)
+            all_records.extend(_parse_cur_csv_gz(ct, key, start_date, end_date))
     logger.info(f"Total CUR records fetched for CT {ct.name}: {len(all_records)}")
     return all_records
 
 
 def get_report_keys_for_period(ct: ControlTower, period: str) -> list[str]:
-    """Return report keys for a billing period without downloading data."""
     manifest = _get_latest_manifest(ct, period)
     if not manifest:
         return []
@@ -243,12 +219,11 @@ def get_report_keys_for_period(ct: ControlTower, period: str) -> list[str]:
 
 
 def fetch_cur_single_file(ct: ControlTower, report_key: str, start_date: str, end_date: str) -> list[dict]:
-    """Parse a single CUR file and return records."""
     return _parse_cur_csv_gz(ct, report_key, start_date, end_date)
 
 
 def stream_cur_file_batches(ct: ControlTower, report_key: str, start_date: str, end_date: str, batch_size: int = 5000):
-    """Stream-parse a CUR file and yield batches of records to avoid memory buildup."""
+    """Stream-parse a CUR file and yield batches of records."""
     s3 = _get_s3_client(ct)
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
@@ -259,78 +234,16 @@ def stream_cur_file_batches(ct: ControlTower, report_key: str, start_date: str, 
         obj = s3.get_object(Bucket=ct.cur_s3_bucket, Key=report_key)
 
         with gzip.open(obj["Body"], mode="rt", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
+            for row in csv.DictReader(f):
                 try:
-                    usage_start = row.get("lineItem/UsageStartDate", "")
-                    if not usage_start:
-                        continue
-                    row_date = date.fromisoformat(usage_start[:10])
-                    if row_date < start or row_date > end:
-                        continue
-
-                    unblended = float(row.get("lineItem/UnblendedCost", 0) or 0)
-                    blended = float(row.get("lineItem/BlendedCost", 0) or 0)
-                    if unblended == 0 and blended == 0:
-                        continue
-
-                    tags = {}
-                    for col, val in row.items():
-                        if col.startswith("resourceTags/user:") and val:
-                            tags[col.replace("resourceTags/user:", "")] = val
-
-                    line_item_type = row.get("lineItem/LineItemType", "Usage")
-                    savings_arn = row.get("savingsPlan/SavingsPlanARN", "")
-                    reservation_id = row.get("reservation/SubscriptionId", "")
-
-                    if savings_arn:
-                        purchase_type = "SavingsPlan"
-                    elif reservation_id:
-                        purchase_type = "Reserved"
-                    elif line_item_type == "Spot":
-                        purchase_type = "Spot"
-                    else:
-                        purchase_type = "OnDemand"
-
-                    legal_entity = row.get("lineItem/LegalEntity", "")
-                    bill_entity = row.get("bill/BillingEntity", "")
-                    is_marketplace = (
-                        "marketplace" in legal_entity.lower() or
-                        "marketplace" in bill_entity.lower() or
-                        line_item_type == "Marketplace"
-                    )
-
-                    batch.append({
-                        "date": row_date,
-                        "aws_account_id": row.get("lineItem/UsageAccountId", ""),
-                        "service": row.get("lineItem/ProductCode", row.get("product/ProductName", "Unknown")),
-                        "region": row.get("product/region", row.get("product/regionCode", "global")),
-                        "resource_id": row.get("lineItem/ResourceId") or None,
-                        "usage_type": row.get("lineItem/UsageType") or None,
-                        "operation": row.get("lineItem/Operation") or None,
-                        "blended_cost": blended,
-                        "unblended_cost": unblended,
-                        "net_unblended_cost": float(row.get("lineItem/NetUnblendedCost", 0) or 0),
-                        "amortized_cost": float(
-                            row.get("reservation/EffectiveCost", 0) or
-                            row.get("savingsPlan/SavingsPlanEffectiveCost", 0) or
-                            unblended
-                        ),
-                        "usage_quantity": float(row.get("lineItem/UsageAmount", 0) or 0),
-                        "usage_unit": row.get("pricing/unit", ""),
-                        "purchase_type": purchase_type,
-                        "line_item_type": line_item_type,
-                        "is_marketplace": is_marketplace,
-                        "tags": json.dumps(tags) if tags else None,
-                    })
-
-                    if len(batch) >= batch_size:
-                        yield batch
-                        batch = []
-
-                except Exception as row_err:
-                    logger.debug(f"Skipping row: {row_err}")
-                    continue
+                    parsed = _parse_row(row, start, end)
+                    if parsed:
+                        batch.append(parsed)
+                        if len(batch) >= batch_size:
+                            yield batch
+                            batch = []
+                except Exception as e:
+                    logger.debug(f"Skipping row: {e}")
 
         if batch:
             yield batch
@@ -338,6 +251,6 @@ def stream_cur_file_batches(ct: ControlTower, report_key: str, start_date: str, 
         logger.info(f"Finished streaming {report_key}")
 
     except Exception as e:
-        logger.error(f"Failed to stream CUR file {report_key}: {e}", exc_info=True)
+        logger.error(f"Failed to stream {report_key}: {e}", exc_info=True)
         if batch:
             yield batch
