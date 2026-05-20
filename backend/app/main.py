@@ -71,3 +71,8 @@ async def startup():
 @app.get("/health")
 async def health():
     return {"status": "ok", "app": "Finoptix"}
+
+
+@app.get("/api/health")
+async def health_api():
+    return {"status": "ok", "app": "Finoptix"}

@@ -12,10 +12,14 @@ services:
     command: >
       postgres
       -c max_connections=100
-      -c shared_buffers=256MB
-      -c effective_cache_size=768MB
-      -c work_mem=4MB
-      -c maintenance_work_mem=64MB
+      -c shared_buffers=512MB
+      -c effective_cache_size=1536MB
+      -c work_mem=16MB
+      -c maintenance_work_mem=128MB
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -26,8 +30,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 768M
+          cpus: "1.0"
+          memory: 2048M
 
   backend:
     build: ./backend
@@ -50,7 +54,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_URL: http://13.234.82.78:8000/api
+      NEXT_PUBLIC_API_URL: https://finoptix.novactech.in/api
     depends_on:
       - backend
     deploy:
