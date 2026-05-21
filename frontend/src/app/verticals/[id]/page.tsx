@@ -149,11 +149,12 @@ export default function VerticalDetailPage() {
     setAccountResources([]);
     setSelectedResources(new Set());
     setServiceFilter("");
-    // Load towers with sub-accounts for CT hierarchy
-    const res = await axios.get(`${BASE}/api/towers/`, { headers });
-    const towersData: Tower[] = res.data;
+    // Load towers AND businesses in parallel
+    const [towersRes] = await Promise.all([
+      axios.get(`${BASE}/api/towers/`, { headers }),
+    ]);
+    const towersData: Tower[] = towersRes.data;
     setTowers(towersData);
-    // Flatten accounts with CT info
     const flat: Account[] = towersData.flatMap((t) =>
       (t.sub_accounts || []).map((s) => ({
         aws_account_id: s.aws_account_id,
@@ -163,6 +164,17 @@ export default function VerticalDetailPage() {
       }))
     );
     setAccounts(flat);
+    // Reload businesses if empty
+    if (businesses.length === 0) {
+      const bizRes = await axios.get(`${BASE}/api/verticals/${id}/businesses`, { headers });
+      setBusinesses(bizRes.data || []);
+    }
+    // Reload vertical name if empty
+    if (!vertical) {
+      const vertsRes = await axios.get(`${BASE}/api/verticals/`, { headers });
+      const v = (vertsRes.data as any[]).find((x: any) => x.id === id);
+      setVertical(v || null);
+    }
   };
 
   const loadAccountResources = async (accountIds: Set<string>) => {
