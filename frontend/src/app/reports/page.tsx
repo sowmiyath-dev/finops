@@ -117,42 +117,59 @@ function ReportsContent() {
 
   const defaultEnd = boundary?.accurate_until || new Date().toISOString().slice(0, 10);
   const defaultStart = (() => {
-    const d = new Date(defaultEnd);
-    d.setDate(d.getDate() - 29);
-    return d.toISOString().slice(0, 10);
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 10);
+  })();
+  const defaultEndLastMonth = (() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 0).toISOString().slice(0, 10);
   })();
 
   const [startDate, setStartDate] = useState(defaultStart);
-  const [endDate, setEndDate] = useState(defaultEnd);
+  const [endDate, setEndDate] = useState(defaultEndLastMonth);
   const [selectedCTs, setSelectedCTs] = useState<string[]>(params.get("ct") ? [params.get("ct")!] : []);
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [selectedRegions, setSelectedRegions] = useState<string[]>([]);
   const [selectedPurchaseTypes, setSelectedPurchaseTypes] = useState<string[]>([]);
   const [selectedChargeTypes, setSelectedChargeTypes] = useState<string[]>([]);
-  const [marketplaceOnly, setMarketplaceOnly] = useState<string>("all"); // all | yes | no
+  const [marketplaceOnly, setMarketplaceOnly] = useState<string>("all");
   const [metric, setMetric] = useState("unblended_cost");
   const [groupBy, setGroupBy] = useState("account");
   const [granularity, setGranularity] = useState("daily");
   const [tagKey, setTagKey] = useState("");
   const [tagValue, setTagValue] = useState("");
-  const [quickRange, setQuickRange] = useState("30d");
+  const [quickRange, setQuickRange] = useState("last-month");
   const [exporting, setExporting] = useState(false);
   const [filterKey, setFilterKey] = useState(0);
   const [activeFilter, setActiveFilter] = useState<any>(null);
 
-  useEffect(() => {
-    if (boundary) {
-      setEndDate(boundary.accurate_until);
-      applyQuickRange(quickRange, boundary.accurate_until);
+  // No auto-apply on boundary load — user picks dates manually
+  const applyQuickRange = (range: string) => {
+    const now = new Date();
+    const accurate = boundary?.accurate_until || now.toISOString().slice(0, 10);
+    if (range === "this-month") {
+      setStartDate(new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10));
+      setEndDate(accurate);
+    } else if (range === "last-month") {
+      setStartDate(new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 10));
+      setEndDate(new Date(now.getFullYear(), now.getMonth(), 0).toISOString().slice(0, 10));
+    } else if (range === "7d") {
+      const e = new Date(accurate);
+      const s = new Date(e); s.setDate(s.getDate() - 6);
+      setStartDate(s.toISOString().slice(0, 10));
+      setEndDate(accurate);
+    } else if (range === "30d") {
+      const e = new Date(accurate);
+      const s = new Date(e); s.setDate(s.getDate() - 29);
+      setStartDate(s.toISOString().slice(0, 10));
+      setEndDate(accurate);
+    } else if (range === "90d") {
+      const e = new Date(accurate);
+      const s = new Date(e); s.setDate(s.getDate() - 89);
+      setStartDate(s.toISOString().slice(0, 10));
+      setEndDate(accurate);
     }
-  }, [boundary]);
-
-  const applyQuickRange = (range: string, end: string) => {
-    const d = new Date(end);
-    const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
-    d.setDate(d.getDate() - days + 1);
-    setStartDate(d.toISOString().slice(0, 10));
     setQuickRange(range);
   };
 
@@ -184,7 +201,7 @@ function ReportsContent() {
     setSelectedRegions([]); setSelectedPurchaseTypes([]); setSelectedChargeTypes([]); setMarketplaceOnly("all");
     setTagKey(""); setTagValue("");
     setMetric("unblended_cost"); setGroupBy("account"); setGranularity("daily");
-    if (boundary) applyQuickRange("30d", boundary.accurate_until);
+    applyQuickRange("last-month");
   };
 
   const endpoint = groupBy === "account" ? "/reports/account-wise"
@@ -265,11 +282,16 @@ function ReportsContent() {
               {/* Quick range */}
               <div>
                 <label className={labelCls}>Quick Range</label>
-                <div className="flex gap-1">
-                  {["7d", "30d", "90d"].map((r) => (
-                    <button key={r} onClick={() => boundary && applyQuickRange(r, boundary.accurate_until)}
-                      className={qBtnCls(quickRange === r)}>
-                      {r}
+                <div className="grid grid-cols-2 gap-1">
+                  {[
+                    { label: "This Month", value: "this-month" },
+                    { label: "Last Month", value: "last-month" },
+                    { label: "Last 7d",    value: "7d" },
+                    { label: "Last 30d",   value: "30d" },
+                  ].map((r) => (
+                    <button key={r.value} onClick={() => applyQuickRange(r.value)}
+                      className={qBtnCls(quickRange === r.value)}>
+                      {r.label}
                     </button>
                   ))}
                 </div>

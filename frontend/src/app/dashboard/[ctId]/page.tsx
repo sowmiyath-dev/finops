@@ -29,7 +29,27 @@ const TABS = [
 function getLastMonth() {
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const end = new Date(now.getFullYear(), now.getMonth(), 0);
+  const end = new Date(now.getFullYear(), now.getMonth(), 0); // day 0 = last day of prev month
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10),
+  };
+}
+
+function getThisMonth(accurateUntil?: string) {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const end = accurateUntil ? accurateUntil : now.toISOString().slice(0, 10);
+  return {
+    start: start.toISOString().slice(0, 10),
+    end,
+  };
+}
+
+function getLast7Days(accurateUntil?: string) {
+  const end = accurateUntil ? new Date(accurateUntil) : new Date();
+  const start = new Date(end);
+  start.setDate(start.getDate() - 6);
   return {
     start: start.toISOString().slice(0, 10),
     end: end.toISOString().slice(0, 10),
@@ -174,9 +194,9 @@ export default function CTDetailPage() {
           {/* Quick presets */}
           <div className="flex border border-gray-300 rounded-md overflow-hidden">
             {[
-              { label: "This Month", fn: () => { const n = new Date(); setStartDate(new Date(n.getFullYear(), n.getMonth(), 1).toISOString().slice(0,10)); setEndDate(boundary?.accurate_until || n.toISOString().slice(0,10)); }},
+              { label: "This Month", fn: () => { const r = getThisMonth(boundary?.accurate_until); setStartDate(r.start); setEndDate(r.end); }},
               { label: "Last Month", fn: () => { const r = getLastMonth(); setStartDate(r.start); setEndDate(r.end); }},
-              { label: "Last 7d", fn: () => { const e = boundary?.accurate_until || new Date().toISOString().slice(0,10); const s = new Date(e); s.setDate(s.getDate()-6); setStartDate(s.toISOString().slice(0,10)); setEndDate(e); }},
+              { label: "Last 7d",    fn: () => { const r = getLast7Days(boundary?.accurate_until); setStartDate(r.start); setEndDate(r.end); }},
             ].map((p) => (
               <button key={p.label} onClick={p.fn}
                 className="px-3 py-2 text-xs font-bold bg-white text-black hover:bg-gray-50 border-l border-gray-300 first:border-l-0 transition">
