@@ -785,18 +785,38 @@ export default function VerticalDetailPage() {
               </div>
             )}
 
-            <div className="flex justify-end gap-3 flex-shrink-0">
-              <button onClick={() => setShowBulkTag(false)}
-                className="px-4 py-2 border border-gray-300 rounded-md text-xs font-bold text-black hover:bg-gray-50 transition">
-                Cancel
-              </button>
-              <button
-                onClick={applyBulkTag}
-                disabled={tagging || selectedResources.size === 0}
-                className="px-5 py-2 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-md transition disabled:opacity-50"
-              >
-                {tagging ? "Tagging..." : `Tag ${selectedResources.size} Resource${selectedResources.size !== 1 ? "s" : ""} → Vertical=${vertical?.name}`}
-              </button>
+            <div className="flex-shrink-0 border-t border-gray-200 pt-4 mt-2">
+              {/* Business tag selector — shown after resources are selected */}
+              <div className="mb-3">
+                <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">
+                  Tag as Business <span className="text-gray-400 font-normal">(optional)</span>
+                </label>
+                <select
+                  value={selectedBusiness}
+                  onChange={(e) => setSelectedBusiness(e.target.value)}
+                  className="w-full border border-gray-400 rounded-md px-3 py-2 text-sm text-black focus:border-blue-900 outline-none">
+                  <option value="">— Vertical tag only —</option>
+                  {businesses.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-gray-500 mt-1">
+                  Tags applied: <span className="font-bold text-blue-900">Vertical={vertical?.name}</span>
+                  {selectedBusiness && <span className="font-bold text-green-700"> + Business={businesses.find(b => b.id === selectedBusiness)?.name}</span>}
+                </p>
+              </div>
+              <div className="flex justify-end gap-3">
+                <button onClick={() => setShowBulkTag(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-xs font-bold text-black hover:bg-gray-50 transition">
+                  Cancel
+                </button>
+                <button
+                  onClick={applyBulkTag}
+                  disabled={tagging || selectedResources.size === 0}
+                  className="px-5 py-2 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-md transition disabled:opacity-50">
+                  {tagging ? "Tagging..." : `Tag ${selectedResources.size} Resource${selectedResources.size !== 1 ? "s" : ""}`}
+                </button>
+              </div>
             </div>
           </div>
         </div>
