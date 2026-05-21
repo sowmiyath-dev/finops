@@ -10,7 +10,7 @@ from app.models.db_models import ControlTower
 
 logger = logging.getLogger(__name__)
 
-COST_LAG_DAYS = 2
+COST_LAG_DAYS = 1
 
 # Keep these line item types even if unblended+blended = 0
 _KEEP_ZERO_COST_TYPES = {"Tax", "Fee", "OCBLateFee", "Credit", "Refund", "BundledDiscount"}

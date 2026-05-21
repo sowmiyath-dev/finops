@@ -31,17 +31,19 @@ _scheduler_tasks: set = set()
 
 
 async def _daily_sync_scheduler():
-    """Fires once every day at 10:30 AM UTC."""
+    """Fires once every day at 10:30 AM IST (05:00 UTC)."""
     from app.routers.towers import _do_sync
+    from datetime import timedelta
     logger.info("Daily sync scheduler started")
     while True:
         now = datetime.now(timezone.utc)
-        target_hour, target_minute = 10, 30
+        # 10:30 AM IST = 05:00 AM UTC
+        target_hour, target_minute = 5, 0
         next_run = now.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
         if now >= next_run:
-            next_run = next_run.replace(day=next_run.day + 1)
+            next_run = next_run + timedelta(days=1)
         wait_seconds = (next_run - now).total_seconds()
-        logger.info(f"Next daily sync in {wait_seconds:.0f}s at {next_run.isoformat()}")
+        logger.info(f"Next daily sync in {wait_seconds:.0f}s at {next_run.isoformat()} UTC (10:30 AM IST)")
         await asyncio.sleep(wait_seconds)
 
         try:
