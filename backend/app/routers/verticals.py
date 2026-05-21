@@ -407,6 +407,31 @@ async def get_business(
             "vertical_id": str(b.vertical_id)}
 
 
+@router.patch("/businesses/{business_id}", status_code=200)
+async def update_business(
+    business_id: str,
+    payload: BusinessCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if user.role == "viewer":
+        raise HTTPException(403)
+    b = (await db.execute(select(Business).where(Business.id == business_id))).scalar_one_or_none()
+    if not b:
+        raise HTTPException(404)
+    if payload.name:
+        b.name = payload.name
+    if payload.owner_name is not None:
+        b.owner_name = payload.owner_name
+    if payload.owner_email is not None:
+        b.owner_email = payload.owner_email
+    if payload.color:
+        b.color = payload.color
+    await db.commit()
+    await db.refresh(b)
+    return {"id": str(b.id), "name": b.name, "owner_name": b.owner_name, "owner_email": b.owner_email}
+
+
 @router.delete("/businesses/{business_id}", status_code=204)
 async def delete_business(
     business_id: str,

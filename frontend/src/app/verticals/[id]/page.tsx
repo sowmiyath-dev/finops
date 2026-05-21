@@ -402,20 +402,21 @@ export default function VerticalDetailPage() {
         <div className="bg-white rounded-lg border border-gray-300 shadow-sm mb-6">
           <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between">
             <h2 className="text-sm font-bold text-black">Businesses ({businesses.length})</h2>
-            <p className="text-xs text-gray-500">Tag resources with <span className="font-bold">Business=name</span> to see cost here</p>
+            <p className="text-xs text-gray-500">Click a business to view cost details</p>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 p-4">
             {businesses.map((b) => (
               <div key={b.id}
+                onClick={() => router.push(`/verticals/${id}/business/${b.id}`)}
                 className="rounded-lg border border-gray-200 p-3 hover:shadow-md hover:border-blue-900 transition cursor-pointer"
                 style={{ borderLeft: `4px solid ${b.color || vertical?.color || "#0f2d5e"}` }}>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-sm font-bold text-black">{b.name}</span>
-                </div>
-                {b.owner_name && (
-                  <div className="text-xs text-gray-500">Owner: {b.owner_name}</div>
+                <div className="text-sm font-bold text-black mb-1">{b.name}</div>
+                {b.owner_name ? (
+                  <div className="text-xs text-gray-500 truncate">👤 {b.owner_name}</div>
+                ) : (
+                  <div className="text-xs text-gray-400">No owner</div>
                 )}
-                <div className="text-[10px] text-gray-400 mt-1 font-mono">Business={b.name}</div>
+                <div className="text-[10px] text-blue-900 font-bold mt-1.5">View Cost →</div>
               </div>
             ))}
           </div>
