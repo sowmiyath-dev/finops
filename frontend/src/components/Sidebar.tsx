@@ -26,29 +26,7 @@ const STATIC_NAV: NavItem[] = [
     id: "org",
     label: "Organization",
     icon: Building2,
-    children: [
-      {
-        id: "aws",
-        label: "Amazon Web Services",
-        icon: Globe,
-        badge: "Active",
-        href: "/dashboard",
-      },
-      {
-        id: "azure",
-        label: "Microsoft Azure",
-        icon: Globe,
-        badge: "Soon",
-        href: "/clouds/azure",
-      },
-      {
-        id: "gcp",
-        label: "Google Cloud",
-        icon: Globe,
-        badge: "Soon",
-        href: "/clouds/gcp",
-      },
-    ],
+    href: "/org",
   },
   {
     id: "verticals",
