@@ -115,11 +115,6 @@ function ReportsContent() {
     (t.sub_accounts || []).map((s: any) => ({ ...s, ct_name: t.name }))
   );
 
-  // Filter accounts based on selected CTs
-  const filteredAccounts = selectedCTs.length > 0
-    ? allAccounts.filter((a: any) => selectedCTs.includes(a.ct_name))
-    : allAccounts;
-
   const defaultStart = (() => {
     const now = new Date();
     const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
@@ -140,6 +135,11 @@ function ReportsContent() {
     setSelectedCTs(cts);
     setSelectedAccounts([]);
   };
+
+  // Filter accounts based on selected CTs
+  const filteredAccounts = selectedCTs.length > 0
+    ? allAccounts.filter((a: any) => selectedCTs.includes(a.ct_name))
+    : allAccounts;
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [selectedRegions, setSelectedRegions] = useState<string[]>([]);
