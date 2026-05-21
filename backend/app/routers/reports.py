@@ -1,4 +1,4 @@
-import csv, io, json
+import csv, io, json, time
 from datetime import date, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -12,6 +12,19 @@ from app.services.auth_service import get_current_user
 from app.services.cost_service import COST_LAG_DAYS
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+
+# Simple in-memory cache for metadata — these rarely change
+_cache: dict = {}
+_CACHE_TTL = 600  # 10 minutes
+
+def _cache_get(key: str):
+    e = _cache.get(key)
+    if e and time.time() - e["t"] < _CACHE_TTL:
+        return e["d"]
+    return None
+
+def _cache_set(key: str, data):
+    _cache[key] = {"d": data, "t": time.time()}
 
 METRIC_MAP = {
     "unblended_cost": CostRecord.unblended_cost,
@@ -336,19 +349,25 @@ async def export_csv(f: ReportFilter, db: AsyncSession = Depends(get_db), user: 
 @router.get("/meta/services")
 async def get_services(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     ct_ids = await _get_user_ct_ids(db, user)
-    result = await db.execute(
-        select(CostRecord.service).where(CostRecord.control_tower_id.in_(ct_ids)).distinct()
-    )
-    return sorted([r[0] for r in result.all()])
+    key = f"svc_{'_'.join(sorted(ct_ids))}"
+    if (cached := _cache_get(key)) is not None:
+        return cached
+    result = await db.execute(select(CostRecord.service).where(CostRecord.control_tower_id.in_(ct_ids)).distinct())
+    data = sorted([r[0] for r in result.all()])
+    _cache_set(key, data)
+    return data
 
 
 @router.get("/meta/regions")
 async def get_regions(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     ct_ids = await _get_user_ct_ids(db, user)
-    result = await db.execute(
-        select(CostRecord.region).where(CostRecord.control_tower_id.in_(ct_ids)).distinct()
-    )
-    return sorted([r[0] for r in result.all() if r[0]])
+    key = f"reg_{'_'.join(sorted(ct_ids))}"
+    if (cached := _cache_get(key)) is not None:
+        return cached
+    result = await db.execute(select(CostRecord.region).where(CostRecord.control_tower_id.in_(ct_ids)).distinct())
+    data = sorted([r[0] for r in result.all() if r[0]])
+    _cache_set(key, data)
+    return data
 
 
 @router.get("/meta/tag-keys")
@@ -385,13 +404,18 @@ async def get_sync_logs(limit: int = 100, db: AsyncSession = Depends(get_db), us
 @router.get("/meta/charge-types")
 async def get_charge_types(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     ct_ids = await _get_user_ct_ids(db, user)
+    key = f"ct_{'_'.join(sorted(ct_ids))}"
+    if (cached := _cache_get(key)) is not None:
+        return cached
     result = await db.execute(
         select(CostRecord.line_item_type).where(
             CostRecord.control_tower_id.in_(ct_ids),
             CostRecord.line_item_type.isnot(None)
         ).distinct()
     )
-    return sorted([r[0] for r in result.all() if r[0]])
+    data = sorted([r[0] for r in result.all() if r[0]])
+    _cache_set(key, data)
+    return data
 
 
 @router.get("/meta/resources-by-account")

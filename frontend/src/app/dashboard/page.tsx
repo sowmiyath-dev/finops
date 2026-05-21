@@ -10,17 +10,25 @@ import { Plus, RefreshCw, Trash2, ChevronRight, Clock, Building2, Users, AlertCi
 
 function SyncProgressBar({ ctId }: { ctId: string }) {
   const [progress, setProgress] = useState<{ percent: number; status: string; message: string } | null>(null);
+  const [polling, setPolling] = useState(true);
+
   useEffect(() => {
+    if (!polling) return;
     const iv = setInterval(async () => {
       try {
         const res = await api.get(`/towers/${ctId}/sync-status`);
         setProgress(res.data);
-        if (res.data.status === "done" || res.data.status === "idle") clearInterval(iv);
-      } catch {}
-    }, 2000);
+        // Stop polling when idle or done
+        if (res.data.status === "done" || res.data.status === "idle" || !res.data.status) {
+          setPolling(false);
+          clearInterval(iv);
+        }
+      } catch { setPolling(false); }
+    }, 10000); // poll every 10s instead of 2s
     return () => clearInterval(iv);
-  }, [ctId]);
-  if (!progress || progress.status === "idle" || progress.status === "done") return null;
+  }, [ctId, polling]);
+
+  if (!progress || progress.status === "idle" || progress.status === "done" || !progress.status) return null;
   return (
     <div className="mt-2">
       <div className="flex justify-between text-xs mb-1">
@@ -48,13 +56,15 @@ export default function DashboardPage() {
     queryKey: ["towers"],
     queryFn: () => api.get("/towers/").then((r) => r.data),
     enabled: !!token,
-    refetchInterval: 30000,
+    staleTime: 5 * 60 * 1000,   // consider fresh for 5 minutes
+    refetchInterval: 5 * 60 * 1000, // refetch every 5 minutes
   });
 
   const { data: boundary } = useQuery({
     queryKey: ["boundary"],
     queryFn: () => api.get("/reports/data-boundary").then((r) => r.data),
     enabled: !!token,
+    staleTime: 60 * 60 * 1000, // fresh for 1 hour
   });
 
   const syncMutation = useMutation({

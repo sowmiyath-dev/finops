@@ -73,36 +73,42 @@ function ReportsContent() {
     queryKey: ["boundary"],
     queryFn: () => api.get("/reports/data-boundary").then((r) => r.data),
     enabled: !!token,
+    staleTime: 60 * 60 * 1000,
   });
 
   const { data: towers = [] } = useQuery({
     queryKey: ["towers"],
     queryFn: () => api.get("/towers/").then((r) => r.data),
     enabled: !!token,
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: services = [] } = useQuery({
     queryKey: ["meta-services"],
     queryFn: () => api.get("/reports/meta/services").then((r) => r.data),
     enabled: !!token,
+    staleTime: 30 * 60 * 1000, // fresh for 30 minutes
   });
 
   const { data: regions = [] } = useQuery({
     queryKey: ["meta-regions"],
     queryFn: () => api.get("/reports/meta/regions").then((r) => r.data),
     enabled: !!token,
+    staleTime: 30 * 60 * 1000,
   });
 
   const { data: tagKeys = [] } = useQuery({
     queryKey: ["tag-keys"],
     queryFn: () => api.get("/reports/meta/tag-keys").then((r) => r.data),
     enabled: !!token,
+    staleTime: 30 * 60 * 1000,
   });
 
   const { data: chargeTypes = [] } = useQuery({
     queryKey: ["charge-types"],
     queryFn: () => api.get("/reports/meta/charge-types").then((r) => r.data),
     enabled: !!token,
+    staleTime: 30 * 60 * 1000,
   });
 
   const allAccounts = towers.flatMap((t: any) =>

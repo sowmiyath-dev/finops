@@ -221,34 +221,48 @@ export default function Sidebar() {
     if (saved) setPinned(new Set(JSON.parse(saved)));
   }, []);
 
-  // Load verticals dynamically
+  // Load verticals dynamically — cached, only fetches once per session
   useEffect(() => {
     if (!token) return;
-    axios.get(`${API}/api/verticals/`, { headers: { Authorization: `Bearer ${token}` } })
+    // Check session cache first
+    const cached = sessionStorage.getItem("finoptix_verticals");
+    if (cached) {
+      try {
+        const verts = JSON.parse(cached);
+        if (verts.length > 0) { updateVerticals(verts); return; }
+      } catch {}
+    }
+    const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api").replace(/\/api$/, "");
+    axios.get(`${BASE}/api/verticals/`, { headers: { Authorization: `Bearer ${token}` } })
       .then((res) => {
         const verts: { id: string; name: string }[] = res.data;
         if (verts.length === 0) return;
-        setNavItems((prev) =>
-          prev.map((item) =>
-            item.id === "verticals"
-              ? {
-                  ...item,
-                  children: [
-                    { id: "verticals-all", label: "All Verticals", icon: LayoutDashboard, href: "/verticals" },
-                    ...verts.map((v) => ({
-                      id: `vertical-${v.id}`,
-                      label: v.name,
-                      icon: Layers,
-                      href: `/verticals/${v.id}`,
-                    })),
-                  ],
-                }
-              : item
-          )
-        );
+        sessionStorage.setItem("finoptix_verticals", JSON.stringify(verts));
+        updateVerticals(verts);
       })
       .catch(() => {});
   }, [token]);
+
+  const updateVerticals = (verts: { id: string; name: string }[]) => {
+    setNavItems((prev) =>
+      prev.map((item) =>
+        item.id === "verticals"
+          ? {
+              ...item,
+              children: [
+                { id: "verticals-all", label: "All Verticals", icon: LayoutDashboard, href: "/verticals" },
+                ...verts.map((v) => ({
+                  id: `vertical-${v.id}`,
+                  label: v.name,
+                  icon: Layers,
+                  href: `/verticals/${v.id}`,
+                })),
+              ],
+            }
+          : item
+      )
+    );
+  };
 
   const togglePin = (id: string) => {
     setPinned((prev) => {

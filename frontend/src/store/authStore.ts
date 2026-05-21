@@ -10,7 +10,7 @@ interface AuthState {
   fetchMe: () => Promise<void>;
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   token: typeof window !== "undefined" ? sessionStorage.getItem("token") : null,
 
@@ -23,10 +23,13 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   logout: () => {
     sessionStorage.removeItem("token");
+    sessionStorage.removeItem("finoptix_verticals"); // clear vertical cache on logout
     set({ user: null, token: null });
   },
 
   fetchMe: async () => {
+    // Skip if user already loaded — avoids repeated /auth/me on every page navigation
+    if (get().user) return;
     try {
       const { data } = await api.get("/auth/me");
       set({ user: data });
