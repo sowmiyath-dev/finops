@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  CartesianGrid, Legend, LineChart, Line,
+  CartesianGrid, Cell,
 } from "recharts";
 
 const COLORS = ["#0f2d5e","#ec7211","#1d8348","#8e44ad","#1a6fa8","#c0392b","#16a085","#e67e22","#2980b9","#27ae60"];
@@ -228,7 +228,7 @@ export default function CTDetailPage() {
                 <Tooltip formatter={(v: number) => [fmt(v), "Cost"]} />
                 <Bar dataKey="cost" radius={[4, 4, 0, 0]}>
                   {stackedData.map((_: any, i: number) => (
-                    <rect key={i} fill={COLORS[i % COLORS.length]} />
+                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
                   ))}
                 </Bar>
               </BarChart>
