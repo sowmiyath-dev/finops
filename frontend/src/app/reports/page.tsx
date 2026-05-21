@@ -133,7 +133,16 @@ function ReportsContent() {
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [selectedRegions, setSelectedRegions] = useState<string[]>([]);
   const [selectedPurchaseTypes, setSelectedPurchaseTypes] = useState<string[]>([]);
-  const [selectedChargeTypes, setSelectedChargeTypes] = useState<string[]>([]);
+  const DEFAULT_CHARGE_TYPES = [
+    "Usage",
+    "SavingsPlanCoveredUsage",
+    "SavingsPlanRecurringFee",
+    "SavingsPlanNegation",
+    "RIFee",
+    "DiscountedUsage",
+  ];
+
+  const [selectedChargeTypes, setSelectedChargeTypes] = useState<string[]>(DEFAULT_CHARGE_TYPES);
   const [marketplaceOnly, setMarketplaceOnly] = useState<string>("all");
   const [metric, setMetric] = useState("unblended_cost");
   const [groupBy, setGroupBy] = useState("account");
@@ -198,7 +207,7 @@ function ReportsContent() {
 
   const resetFilters = () => {
     setSelectedCTs([]); setSelectedAccounts([]); setSelectedServices([]);
-    setSelectedRegions([]); setSelectedPurchaseTypes([]); setSelectedChargeTypes([]); setMarketplaceOnly("all");
+    setSelectedRegions([]); setSelectedPurchaseTypes([]); setSelectedChargeTypes(DEFAULT_CHARGE_TYPES); setMarketplaceOnly("all");
     setTagKey(""); setTagValue("");
     setMetric("unblended_cost"); setGroupBy("account"); setGranularity("daily");
     applyQuickRange("last-month");
@@ -344,13 +353,47 @@ function ReportsContent() {
               <MultiSelect label="Regions" options={regions} selected={selectedRegions} onChange={setSelectedRegions} />
               <MultiSelect label="Purchase Types" options={["OnDemand", "Reserved", "SavingsPlan", "Spot"]} selected={selectedPurchaseTypes} onChange={setSelectedPurchaseTypes} />
 
-              {/* Charge Type */}
-              <MultiSelect
-                label="Charge Type"
-                options={chargeTypes.length > 0 ? chargeTypes : ["Usage","SavingsPlanCoveredUsage","RIFee","DiscountedUsage","Credit","Tax","Fee","Refund"]}
-                selected={selectedChargeTypes}
-                onChange={setSelectedChargeTypes}
-              />
+              {/* Charge Type — with friendly names and smart defaults */}
+              <div>
+                <label className={labelCls}>Charge Types</label>
+                <div className="space-y-1 border border-gray-400 rounded-md p-2 bg-white max-h-48 overflow-y-auto">
+                  {[
+                    { value: "Usage",                    label: "Usage",                  default: true },
+                    { value: "SavingsPlanCoveredUsage",  label: "Savings Plan Usage",     default: true },
+                    { value: "SavingsPlanRecurringFee",  label: "Savings Plan Fee",       default: true },
+                    { value: "SavingsPlanNegation",      label: "Savings Plan Negation",  default: true },
+                    { value: "RIFee",                    label: "Reserved Instance Fee",  default: true },
+                    { value: "DiscountedUsage",          label: "Discounted Usage",       default: true },
+                    { value: "Tax",                      label: "Tax",                    default: false },
+                    { value: "DistributorDiscount",      label: "Distributor Discount",   default: false },
+                    { value: "Credit",                   label: "Credit",                 default: false },
+                    { value: "Refund",                   label: "Refund",                 default: false },
+                    { value: "OCBLateFee",               label: "Late Fee (OCB)",         default: false },
+                    { value: "Fee",                      label: "Fee",                    default: false },
+                    { value: "BundledDiscount",          label: "Bundled Discount",       default: false },
+                  ].map((ct) => (
+                    <label key={ct.value} className="flex items-center gap-2 px-1 py-1 rounded cursor-pointer hover:bg-blue-50 transition">
+                      <input
+                        type="checkbox"
+                        checked={selectedChargeTypes.includes(ct.value)}
+                        onChange={() => {
+                          setSelectedChargeTypes((prev) =>
+                            prev.includes(ct.value)
+                              ? prev.filter((x) => x !== ct.value)
+                              : [...prev, ct.value]
+                          );
+                        }}
+                        className="w-3 h-3 accent-blue-900"
+                      />
+                      <span className="text-xs font-medium text-black">{ct.label}</span>
+                      {!ct.default && (
+                        <span className="text-[10px] text-gray-400 ml-auto">excluded</span>
+                      )}
+                    </label>
+                  ))}
+                </div>
+                <p className="text-[10px] text-gray-500 mt-1">Tax &amp; discounts excluded by default</p>
+              </div>
 
               {/* Marketplace */}
               <div>
