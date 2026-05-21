@@ -129,11 +129,27 @@ class Vertical(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
 
-class Owner(Base):
-    """Team or person owning applications within a vertical."""
-    __tablename__ = "owners"
+class Business(Base):
+    """Business entity within a vertical (e.g. IDC, SFL, SGIC)."""
+    __tablename__ = "businesses"
+    __table_args__ = (Index("ix_business_vertical", "vertical_id"),)
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     vertical_id = Column(UUID(as_uuid=True), ForeignKey("verticals.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    color = Column(String, default="#0f2d5e")
+    owner_name = Column(String, nullable=True)  # business owner
+    owner_email = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class Owner(Base):
+    """Team or person owning applications within a business."""
+    __tablename__ = "owners"
+    __table_args__ = (Index("ix_owner_business", "business_id"),)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    vertical_id = Column(UUID(as_uuid=True), ForeignKey("verticals.id", ondelete="CASCADE"), nullable=False)
+    business_id = Column(UUID(as_uuid=True), ForeignKey("businesses.id", ondelete="CASCADE"), nullable=True)
     name = Column(String, nullable=False)
     email = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)

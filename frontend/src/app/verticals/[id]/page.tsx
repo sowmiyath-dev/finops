@@ -37,6 +37,7 @@ export default function VerticalDetailPage() {
 
   const [vertical, setVertical] = useState<{ id: string; name: string; color: string } | null>(null);
   const [owners, setOwners] = useState<Owner[]>([]);
+  const [businesses, setBusinesses] = useState<{id:string;name:string;color:string;owner_name?:string;owner_email?:string}[]>([]);
   const [costData, setCostData] = useState<OwnerCost[]>([]);
   const [taggedCount, setTaggedCount] = useState(0);
   const [taggedAccounts, setTaggedAccounts] = useState<{aws_account_id: string; account_name: string; resource_count: number}[]>([]);
@@ -45,6 +46,13 @@ export default function VerticalDetailPage() {
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [loading, setLoading] = useState(true);
+
+  // Add Business modal
+  const [showAddBusiness, setShowAddBusiness] = useState(false);
+  const [newBizName, setNewBizName] = useState("");
+  const [newBizOwner, setNewBizOwner] = useState("");
+  const [newBizEmail, setNewBizEmail] = useState("");
+  const [savingBiz, setSavingBiz] = useState(false);
 
   // Add Owner modal
   const [showAddOwner, setShowAddOwner] = useState(false);
@@ -70,13 +78,15 @@ export default function VerticalDetailPage() {
       if (start) params.start_date = start;
       if (end) params.end_date = end;
       // Run cost + owners in parallel, tagged accounts separately (less critical)
-      const [ownersRes, costRes] = await Promise.all([
+      const [ownersRes, costRes, bizRes] = await Promise.all([
         axios.get(`${BASE}/api/verticals/${id}/owners`, { headers }),
         axios.get(`${BASE}/api/verticals/${id}/cost`, { headers, params }),
+        axios.get(`${BASE}/api/verticals/${id}/businesses`, { headers }),
       ]);
       setOwners(ownersRes.data);
       setCostData(costRes.data.owners || []);
       setTaggedCount(costRes.data.tagged_resource_count || 0);
+      setBusinesses(bizRes.data || []);
       // Load vertical name + tagged accounts in background
       axios.get(`${BASE}/api/verticals/`, { headers }).then((r) => {
         const v = (r.data as any[]).find((x: any) => x.id === id);
@@ -96,6 +106,19 @@ export default function VerticalDetailPage() {
 
   const handleCustomDate = () => {
     if (customStart && customEnd) load(granularity, customStart, customEnd);
+  };
+
+  const addBusiness = async () => {
+    if (!newBizName.trim()) return;
+    setSavingBiz(true);
+    try {
+      await axios.post(`${BASE}/api/verticals/${id}/businesses`,
+        { name: newBizName.trim(), owner_name: newBizOwner.trim() || null, owner_email: newBizEmail.trim() || null },
+        { headers }
+      );
+      setNewBizName(""); setNewBizOwner(""); setNewBizEmail(""); setShowAddBusiness(false);
+      await load();
+    } finally { setSavingBiz(false); }
   };
 
   const addOwner = async () => {
@@ -302,6 +325,10 @@ export default function VerticalDetailPage() {
             className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-md transition">
             <Tag className="w-3.5 h-3.5" /> Tag Resources by Account
           </button>
+          <button onClick={() => setShowAddBusiness(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-green-700 hover:bg-green-800 text-white text-xs font-bold rounded-md transition">
+            <Plus className="w-3.5 h-3.5" /> Add Business
+          </button>
           <button onClick={() => setShowAddOwner(true)}
             className="flex items-center gap-2 px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold rounded-md transition">
             <Plus className="w-3.5 h-3.5" /> Add Owner
@@ -352,6 +379,28 @@ export default function VerticalDetailPage() {
               ))}
             </BarChart>
           </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Businesses */}
+      {businesses.length > 0 && (
+        <div className="bg-white rounded-lg border border-gray-300 shadow-sm mb-6">
+          <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between">
+            <h2 className="text-sm font-bold text-black">Businesses ({businesses.length})</h2>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 p-4">
+            {businesses.map((b) => (
+              <div key={b.id} className="rounded-lg border border-gray-200 p-3 hover:shadow-sm transition">
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: b.color || vertical?.color || "#0f2d5e" }} />
+                  <span className="text-sm font-bold text-black truncate">{b.name}</span>
+                </div>
+                {b.owner_name && (
+                  <div className="text-xs text-gray-500 truncate">Owner: {b.owner_name}</div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -467,6 +516,48 @@ export default function VerticalDetailPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Add Business Modal */}
+      {showAddBusiness && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg border border-gray-300 shadow-lg w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-bold text-black">Add Business</h3>
+              <button onClick={() => setShowAddBusiness(false)}><X className="w-4 h-4 text-black" /></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">Business Name *</label>
+                <input value={newBizName} onChange={(e) => setNewBizName(e.target.value)}
+                  className="w-full border border-gray-400 rounded-md px-3 py-2 text-sm text-black focus:border-blue-900 outline-none"
+                  placeholder="e.g. IDC, SFL, SGIC" />
+              </div>
+              <div>
+                <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">Owner Name</label>
+                <input value={newBizOwner} onChange={(e) => setNewBizOwner(e.target.value)}
+                  className="w-full border border-gray-400 rounded-md px-3 py-2 text-sm text-black focus:border-blue-900 outline-none"
+                  placeholder="e.g. John Doe" />
+              </div>
+              <div>
+                <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">Owner Email</label>
+                <input value={newBizEmail} onChange={(e) => setNewBizEmail(e.target.value)}
+                  className="w-full border border-gray-400 rounded-md px-3 py-2 text-sm text-black focus:border-blue-900 outline-none"
+                  placeholder="owner@company.com" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-5">
+              <button onClick={() => setShowAddBusiness(false)}
+                className="px-4 py-2 border border-gray-300 rounded-md text-xs font-bold text-black hover:bg-gray-50 transition">
+                Cancel
+              </button>
+              <button onClick={addBusiness} disabled={savingBiz || !newBizName.trim()}
+                className="px-4 py-2 bg-green-700 hover:bg-green-800 text-white text-xs font-bold rounded-md transition disabled:opacity-50">
+                {savingBiz ? "Saving..." : "Add Business"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

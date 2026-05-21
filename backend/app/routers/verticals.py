@@ -7,7 +7,7 @@ from datetime import date, timedelta
 
 from app.models.database import get_db
 from app.models.db_models import (
-    User, Vertical, Owner, Application, ApplicationResource, CostRecord,
+    User, Vertical, Business, Owner, Application, ApplicationResource, CostRecord,
     CustomTag, ResourceTagMapping
 )
 from app.services.auth_service import get_current_user
@@ -26,7 +26,15 @@ class OwnerCreate(BaseModel):
     name: str
     email: Optional[str] = None
 
-class AppCreate(BaseModel):
+class BusinessCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    color: str = "#0f2d5e"
+    owner_name: Optional[str] = None
+    owner_email: Optional[str] = None
+
+
+
     name: str
     description: Optional[str] = None
     color: str = "#0f2d5e"
@@ -147,22 +155,32 @@ async def seed_verticals(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    defaults = [
-        {"name": "Lending",   "color": "#0f2d5e"},
-        {"name": "Insurance", "color": "#1d8348"},
-        {"name": "EBS",       "color": "#ec7211"},
-        {"name": "L&D",       "color": "#8e44ad"},
+    SEED_DATA = [
+        {"name": "NOVAC",     "color": "#0f2d5e", "businesses": ["IDC", "APPSUPPORT", "SOC"]},
+        {"name": "L&D",       "color": "#8e44ad", "businesses": ["AXLE", "MYCOACH", "MIGOTO", "ARVR", "IMMERZ"]},
+        {"name": "Lending",   "color": "#1d8348", "businesses": ["SFL"]},
+        {"name": "Insurance", "color": "#1a6fa8", "businesses": ["SGIC", "SLIC"]},
+        {"name": "Non-SFL",   "color": "#c0392b", "businesses": ["WEALTH", "AMC", "SKI", "SAMIL", "SHRIRAM CREDIT"]},
+        {"name": "EBS",       "color": "#ec7211", "businesses": ["SOJATIA", "NESTAVIA", "INDOSTAR", "PAHAL", "FINERGY", "ZMSL", "CMPS", "THFL", "SDS", "SME", "KAZITO", "SARC"]},
     ]
-    created = []
-    for d in defaults:
-        exists = (await db.execute(
-            select(Vertical).where(Vertical.name == d["name"])
-        )).scalar_one_or_none()
-        if not exists:
-            db.add(Vertical(name=d["name"], color=d["color"]))
-            created.append(d["name"])
+    created_v = []
+    created_b = []
+    for d in SEED_DATA:
+        v = (await db.execute(select(Vertical).where(Vertical.name == d["name"]))).scalar_one_or_none()
+        if not v:
+            v = Vertical(name=d["name"], color=d["color"])
+            db.add(v)
+            await db.flush()
+            created_v.append(d["name"])
+        for bname in d["businesses"]:
+            exists = (await db.execute(
+                select(Business).where(Business.vertical_id == v.id, Business.name == bname)
+            )).scalar_one_or_none()
+            if not exists:
+                db.add(Business(vertical_id=v.id, name=bname, color=d["color"]))
+                created_b.append(bname)
     await db.commit()
-    return {"seeded": created}
+    return {"seeded_verticals": created_v, "seeded_businesses": created_b}
 
 
 @router.post("/bulk-tag-account", status_code=201)
@@ -352,6 +370,37 @@ async def delete_app(
     await db.commit()
 
 
+# ── Business CRUD ────────────────────────────────────────────────────────────
+
+@router.get("/businesses/{business_id}")
+async def get_business(
+    business_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    b = (await db.execute(select(Business).where(Business.id == business_id))).scalar_one_or_none()
+    if not b:
+        raise HTTPException(404)
+    return {"id": str(b.id), "name": b.name, "description": b.description,
+            "color": b.color, "owner_name": b.owner_name, "owner_email": b.owner_email,
+            "vertical_id": str(b.vertical_id)}
+
+
+@router.delete("/businesses/{business_id}", status_code=204)
+async def delete_business(
+    business_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if user.role == "viewer":
+        raise HTTPException(403)
+    b = (await db.execute(select(Business).where(Business.id == business_id))).scalar_one_or_none()
+    if not b:
+        raise HTTPException(404)
+    await db.delete(b)
+    await db.commit()
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # DYNAMIC ROUTES
 # ═════════════════════════════════════════════════════════════════════════════
@@ -395,6 +444,48 @@ async def delete_vertical(
         raise HTTPException(404)
     await db.delete(v)
     await db.commit()
+
+
+@router.get("/{vertical_id}/businesses")
+async def list_businesses(
+    vertical_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    rows = (await db.execute(
+        select(Business).where(Business.vertical_id == vertical_id).order_by(Business.name)
+    )).scalars().all()
+    return [
+        {"id": str(b.id), "name": b.name, "description": b.description,
+         "color": b.color, "owner_name": b.owner_name, "owner_email": b.owner_email}
+        for b in rows
+    ]
+
+
+@router.post("/{vertical_id}/businesses", status_code=201)
+async def create_business(
+    vertical_id: str,
+    payload: BusinessCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if user.role == "viewer":
+        raise HTTPException(403)
+    v = (await db.execute(select(Vertical).where(Vertical.id == vertical_id))).scalar_one_or_none()
+    if not v:
+        raise HTTPException(404)
+    b = Business(
+        vertical_id=vertical_id,
+        name=payload.name,
+        description=payload.description,
+        color=payload.color or v.color,
+        owner_name=payload.owner_name,
+        owner_email=payload.owner_email,
+    )
+    db.add(b)
+    await db.commit()
+    await db.refresh(b)
+    return {"id": str(b.id), "name": b.name, "color": b.color}
 
 
 @router.get("/{vertical_id}/cost")
