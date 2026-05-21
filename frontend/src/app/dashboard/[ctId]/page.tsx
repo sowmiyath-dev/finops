@@ -101,7 +101,7 @@ export default function CTDetailPage() {
   };
 
   const { data: tabData = [], isLoading: tabLoading } = useQuery({
-    queryKey: ["ct-tab", ctId, activeTab, startDate, endDate, selectedAccount],
+    queryKey: ["ct-tab", ctId, activeTab, startDate, endDate, selectedAccounts],
     queryFn: () => api.post(tabEndpoint, tabFilter).then((r) => r.data),
     enabled: !!token && !!ctId,
     staleTime: 2 * 60 * 1000,
