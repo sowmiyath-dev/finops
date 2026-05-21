@@ -406,16 +406,14 @@ export default function VerticalDetailPage() {
           <table className="w-full">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
-                {["Business", "Owner", "Vertical", ""].map((h) => (
+                {["Business", "Owner", "Cost", ""].map((h) => (
                   <th key={h} className="text-left text-xs font-bold uppercase tracking-wider text-black px-5 py-3">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {businesses.map((b) => (
-                <tr key={b.id}
-                  onClick={() => router.push(`/verticals/${id}/business/${b.id}`)}
-                  className="border-b border-gray-200 hover:bg-blue-50 transition cursor-pointer">
+                <tr key={b.id} className="border-b border-gray-200 hover:bg-blue-50 transition">
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-2">
                       <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold"
@@ -426,19 +424,15 @@ export default function VerticalDetailPage() {
                     </div>
                   </td>
                   <td className="px-5 py-3 text-sm text-black">
-                    {b.owner_name ? (
-                      <span className="font-semibold">{b.owner_name}</span>
-                    ) : (
-                      <span className="text-gray-400 text-xs">No owner</span>
-                    )}
+                    {b.owner_name ? <span className="font-semibold">{b.owner_name}</span> : <span className="text-gray-400 text-xs">No owner</span>}
+                  </td>
+                  <td className="px-5 py-3 text-sm font-bold font-mono text-blue-900">
+                    <span className="text-xs text-gray-400">See details</span>
                   </td>
                   <td className="px-5 py-3">
-                    <span className="text-xs font-bold px-2 py-0.5 rounded text-white"
-                      style={{ background: vertical?.color || "#0f2d5e" }}>
-                      {vertical?.name}
-                    </span>
+                    <button onClick={() => router.push(`/verticals/${id}/business/${b.id}`)}
+                      className="text-xs font-bold text-blue-900 hover:underline">View Details →</button>
                   </td>
-                  <td className="px-5 py-3 text-xs font-bold text-blue-900">View Cost →</td>
                 </tr>
               ))}
             </tbody>
