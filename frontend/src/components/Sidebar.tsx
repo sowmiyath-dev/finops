@@ -7,7 +7,7 @@ import axios from "axios";
 import {
   Building2, Cloud, Tag, Bell, Settings, ChevronRight, ChevronDown,
   Menu, X, Users, Mail, AlertTriangle, Zap, Globe, DollarSign,
-  LayoutDashboard, Layers, RefreshCw,
+  LayoutDashboard, Layers,
 } from "lucide-react";
 
 const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api").replace(/\/api$/, "");
@@ -32,9 +32,7 @@ const STATIC_NAV: NavItem[] = [
     id: "verticals",
     label: "Verticals",
     icon: Layers,
-    children: [
-      { id: "verticals-all", label: "All Verticals", icon: LayoutDashboard, href: "/verticals" },
-    ],
+    href: "/verticals",
   },
   {
     id: "tags",
@@ -145,41 +143,12 @@ export default function Sidebar() {
     if (!token) return;
     const cached = sessionStorage.getItem("finoptix_verticals");
     if (cached) {
-      try {
-        const verts = JSON.parse(cached);
-        if (verts.length > 0) { updateVerticals(verts); return; }
-      } catch {}
+      try { JSON.parse(cached); } catch {}
     }
-    axios.get(`${BASE}/api/verticals/`, { headers: { Authorization: `Bearer ${token}` } })
-      .then((res) => {
-        const verts: { id: string; name: string }[] = res.data;
-        if (!verts.length) return;
-        sessionStorage.setItem("finoptix_verticals", JSON.stringify(verts));
-        updateVerticals(verts);
-      })
-      .catch(() => {});
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const updateVerticals = (verts: { id: string; name: string }[]) => {
-    setNavItems((prev) =>
-      prev.map((item) =>
-        item.id === "verticals"
-          ? {
-              ...item,
-              children: [
-                { id: "verticals-all", label: "All Verticals", icon: LayoutDashboard, href: "/verticals" },
-                ...verts.map((v) => ({
-                  id: `vertical-${v.id}`,
-                  label: v.name,
-                  icon: Layers,
-                  href: `/verticals/${v.id}`,
-                })),
-              ],
-            }
-          : item
-      )
-    );
-  };
+  const updateVerticals = (_verts: { id: string; name: string }[]) => {};
+
 
   return (
     <aside

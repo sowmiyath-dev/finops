@@ -50,6 +50,7 @@ export default function CTDetailPage() {
   const [endDate, setEndDate] = useState(lastMonth.end);
   const [granularity, setGranularity] = useState("monthly");
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
+  const [accountDropdownOpen, setAccountDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("service");
 
   useEffect(() => { if (!token) router.push("/auth"); }, [token]);
@@ -238,37 +239,64 @@ export default function CTDetailPage() {
           <div className="bg-white rounded-lg border border-gray-300 shadow-sm mb-6">
             <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between">
               <h2 className="text-sm font-bold text-black">Subaccount Costs</h2>
-              <div className="flex flex-wrap gap-1.5 items-center">
-                <span className="text-xs font-bold text-black mr-1">Filter:</span>
+              {/* Multi-select dropdown */}
+              <div className="relative">
                 <button
-                  onClick={() => setSelectedAccounts([])}
-                  className={`px-2.5 py-1 text-xs font-bold rounded-md border transition ${
-                    selectedAccounts.length === 0
-                      ? "bg-blue-900 text-white border-blue-900"
-                      : "bg-white text-black border-gray-300 hover:border-blue-900"
-                  }`}>
-                  All
+                  onClick={() => setAccountDropdownOpen(!accountDropdownOpen)}
+                  className="flex items-center gap-2 px-3 py-1.5 border border-gray-400 rounded-md text-xs font-bold text-black bg-white hover:border-blue-900 transition min-w-[180px] justify-between">
+                  <span>
+                    {selectedAccounts.length === 0
+                      ? "All Accounts"
+                      : `${selectedAccounts.length} account${selectedAccounts.length > 1 ? "s" : ""} selected`}
+                  </span>
+                  <ChevronRight className={`w-3.5 h-3.5 transition-transform ${accountDropdownOpen ? "rotate-90" : ""}`} />
                 </button>
-                {subAccounts.map((acc: any) => {
-                  const selected = selectedAccounts.includes(acc.aws_account_id);
-                  return (
-                    <button key={acc.aws_account_id}
-                      onClick={() => {
-                        setSelectedAccounts((prev) =>
-                          selected
-                            ? prev.filter((a) => a !== acc.aws_account_id)
-                            : [...prev, acc.aws_account_id]
+                {accountDropdownOpen && (
+                  <div className="absolute right-0 top-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-20 min-w-[220px]">
+                    <div className="p-2 border-b border-gray-100">
+                      <button
+                        onClick={() => { setSelectedAccounts([]); setAccountDropdownOpen(false); }}
+                        className={`w-full text-left px-3 py-1.5 text-xs font-bold rounded transition ${
+                          selectedAccounts.length === 0 ? "bg-blue-900 text-white" : "text-black hover:bg-gray-100"
+                        }`}>
+                        All Accounts
+                      </button>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto p-2 space-y-0.5">
+                      {subAccounts.map((acc: any) => {
+                        const selected = selectedAccounts.includes(acc.aws_account_id);
+                        return (
+                          <label key={acc.aws_account_id}
+                            className="flex items-center gap-2 px-3 py-1.5 rounded cursor-pointer hover:bg-gray-50 transition">
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={() => setSelectedAccounts((prev) =>
+                                selected
+                                  ? prev.filter((a) => a !== acc.aws_account_id)
+                                  : [...prev, acc.aws_account_id]
+                              )}
+                              className="w-3.5 h-3.5 accent-blue-900"
+                            />
+                            <div className="min-w-0">
+                              <div className="text-xs font-semibold text-black truncate">{acc.account_name}</div>
+                              <div className="text-[10px] font-mono text-gray-500">{acc.aws_account_id}</div>
+                            </div>
+                          </label>
                         );
-                      }}
-                      className={`px-2.5 py-1 text-xs font-bold rounded-md border transition ${
-                        selected
-                          ? "bg-blue-900 text-white border-blue-900"
-                          : "bg-white text-black border-gray-300 hover:border-blue-900"
-                      }`}>
-                      {acc.account_name}
-                    </button>
-                  );
-                })}
+                      })}
+                    </div>
+                    {selectedAccounts.length > 0 && (
+                      <div className="p-2 border-t border-gray-100">
+                        <button
+                          onClick={() => setSelectedAccounts([])}
+                          className="w-full text-xs font-bold text-red-600 hover:text-red-700 transition">
+                          Clear selection
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
             <table className="w-full">
