@@ -6,7 +6,7 @@ import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
 import Link from "next/link";
 import {
-  ChevronRight, DollarSign, RefreshCw, FileText, Clock,
+  ChevronRight, DollarSign, RefreshCw,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -49,7 +49,7 @@ export default function CTDetailPage() {
   const [startDate, setStartDate] = useState(lastMonth.start);
   const [endDate, setEndDate] = useState(lastMonth.end);
   const [granularity, setGranularity] = useState("monthly");
-  const [selectedAccount, setSelectedAccount] = useState<string>("all");
+  const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState("service");
 
   useEffect(() => { if (!token) router.push("/auth"); }, [token]);
@@ -73,7 +73,7 @@ export default function CTDetailPage() {
 
   const filter = {
     control_tower_ids: [ctId],
-    account_ids: selectedAccount !== "all" ? [selectedAccount] : null,
+    account_ids: selectedAccounts.length > 0 ? selectedAccounts : null,
     start_date: startDate,
     end_date: endDate,
     granularity,
@@ -135,25 +135,13 @@ export default function CTDetailPage() {
   return (
     <div className="p-6 max-w-7xl mx-auto">
 
-      {/* Breadcrumb + quick links */}
-      <div className="flex items-center justify-between mb-5">
-        <div className="flex items-center gap-2 text-sm">
-          <Link href="/dashboard" className="text-black hover:text-blue-900 font-medium">
-            AWS
-          </Link>
-          <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
-          <span className="font-bold text-black">{ct?.name || "..."}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link href="/reports"
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-black border border-gray-300 rounded-md hover:border-blue-900 hover:text-blue-900 transition">
-            <FileText className="w-3.5 h-3.5" /> Cost Reports
-          </Link>
-          <Link href="/sync-logs"
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-black border border-gray-300 rounded-md hover:border-blue-900 hover:text-blue-900 transition">
-            <Clock className="w-3.5 h-3.5" /> Sync Logs
-          </Link>
-        </div>
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-2 text-sm mb-5">
+        <Link href="/dashboard" className="text-black hover:text-blue-900 font-medium">
+          AWS
+        </Link>
+        <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
+        <span className="font-bold text-black">{ct?.name || "..."}</span>
       </div>
 
       {/* Header */}
@@ -250,15 +238,38 @@ export default function CTDetailPage() {
           <div className="bg-white rounded-lg border border-gray-300 shadow-sm mb-6">
             <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between">
               <h2 className="text-sm font-bold text-black">Subaccount Costs</h2>
-              <select value={selectedAccount} onChange={(e) => setSelectedAccount(e.target.value)}
-                className="border border-gray-400 rounded-md px-3 py-1.5 text-xs text-black focus:border-blue-900 outline-none">
-                <option value="all">All Accounts</option>
-                {subAccounts.map((acc: any) => (
-                  <option key={acc.aws_account_id} value={acc.aws_account_id}>
-                    {acc.account_name} ({acc.aws_account_id})
-                  </option>
-                ))}
-              </select>
+              <div className="flex flex-wrap gap-1.5 items-center">
+                <span className="text-xs font-bold text-black mr-1">Filter:</span>
+                <button
+                  onClick={() => setSelectedAccounts([])}
+                  className={`px-2.5 py-1 text-xs font-bold rounded-md border transition ${
+                    selectedAccounts.length === 0
+                      ? "bg-blue-900 text-white border-blue-900"
+                      : "bg-white text-black border-gray-300 hover:border-blue-900"
+                  }`}>
+                  All
+                </button>
+                {subAccounts.map((acc: any) => {
+                  const selected = selectedAccounts.includes(acc.aws_account_id);
+                  return (
+                    <button key={acc.aws_account_id}
+                      onClick={() => {
+                        setSelectedAccounts((prev) =>
+                          selected
+                            ? prev.filter((a) => a !== acc.aws_account_id)
+                            : [...prev, acc.aws_account_id]
+                        );
+                      }}
+                      className={`px-2.5 py-1 text-xs font-bold rounded-md border transition ${
+                        selected
+                          ? "bg-blue-900 text-white border-blue-900"
+                          : "bg-white text-black border-gray-300 hover:border-blue-900"
+                      }`}>
+                      {acc.account_name}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
             <table className="w-full">
               <thead>
@@ -270,7 +281,7 @@ export default function CTDetailPage() {
               </thead>
               <tbody>
                 {(summary?.per_account || [])
-                  .filter((acc: any) => selectedAccount === "all" || acc.aws_account_id === selectedAccount)
+                  .filter((acc: any) => selectedAccounts.length === 0 || selectedAccounts.includes(acc.aws_account_id))
                   .map((acc: any) => {
                     const pct = totalCost > 0 ? (acc.cost / totalCost) * 100 : 0;
                     return (

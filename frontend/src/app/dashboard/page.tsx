@@ -6,7 +6,7 @@ import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
 import Link from "next/link";
-import { Plus, RefreshCw, Trash2, ChevronRight, Clock, Building2, Users, AlertCircle } from "lucide-react";
+import { Plus, RefreshCw, Trash2, ChevronRight, Clock, Building2, Users, AlertCircle, FileText, BarChart2 } from "lucide-react";
 
 function SyncProgressBar({ ctId }: { ctId: string }) {
   const [progress, setProgress] = useState<{ percent: number; status: string; message: string } | null>(null);
@@ -91,17 +91,27 @@ export default function DashboardPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-2xl font-bold text-black">AWS Control Towers</h1>
+          <h1 className="text-2xl font-bold text-black">Amazon Web Services</h1>
           <p className="text-sm text-black mt-0.5">
             {towers.length} control tower{towers.length !== 1 ? "s" : ""} · {totalAccounts} sub-accounts
           </p>
         </div>
-        {(user?.role === "owner" || user?.role === "editor") && (
-          <Link href="/onboard"
-            className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white rounded-md bg-blue-900 hover:bg-blue-800 transition">
-            <Plus className="w-4 h-4" /> Add Control Tower
+        <div className="flex items-center gap-3">
+          <Link href="/reports"
+            className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-black border border-gray-300 rounded-md hover:border-blue-900 hover:text-blue-900 transition">
+            <FileText className="w-4 h-4" /> Cost Reports
           </Link>
-        )}
+          <Link href="/sync-logs"
+            className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-black border border-gray-300 rounded-md hover:border-blue-900 hover:text-blue-900 transition">
+            <Clock className="w-4 h-4" /> Sync Logs
+          </Link>
+          {(user?.role === "owner" || user?.role === "editor") && (
+            <Link href="/onboard"
+              className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white rounded-md bg-blue-900 hover:bg-blue-800 transition">
+              <Plus className="w-4 h-4" /> Add Control Tower
+            </Link>
+          )}
+        </div>
       </div>
 
       {/* Boundary notice */}
