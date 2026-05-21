@@ -518,7 +518,6 @@ async def business_cost(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Cost for all resources tagged with Business=<business_name>."""
     start, end = _date_range(granularity)
     if start_date:
         start = date.fromisoformat(start_date)
@@ -529,7 +528,6 @@ async def business_cost(
     if not biz:
         raise HTTPException(404)
 
-    # Get resource IDs tagged with Business=<name>
     resource_ids = list(set((await db.execute(
         select(ResourceTagMapping.resource_id)
         .join(CustomTag, ResourceTagMapping.custom_tag_id == CustomTag.id)
@@ -539,7 +537,6 @@ async def business_cost(
         )
     )).scalars().all()))
 
-    # Also get account IDs for account-level charges
     account_ids = list(set((await db.execute(
         select(ResourceTagMapping.aws_account_id)
         .join(CustomTag, ResourceTagMapping.custom_tag_id == CustomTag.id)
@@ -553,6 +550,37 @@ async def business_cost(
     trend = await _cost_for_resources_and_accounts(db, resource_ids, account_ids, start, end, granularity)
     total = sum(p["cost"] for p in trend)
 
+    # Per-account cost breakdown
+    per_account = []
+    if account_ids:
+        from sqlalchemy import or_
+        acc_stmt = (
+            select(
+                CostRecord.aws_account_id,
+                CostRecord.account_name,
+                func.sum(CostRecord.unblended_cost).label("cost"),
+            )
+            .where(
+                CostRecord.date >= start,
+                CostRecord.date <= end,
+                or_(
+                    CostRecord.resource_id.in_(resource_ids) if resource_ids else False,
+                    CostRecord.aws_account_id.in_(account_ids),
+                )
+            )
+            .group_by(CostRecord.aws_account_id, CostRecord.account_name)
+            .order_by(func.sum(CostRecord.unblended_cost).desc())
+        )
+        acc_rows = (await db.execute(acc_stmt)).all()
+        per_account = [
+            {
+                "aws_account_id": r.aws_account_id,
+                "account_name": r.account_name or r.aws_account_id,
+                "cost": float(r.cost or 0),
+            }
+            for r in acc_rows
+        ]
+
     return {
         "business_id": business_id,
         "business_name": biz.name,
@@ -562,6 +590,7 @@ async def business_cost(
         "total_cost": total,
         "resource_count": len(resource_ids),
         "trend": trend,
+        "per_account": per_account,
     }
 
 
