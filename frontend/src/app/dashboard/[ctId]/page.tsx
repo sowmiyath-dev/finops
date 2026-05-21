@@ -1,25 +1,56 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useParams, useRouter, usePathname } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
-import DateRangePicker, { DateRange, getLast30 } from "@/components/DateRangePicker";
 import Link from "next/link";
 import {
-  ChevronRight, Users, DollarSign, TrendingUp,
-  ChevronDown, ChevronUp, BarChart2,
+  ChevronRight, DollarSign, RefreshCw, FileText, Clock,
 } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  CartesianGrid, Legend, LineChart, Line,
+} from "recharts";
 
-const COLORS = ["#0f2d5e","#1a6fa8","#ec7211","#1d8348","#c0392b","#8e44ad","#2980b9"];
+const COLORS = ["#0f2d5e","#ec7211","#1d8348","#8e44ad","#1a6fa8","#c0392b","#16a085","#e67e22","#2980b9","#27ae60"];
+
+const GRANULARITY = [
+  { label: "Daily", value: "daily" },
+  { label: "Monthly", value: "monthly" },
+];
+
+const TABS = [
+  { label: "Service Wise", value: "service" },
+  { label: "Resource Wise", value: "resource" },
+  { label: "Tag Wise", value: "tag" },
+];
+
+function getLastMonth() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const end = new Date(now.getFullYear(), now.getMonth(), 0);
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10),
+  };
+}
+
+function fmt(n: number) {
+  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
 
 export default function CTDetailPage() {
   const { ctId } = useParams<{ ctId: string }>();
   const { token } = useAuthStore();
   const router = useRouter();
-  const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(new Set());
-  const [dateRange, setDateRange] = useState<DateRange | null>(null);
+
+  const lastMonth = getLastMonth();
+  const [startDate, setStartDate] = useState(lastMonth.start);
+  const [endDate, setEndDate] = useState(lastMonth.end);
+  const [granularity, setGranularity] = useState("monthly");
+  const [selectedAccount, setSelectedAccount] = useState<string>("all");
+  const [activeTab, setActiveTab] = useState("service");
 
   useEffect(() => { if (!token) router.push("/auth"); }, [token]);
 
@@ -27,248 +58,354 @@ export default function CTDetailPage() {
     queryKey: ["boundary"],
     queryFn: () => api.get("/reports/data-boundary").then((r) => r.data),
     enabled: !!token,
+    staleTime: 60 * 60 * 1000,
   });
-
-  useEffect(() => {
-    if (boundary && !dateRange) setDateRange(getLast30(boundary.accurate_until));
-  }, [boundary]);
 
   const { data: towers = [] } = useQuery({
     queryKey: ["towers"],
     queryFn: () => api.get("/towers/").then((r) => r.data),
     enabled: !!token,
+    staleTime: 5 * 60 * 1000,
   });
 
   const ct = towers.find((t: any) => t.id === ctId);
+  const subAccounts: any[] = ct?.sub_accounts || [];
 
-  const { data: summary, isLoading } = useQuery({
-    queryKey: ["ct-summary", ctId, dateRange?.start, dateRange?.end],
-    queryFn: () => api.post("/reports/summary", {
-      control_tower_ids: [ctId],
-      start_date: dateRange!.start,
-      end_date: dateRange!.end,
-      granularity: "daily",
-      metric: "unblended_cost",
-      group_by: "account",
-    }).then((r) => r.data),
-    enabled: !!token && !!ctId && !!dateRange,
-  });
-
-  const toggleAccount = (id: string) => {
-    setExpandedAccounts((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+  const filter = {
+    control_tower_ids: [ctId],
+    account_ids: selectedAccount !== "all" ? [selectedAccount] : null,
+    start_date: startDate,
+    end_date: endDate,
+    granularity,
+    metric: "unblended_cost",
+    group_by: "account",
   };
 
-  return (
-    <div className="flex h-full">
+  // Main summary — subaccount costs
+  const { data: summary, isLoading: summaryLoading } = useQuery({
+    queryKey: ["ct-summary", ctId, startDate, endDate, granularity, selectedAccount],
+    queryFn: () => api.post("/reports/summary", filter).then((r) => r.data),
+    enabled: !!token && !!ctId,
+    staleTime: 2 * 60 * 1000,
+  });
 
-        {/* ── Left Navigation (AWS-style) ── */}
-        <aside className="w-64 min-h-screen bg-white border-r border-gray-300 flex-shrink-0">
-          {/* CT header */}
-          <div className="px-4 py-4 border-b border-gray-200 bg-blue-900">
-            <div className="text-xs font-bold text-white/70 uppercase tracking-wide mb-1">Control Tower</div>
-            <div className="text-sm font-bold text-white truncate">{ct?.name || "..."}</div>
-            <div className="text-xs text-white/60 font-mono mt-0.5">{ct?.management_account_id}</div>
+  // Tab data
+  const tabEndpoint = activeTab === "service" ? "/reports/service-wise"
+    : activeTab === "resource" ? "/reports/resource-wise"
+    : "/reports/tag-wise";
+
+  const tabFilter = {
+    ...filter,
+    group_by: activeTab,
+    granularity: "monthly",
+  };
+
+  const { data: tabData = [], isLoading: tabLoading } = useQuery({
+    queryKey: ["ct-tab", ctId, activeTab, startDate, endDate, selectedAccount],
+    queryFn: () => api.post(tabEndpoint, tabFilter).then((r) => r.data),
+    enabled: !!token && !!ctId,
+    staleTime: 2 * 60 * 1000,
+  });
+
+  // Build stacked chart data — one bar per date, stacked by account
+  const chartData = (() => {
+    if (!summary?.daily_trend) return [];
+    if (granularity === "monthly") {
+      // group per_account by month
+      return summary.per_account?.map((acc: any) => ({
+        name: acc.account_name || acc.aws_account_id,
+        cost: acc.cost,
+      })) || [];
+    }
+    return summary.daily_trend.map((d: any) => ({ date: d.date.slice(5), cost: d.cost }));
+  })();
+
+  // Build per-account stacked data for the top chart
+  const stackedData = (() => {
+    if (!summary?.per_account) return [];
+    // For daily: we need account-wise daily data — use per_account as totals for now
+    return summary.per_account?.slice(0, 10).map((acc: any) => ({
+      name: (acc.account_name || acc.aws_account_id).slice(0, 15),
+      cost: parseFloat(acc.cost.toFixed(2)),
+    })) || [];
+  })();
+
+  const totalCost = summary?.total_cost || 0;
+
+  return (
+    <div className="p-6 max-w-7xl mx-auto">
+
+      {/* Breadcrumb + quick links */}
+      <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center gap-2 text-sm">
+          <Link href="/dashboard" className="text-black hover:text-blue-900 font-medium">
+            AWS
+          </Link>
+          <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
+          <span className="font-bold text-black">{ct?.name || "..."}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Link href="/reports"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-black border border-gray-300 rounded-md hover:border-blue-900 hover:text-blue-900 transition">
+            <FileText className="w-3.5 h-3.5" /> Cost Reports
+          </Link>
+          <Link href="/sync-logs"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-black border border-gray-300 rounded-md hover:border-blue-900 hover:text-blue-900 transition">
+            <Clock className="w-3.5 h-3.5" /> Sync Logs
+          </Link>
+        </div>
+      </div>
+
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-black">{ct?.name}</h1>
+          <p className="text-xs text-black mt-0.5 font-mono">{ct?.management_account_id} · {ct?.management_account_name}</p>
+        </div>
+
+        {/* Date + Granularity controls */}
+        <div className="flex items-center gap-3">
+          <div className="flex border border-gray-300 rounded-md overflow-hidden">
+            {GRANULARITY.map((g) => (
+              <button key={g.value} onClick={() => setGranularity(g.value)}
+                className={`px-4 py-2 text-xs font-bold transition ${granularity === g.value ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-gray-50"}`}>
+                {g.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
+              max={boundary?.accurate_until}
+              className="border border-gray-400 rounded-md px-3 py-2 text-xs text-black focus:border-blue-900 outline-none" />
+            <span className="text-xs text-black font-semibold">to</span>
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
+              max={boundary?.accurate_until}
+              className="border border-gray-400 rounded-md px-3 py-2 text-xs text-black focus:border-blue-900 outline-none" />
+          </div>
+          {/* Quick presets */}
+          <div className="flex border border-gray-300 rounded-md overflow-hidden">
+            {[
+              { label: "This Month", fn: () => { const n = new Date(); setStartDate(new Date(n.getFullYear(), n.getMonth(), 1).toISOString().slice(0,10)); setEndDate(boundary?.accurate_until || n.toISOString().slice(0,10)); }},
+              { label: "Last Month", fn: () => { const r = getLastMonth(); setStartDate(r.start); setEndDate(r.end); }},
+              { label: "Last 7d", fn: () => { const e = boundary?.accurate_until || new Date().toISOString().slice(0,10); const s = new Date(e); s.setDate(s.getDate()-6); setStartDate(s.toISOString().slice(0,10)); setEndDate(e); }},
+            ].map((p) => (
+              <button key={p.label} onClick={p.fn}
+                className="px-3 py-2 text-xs font-bold bg-white text-black hover:bg-gray-50 border-l border-gray-300 first:border-l-0 transition">
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {summaryLoading ? (
+        <div className="flex items-center justify-center h-48">
+          <RefreshCw className="w-6 h-6 animate-spin text-blue-900" />
+        </div>
+      ) : (
+        <>
+          {/* KPI */}
+          <div className="grid grid-cols-3 gap-4 mb-6">
+            <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5">
+              <div className="flex items-center gap-2 mb-2">
+                <DollarSign className="w-4 h-4 text-blue-900" />
+                <span className="text-[10px] font-bold uppercase tracking-wider text-black">Total Cost</span>
+              </div>
+              <div className="text-2xl font-bold text-blue-900 font-mono">{fmt(totalCost)}</div>
+              <div className="text-xs text-black mt-1">{startDate} → {endDate}</div>
+            </div>
+            <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-black mb-2">Top Service</div>
+              <div className="text-base font-bold text-orange-600 truncate">{summary?.top_services?.[0]?.service || "—"}</div>
+              <div className="text-xs font-mono text-black mt-1">{fmt(summary?.top_services?.[0]?.cost || 0)}</div>
+            </div>
+            <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-black mb-2">Sub-accounts</div>
+              <div className="text-2xl font-bold text-green-800">{subAccounts.length}</div>
+              <div className="text-xs text-black mt-1">tracked accounts</div>
+            </div>
           </div>
 
-          {/* Nav items */}
-          <nav className="py-2">
-            {/* Overview */}
-            <Link href={`/dashboard/${ctId}`}
-              className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-black bg-blue-50 border-r-2 border-blue-900">
-              <BarChart2 className="w-4 h-4 text-blue-900" />
-              Overview
-            </Link>
+          {/* Subaccount cost chart */}
+          <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5 mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-bold text-black">Subaccount Cost — {granularity === "daily" ? "Daily Trend" : "By Account"}</h2>
+            </div>
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={stackedData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#000" }} />
+                <YAxis tick={{ fontSize: 11, fill: "#000" }} tickFormatter={(v) => `$${v.toLocaleString()}`} />
+                <Tooltip formatter={(v: number) => [fmt(v), "Cost"]} />
+                <Bar dataKey="cost" radius={[4, 4, 0, 0]}>
+                  {stackedData.map((_: any, i: number) => (
+                    <rect key={i} fill={COLORS[i % COLORS.length]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
 
-            {/* Sub-accounts */}
-            <div className="mt-2">
-              <div className="px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-black bg-gray-50 border-y border-gray-200">
-                Sub-accounts ({ct?.sub_accounts?.length || 0})
-              </div>
-              {(ct?.sub_accounts || []).map((acc: any) => (
-                <div key={acc.id}>
-                  <button
-                    onClick={() => toggleAccount(acc.id)}
-                    className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-medium text-black hover:bg-blue-50 transition">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div className="w-5 h-5 rounded bg-blue-900 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                        {acc.account_name[0].toUpperCase()}
-                      </div>
-                      <span className="truncate text-xs font-semibold">{acc.account_name}</span>
-                    </div>
-                    {expandedAccounts.has(acc.id)
-                      ? <ChevronUp className="w-3 h-3 flex-shrink-0 text-black" />
-                      : <ChevronDown className="w-3 h-3 flex-shrink-0 text-black" />}
-                  </button>
+          {/* Subaccount table + filter */}
+          <div className="bg-white rounded-lg border border-gray-300 shadow-sm mb-6">
+            <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="text-sm font-bold text-black">Subaccount Costs</h2>
+              <select value={selectedAccount} onChange={(e) => setSelectedAccount(e.target.value)}
+                className="border border-gray-400 rounded-md px-3 py-1.5 text-xs text-black focus:border-blue-900 outline-none">
+                <option value="all">All Accounts</option>
+                {subAccounts.map((acc: any) => (
+                  <option key={acc.aws_account_id} value={acc.aws_account_id}>
+                    {acc.account_name} ({acc.aws_account_id})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <table className="w-full">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  {["Account", "Account ID", "Cost", "% of Total"].map((h) => (
+                    <th key={h} className="text-left text-xs font-bold uppercase tracking-wider text-black px-5 py-3">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {(summary?.per_account || [])
+                  .filter((acc: any) => selectedAccount === "all" || acc.aws_account_id === selectedAccount)
+                  .map((acc: any) => {
+                    const pct = totalCost > 0 ? (acc.cost / totalCost) * 100 : 0;
+                    return (
+                      <tr key={acc.aws_account_id} className="border-b border-gray-200 hover:bg-blue-50 transition">
+                        <td className="px-5 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-lg bg-blue-900 flex items-center justify-center text-xs font-bold text-white">
+                              {(acc.account_name || "?")[0].toUpperCase()}
+                            </div>
+                            <span className="text-sm font-bold text-black">{acc.account_name || "Unknown"}</span>
+                          </div>
+                        </td>
+                        <td className="px-5 py-3 text-xs font-mono font-semibold text-black">{acc.aws_account_id}</td>
+                        <td className="px-5 py-3 text-sm font-bold font-mono text-blue-900">{fmt(acc.cost)}</td>
+                        <td className="px-5 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                              <div className="h-full rounded-full bg-blue-900" style={{ width: `${pct}%` }} />
+                            </div>
+                            <span className="text-xs font-bold text-black">{pct.toFixed(1)}%</span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
 
-                  {/* Sub-nav under account */}
-                  {expandedAccounts.has(acc.id) && (
-                    <div className="bg-gray-50 border-y border-gray-100">
-                      {[
-                        { label: "Account Overview", href: `/dashboard/${ctId}/account/${acc.id}` },
-                        { label: "Service-wise Cost", href: `/dashboard/${ctId}/account/${acc.id}?tab=service` },
-                        { label: "Resource-wise Cost", href: `/dashboard/${ctId}/account/${acc.id}?tab=resource` },
-                        { label: "Tag-wise Cost", href: `/dashboard/${ctId}/account/${acc.id}?tab=tag` },
-                      ].map((item) => (
-                        <Link key={item.label} href={item.href}
-                          className="flex items-center gap-2 pl-10 pr-4 py-2 text-xs font-semibold text-black hover:bg-blue-100 hover:text-blue-900 transition">
-                          <ChevronRight className="w-3 h-3" />
-                          {item.label}
-                        </Link>
-                      ))}
-                    </div>
-                  )}
-                </div>
+          {/* Service / Resource / Tag tabs */}
+          <div className="bg-white rounded-lg border border-gray-300 shadow-sm">
+            <div className="flex border-b border-gray-200">
+              {TABS.map((tab) => (
+                <button key={tab.value} onClick={() => setActiveTab(tab.value)}
+                  className={`px-5 py-3 text-sm font-bold transition border-b-2 ${
+                    activeTab === tab.value
+                      ? "border-blue-900 text-blue-900"
+                      : "border-transparent text-black hover:text-blue-900"
+                  }`}>
+                  {tab.label}
+                </button>
               ))}
             </div>
-          </nav>
-        </aside>
 
-        {/* ── Main Content ── */}
-        <main className="flex-1 px-6 py-6 overflow-auto">
-
-          {/* Breadcrumb + date picker */}
-          <div className="flex items-center justify-between mb-5">
-            <div className="flex items-center gap-2 text-sm">
-              <Link href="/dashboard" className="text-black hover:text-blue-900 font-medium transition">
-                Control Towers
-              </Link>
-              <ChevronRight className="w-3.5 h-3.5 text-black" />
-              <span className="font-bold text-black">{ct?.name || "..."}</span>
-            </div>
-            {boundary && dateRange && (
-              <DateRangePicker boundary={boundary.accurate_until} value={dateRange} onChange={setDateRange} />
-            )}
-          </div>
-
-          {/* Page title */}
-          <div className="mb-5">
-            <h1 className="text-xl font-bold text-black">{ct?.name} — Cost Overview</h1>
-            <p className="text-sm text-black mt-0.5">
-              Management: <span className="font-mono">{ct?.management_account_id}</span>
-              {" · "}{ct?.management_account_name}
-            </p>
-          </div>
-
-          {isLoading ? (
-            <div className="flex items-center justify-center h-40">
-              <div className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin border-blue-900" />
-            </div>
-          ) : (
-            <>
-              {/* Summary cards */}
-              <div className="grid grid-cols-3 gap-4 mb-5">
-                <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5">
-                  <div className="text-xs font-bold uppercase tracking-wide text-black mb-1">Total Cost</div>
-                  <div className="text-2xl font-bold text-blue-900">
-                    ${(summary?.total_cost || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </div>
-                  <div className="text-xs font-semibold text-black mt-1">{dateRange?.start} → {dateRange?.end}</div>
+            <div className="p-5">
+              {tabLoading ? (
+                <div className="flex items-center justify-center h-32">
+                  <RefreshCw className="w-5 h-5 animate-spin text-blue-900" />
                 </div>
-                <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5">
-                  <div className="text-xs font-bold uppercase tracking-wide text-black mb-1">Top Service</div>
-                  <div className="text-base font-bold text-orange-600 truncate">
-                    {summary?.top_services?.[0]?.service || "—"}
-                  </div>
-                  <div className="text-xs font-semibold text-black mt-1">
-                    ${(summary?.top_services?.[0]?.cost || 0).toFixed(2)}
-                  </div>
-                </div>
-                <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5">
-                  <div className="text-xs font-bold uppercase tracking-wide text-black mb-1">Sub-accounts</div>
-                  <div className="text-2xl font-bold text-green-800">{ct?.sub_accounts?.length || 0}</div>
-                  <div className="text-xs font-semibold text-black mt-1">tracked accounts</div>
-                </div>
-              </div>
+              ) : (
+                <>
+                  {/* Cumulative cost chart for tab */}
+                  {tabData.length > 0 && (
+                    <div className="mb-5">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-black mb-3">
+                        Cumulative Cost — {TABS.find(t => t.value === activeTab)?.label}
+                      </h3>
+                      <ResponsiveContainer width="100%" height={200}>
+                        <BarChart
+                          data={tabData.slice(0, 15).map((r: any) => ({
+                            name: (r.service || r.resource_id || r.tag_value || "—").slice(0, 20),
+                            cost: parseFloat((r.cost || 0).toFixed(2)),
+                          }))}
+                          margin={{ top: 0, right: 0, left: 0, bottom: 40 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                          <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#000" }} angle={-30} textAnchor="end" />
+                          <YAxis tick={{ fontSize: 10, fill: "#000" }} tickFormatter={(v) => `$${v.toLocaleString()}`} />
+                          <Tooltip formatter={(v: number) => [fmt(v), "Cost"]} />
+                          <Bar dataKey="cost" fill="#0f2d5e" radius={[3, 3, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
 
-              {/* Daily trend chart */}
-              {summary?.daily_trend?.length > 0 && (
-                <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5 mb-5">
-                  <h3 className="text-sm font-bold text-black mb-4">Daily Cost Trend</h3>
-                  <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={summary.daily_trend} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
-                      <XAxis dataKey="date" tick={{ fill: "#000000", fontSize: 10, fontWeight: 600 }} tickFormatter={(v) => v.slice(5)} />
-                      <YAxis tick={{ fill: "#000000", fontSize: 10, fontWeight: 600 }} tickFormatter={(v) => `$${v}`} />
-                      <Tooltip
-                        cursor={{ fill: "rgba(15,45,94,0.08)" }}
-                        contentStyle={{ background: "white", border: "2px solid #0f2d5e", borderRadius: 6, boxShadow: "0 4px 12px rgba(0,0,0,0.15)" }}
-                        labelStyle={{ color: "#000000", fontWeight: 700, fontSize: 12 }}
-                        formatter={(v: any) => [`$${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, "Cost"]}
-                      />
-                      <Bar dataKey="cost" radius={[4, 4, 0, 0]}>
-                        {summary.daily_trend.map((_: any, i: number) => (
-                          <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-
-              {/* Account cost breakdown */}
-              <div className="bg-white rounded-lg border border-gray-300 shadow-sm overflow-hidden">
-                <div className="px-5 py-3 bg-gray-100 border-b-2 border-gray-300 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Users className="w-4 h-4 text-blue-900" />
-                    <span className="text-sm font-bold text-black">Account Cost Breakdown</span>
-                  </div>
-                  <span className="text-xs font-bold text-black">{summary?.per_account?.length || 0} accounts</span>
-                </div>
-                <table className="w-full">
-                  <thead>
-                    <tr className="bg-gray-100 border-b-2 border-gray-300">
-                      {["Account", "Account ID", "Cost (USD)", "% of Total", ""].map((h) => (
-                        <th key={h} className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-black">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(summary?.per_account || []).map((acc: any) => {
-                      const pct = summary.total_cost > 0 ? (acc.cost / summary.total_cost) * 100 : 0;
-                      const subAcc = ct?.sub_accounts?.find((s: any) => s.aws_account_id === acc.aws_account_id);
-                      return (
-                        <tr key={acc.aws_account_id}
-                          className="border-b border-gray-200 hover:bg-blue-50 transition">
-                          <td className="px-5 py-3">
-                            <div className="flex items-center gap-2">
-                              <div className="w-7 h-7 rounded-lg bg-blue-900 flex items-center justify-center text-xs font-bold text-white flex-shrink-0">
-                                {(acc.account_name || "?")[0].toUpperCase()}
-                              </div>
-                              <span className="text-sm font-bold text-black">{acc.account_name || "Unknown"}</span>
-                            </div>
-                          </td>
-                          <td className="px-5 py-3 text-xs font-mono font-semibold text-black">{acc.aws_account_id}</td>
-                          <td className="px-5 py-3 text-sm font-bold font-mono text-blue-900">
-                            ${acc.cost.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-                          <td className="px-5 py-3">
-                            <div className="flex items-center gap-2">
-                              <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
-                                <div className="h-full rounded-full bg-blue-900" style={{ width: `${pct}%` }} />
-                              </div>
-                              <span className="text-xs font-bold text-black">{pct.toFixed(1)}%</span>
-                            </div>
-                          </td>
-                          <td className="px-5 py-3">
-                            {subAcc && (
-                              <Link href={`/dashboard/${ctId}/account/${subAcc.id}`}
-                                className="flex items-center gap-1 text-xs font-bold text-blue-900 hover:text-orange-600 transition">
-                                View Details <ChevronRight className="w-3 h-3" />
-                              </Link>
-                            )}
+                  {/* Tab table */}
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-200">
+                        {activeTab === "service" && (
+                          <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Service</th>
+                        )}
+                        {activeTab === "resource" && (
+                          <>
+                            <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Resource ID</th>
+                            <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Service</th>
+                            <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Region</th>
+                          </>
+                        )}
+                        {activeTab === "tag" && (
+                          <>
+                            <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Tag Key</th>
+                            <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Tag Value</th>
+                          </>
+                        )}
+                        <th className="text-right text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Cost (USD)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tabData.slice(0, 50).map((row: any, i: number) => (
+                        <tr key={i} className="border-b border-gray-200 hover:bg-blue-50 transition">
+                          {activeTab === "service" && (
+                            <td className="px-4 py-2.5 text-sm font-semibold text-black">{row.service}</td>
+                          )}
+                          {activeTab === "resource" && (
+                            <>
+                              <td className="px-4 py-2.5 text-xs font-mono font-semibold text-black max-w-xs truncate">{row.resource_id}</td>
+                              <td className="px-4 py-2.5 text-xs font-semibold text-black">{row.service}</td>
+                              <td className="px-4 py-2.5 text-xs text-black">{row.region || "—"}</td>
+                            </>
+                          )}
+                          {activeTab === "tag" && (
+                            <>
+                              <td className="px-4 py-2.5 text-sm font-semibold text-black">{row.tag_key}</td>
+                              <td className="px-4 py-2.5 text-sm text-black">{row.tag_value || "(untagged)"}</td>
+                            </>
+                          )}
+                          <td className="px-4 py-2.5 text-right text-sm font-bold font-mono text-blue-900">
+                            {fmt(row.cost)}
                           </td>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-        </main>
+                      ))}
+                    </tbody>
+                  </table>
+                  {tabData.length > 50 && (
+                    <p className="text-xs text-black text-center py-3 border-t border-gray-200">
+                      Showing 50 of {tabData.length} rows
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
