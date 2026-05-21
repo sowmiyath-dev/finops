@@ -65,6 +65,7 @@ export default function VerticalDetailPage() {
   const [towers, setTowers] = useState<Tower[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedAccounts, setSelectedAccounts] = useState<Set<string>>(new Set());
+  const [selectedBusiness, setSelectedBusiness] = useState<string>("");
   const [accountResources, setAccountResources] = useState<Resource[]>([]);
   const [selectedResources, setSelectedResources] = useState<Set<string>>(new Set());
   const [loadingResources, setLoadingResources] = useState(false);
@@ -144,6 +145,7 @@ export default function VerticalDetailPage() {
   const openBulkTag = async () => {
     setShowBulkTag(true);
     setSelectedAccounts(new Set());
+    setSelectedBusiness("");
     setAccountResources([]);
     setSelectedResources(new Set());
     setServiceFilter("");
@@ -226,13 +228,14 @@ export default function VerticalDetailPage() {
       for (const [aid, rids] of byAccount.entries()) {
         const res = await axios.post(`${BASE}/api/verticals/bulk-tag-account`, {
           vertical_id: id,
+          business_id: selectedBusiness || null,
           aws_account_id: aid,
           resource_ids: rids,
           cloud_provider: "aws",
         }, { headers });
         totalTagged += res.data.tagged;
       }
-      alert(`✓ Tagged ${totalTagged} resources with Vertical=${vertical?.name}`);
+      alert(`✓ Tagged ${totalTagged} resources with Vertical=${vertical?.name}${selectedBusiness ? ` + Business tag` : ""}`);
       setShowBulkTag(false);
       await load();
     } catch (err: any) {
@@ -387,17 +390,20 @@ export default function VerticalDetailPage() {
         <div className="bg-white rounded-lg border border-gray-300 shadow-sm mb-6">
           <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between">
             <h2 className="text-sm font-bold text-black">Businesses ({businesses.length})</h2>
+            <p className="text-xs text-gray-500">Tag resources with <span className="font-bold">Business=name</span> to see cost here</p>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 p-4">
             {businesses.map((b) => (
-              <div key={b.id} className="rounded-lg border border-gray-200 p-3 hover:shadow-sm transition">
+              <div key={b.id}
+                className="rounded-lg border border-gray-200 p-3 hover:shadow-md hover:border-blue-900 transition cursor-pointer"
+                style={{ borderLeft: `4px solid ${b.color || vertical?.color || "#0f2d5e"}` }}>
                 <div className="flex items-center gap-2 mb-1">
-                  <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: b.color || vertical?.color || "#0f2d5e" }} />
-                  <span className="text-sm font-bold text-black truncate">{b.name}</span>
+                  <span className="text-sm font-bold text-black">{b.name}</span>
                 </div>
                 {b.owner_name && (
-                  <div className="text-xs text-gray-500 truncate">Owner: {b.owner_name}</div>
+                  <div className="text-xs text-gray-500">Owner: {b.owner_name}</div>
                 )}
+                <div className="text-[10px] text-gray-400 mt-1 font-mono">Business={b.name}</div>
               </div>
             ))}
           </div>
@@ -609,6 +615,28 @@ export default function VerticalDetailPage() {
                 </p>
               </div>
               <button onClick={() => setShowBulkTag(false)}><X className="w-4 h-4 text-black" /></button>
+            </div>
+
+            {/* Business selector */}
+            <div className="mb-4 flex-shrink-0">
+              <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">Select Business (optional)</label>
+              <select
+                value={selectedBusiness}
+                onChange={(e) => setSelectedBusiness(e.target.value)}
+                className="w-full border border-gray-400 rounded-md px-3 py-2 text-sm text-black focus:border-blue-900 outline-none">
+                <option value="">— Tag Vertical only (no business) —</option>
+                {businesses.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+              {selectedBusiness && (
+                <p className="text-xs text-orange-700 mt-1 font-semibold">
+                  Will tag: <span className="font-bold">Vertical={vertical?.name}</span> + <span className="font-bold">Business={businesses.find(b => b.id === selectedBusiness)?.name}</span>
+                </p>
+              )}
+              {!selectedBusiness && (
+                <p className="text-xs text-gray-500 mt-1">Will tag: <span className="font-bold">Vertical={vertical?.name}</span> only</p>
+              )}
             </div>
 
             {/* Step 1: Select accounts */}

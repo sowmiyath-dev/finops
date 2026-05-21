@@ -48,6 +48,7 @@ class AppResourceAssign(BaseModel):
 
 class BulkTagByAccount(BaseModel):
     vertical_id: str
+    business_id: Optional[str] = None
     aws_account_id: str
     resource_ids: list[str]
     cloud_provider: str = "aws"
@@ -189,7 +190,6 @@ async def bulk_tag_account(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Find or create Vertical=<name> tag and assign all given resource IDs to it."""
     if user.role == "viewer":
         raise HTTPException(403)
 
@@ -199,45 +199,66 @@ async def bulk_tag_account(
     if not vertical:
         raise HTTPException(404, "Vertical not found")
 
-    # Find or create the CustomTag key=Vertical value=vertical.name
-    tag = (await db.execute(
-        select(CustomTag).where(
-            func.lower(CustomTag.tag_key) == "vertical",
-            func.lower(CustomTag.tag_value) == vertical.name.lower(),
-        )
-    )).scalar_one_or_none()
+    # Get business name if business_id provided
+    business_name = None
+    if payload.business_id:
+        biz = (await db.execute(
+            select(Business).where(Business.id == payload.business_id)
+        )).scalar_one_or_none()
+        if biz:
+            business_name = biz.name
 
-    if not tag:
-        tag = CustomTag(
-            tag_key="Vertical",
-            tag_value=vertical.name,
-            color=vertical.color,
-            description=f"Auto-created for vertical {vertical.name}",
-            created_by=user.id,
-        )
-        db.add(tag)
-        await db.flush()
+    async def _get_or_create_tag(key: str, value: str, color: str) -> CustomTag:
+        tag = (await db.execute(
+            select(CustomTag).where(
+                func.lower(CustomTag.tag_key) == key.lower(),
+                func.lower(CustomTag.tag_value) == value.lower(),
+            )
+        )).scalar_one_or_none()
+        if not tag:
+            tag = CustomTag(
+                tag_key=key,
+                tag_value=value,
+                color=color,
+                description=f"Auto-created for {key}={value}",
+                created_by=user.id,
+            )
+            db.add(tag)
+            await db.flush()
+        return tag
+
+    # Create Vertical tag
+    vertical_tag = await _get_or_create_tag("Vertical", vertical.name, vertical.color)
+
+    # Create Business tag if business selected
+    business_tag = None
+    if business_name:
+        business_tag = await _get_or_create_tag("Business", business_name, vertical.color)
 
     added = 0
     for rid in payload.resource_ids:
-        exists = (await db.execute(
-            select(ResourceTagMapping).where(
-                ResourceTagMapping.resource_id == rid,
-                ResourceTagMapping.custom_tag_id == tag.id,
-            )
-        )).scalar_one_or_none()
-        if not exists:
-            db.add(ResourceTagMapping(
-                resource_id=rid,
-                cloud_provider=payload.cloud_provider,
-                aws_account_id=payload.aws_account_id,
-                custom_tag_id=tag.id,
-                created_by=user.id,
-            ))
-            added += 1
+        for tag in [t for t in [vertical_tag, business_tag] if t]:
+            exists = (await db.execute(
+                select(ResourceTagMapping).where(
+                    ResourceTagMapping.resource_id == rid,
+                    ResourceTagMapping.custom_tag_id == tag.id,
+                )
+            )).scalar_one_or_none()
+            if not exists:
+                db.add(ResourceTagMapping(
+                    resource_id=rid,
+                    cloud_provider=payload.cloud_provider,
+                    aws_account_id=payload.aws_account_id,
+                    custom_tag_id=tag.id,
+                    created_by=user.id,
+                ))
+        added += 1
 
     await db.commit()
-    return {"tagged": added, "tag": f"Vertical={vertical.name}", "account": payload.aws_account_id}
+    tags_created = f"Vertical={vertical.name}"
+    if business_name:
+        tags_created += f", Business={business_name}"
+    return {"tagged": added, "tags": tags_created, "account": payload.aws_account_id}
 
 
 @router.get("/apps/{app_id}/cost")
@@ -460,6 +481,63 @@ async def list_businesses(
          "color": b.color, "owner_name": b.owner_name, "owner_email": b.owner_email}
         for b in rows
     ]
+
+
+@router.get("/{vertical_id}/businesses/{business_id}/cost")
+async def business_cost(
+    vertical_id: str,
+    business_id: str,
+    granularity: str = "monthly",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Cost for all resources tagged with Business=<business_name>."""
+    start, end = _date_range(granularity)
+    if start_date:
+        start = date.fromisoformat(start_date)
+    if end_date:
+        end = date.fromisoformat(end_date)
+
+    biz = (await db.execute(select(Business).where(Business.id == business_id))).scalar_one_or_none()
+    if not biz:
+        raise HTTPException(404)
+
+    # Get resource IDs tagged with Business=<name>
+    resource_ids = list(set((await db.execute(
+        select(ResourceTagMapping.resource_id)
+        .join(CustomTag, ResourceTagMapping.custom_tag_id == CustomTag.id)
+        .where(
+            func.lower(CustomTag.tag_key) == "business",
+            func.lower(CustomTag.tag_value) == biz.name.lower(),
+        )
+    )).scalars().all()))
+
+    # Also get account IDs for account-level charges
+    account_ids = list(set((await db.execute(
+        select(ResourceTagMapping.aws_account_id)
+        .join(CustomTag, ResourceTagMapping.custom_tag_id == CustomTag.id)
+        .where(
+            func.lower(CustomTag.tag_key) == "business",
+            func.lower(CustomTag.tag_value) == biz.name.lower(),
+            ResourceTagMapping.aws_account_id.isnot(None),
+        )
+    )).scalars().all()))
+
+    trend = await _cost_for_resources_and_accounts(db, resource_ids, account_ids, start, end, granularity)
+    total = sum(p["cost"] for p in trend)
+
+    return {
+        "business_id": business_id,
+        "business_name": biz.name,
+        "granularity": granularity,
+        "start": str(start),
+        "end": str(end),
+        "total_cost": total,
+        "resource_count": len(resource_ids),
+        "trend": trend,
+    }
 
 
 @router.post("/{vertical_id}/businesses", status_code=201)
