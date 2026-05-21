@@ -25,7 +25,8 @@ interface OwnerCost {
   resource_count: number; total_cost: number;
   trend: { period: string; cost: number }[];
 }
-interface Account { aws_account_id: string; account_name: string; }
+interface Tower { id: string; name: string; sub_accounts: { aws_account_id: string; account_name: string }[]; }
+interface Account { aws_account_id: string; account_name: string; ct_name: string; ct_id: string; }
 interface Resource { resource_id: string; service: string; region: string; account_id?: string; }
 
 export default function VerticalDetailPage() {
@@ -53,6 +54,7 @@ export default function VerticalDetailPage() {
 
   // Bulk tag modal
   const [showBulkTag, setShowBulkTag] = useState(false);
+  const [towers, setTowers] = useState<Tower[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedAccounts, setSelectedAccounts] = useState<Set<string>>(new Set());
   const [accountResources, setAccountResources] = useState<Resource[]>([]);
@@ -67,18 +69,22 @@ export default function VerticalDetailPage() {
       const params: any = { granularity: gran };
       if (start) params.start_date = start;
       if (end) params.end_date = end;
-      const [vertsRes, ownersRes, costRes, taggedAcctsRes] = await Promise.all([
-        axios.get(`${BASE}/api/verticals/`, { headers }),
+      // Run cost + owners in parallel, tagged accounts separately (less critical)
+      const [ownersRes, costRes] = await Promise.all([
         axios.get(`${BASE}/api/verticals/${id}/owners`, { headers }),
         axios.get(`${BASE}/api/verticals/${id}/cost`, { headers, params }),
-        axios.get(`${BASE}/api/verticals/${id}/tagged-accounts`, { headers }),
       ]);
-      const v = (vertsRes.data as any[]).find((x: any) => x.id === id);
-      setVertical(v || null);
       setOwners(ownersRes.data);
       setCostData(costRes.data.owners || []);
       setTaggedCount(costRes.data.tagged_resource_count || 0);
-      setTaggedAccounts(taggedAcctsRes.data || []);
+      // Load vertical name + tagged accounts in background
+      axios.get(`${BASE}/api/verticals/`, { headers }).then((r) => {
+        const v = (r.data as any[]).find((x: any) => x.id === id);
+        setVertical(v || null);
+      });
+      axios.get(`${BASE}/api/verticals/${id}/tagged-accounts`, { headers }).then((r) => {
+        setTaggedAccounts(r.data || []);
+      });
     } finally {
       setLoading(false);
     }
@@ -118,8 +124,20 @@ export default function VerticalDetailPage() {
     setAccountResources([]);
     setSelectedResources(new Set());
     setServiceFilter("");
-    const res = await axios.get(`${BASE}/api/reports/meta/accounts`, { headers });
-    setAccounts(res.data);
+    // Load towers with sub-accounts for CT hierarchy
+    const res = await axios.get(`${BASE}/api/towers/`, { headers });
+    const towersData: Tower[] = res.data;
+    setTowers(towersData);
+    // Flatten accounts with CT info
+    const flat: Account[] = towersData.flatMap((t) =>
+      (t.sub_accounts || []).map((s) => ({
+        aws_account_id: s.aws_account_id,
+        account_name: s.account_name,
+        ct_name: t.name,
+        ct_id: t.id,
+      }))
+    );
+    setAccounts(flat);
   };
 
   const loadAccountResources = async (accountIds: Set<string>) => {
@@ -514,29 +532,52 @@ export default function VerticalDetailPage() {
                     className="text-xs font-bold text-black hover:underline">Clear</button>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-1.5 max-h-36 overflow-y-auto border border-gray-200 rounded-lg p-2 bg-gray-50">
-                {accounts.map((a) => {
-                  const checked = selectedAccounts.has(a.aws_account_id);
-                  return (
-                    <label key={a.aws_account_id}
-                      className={`flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer transition text-xs font-semibold ${
-                        checked ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-blue-50 border border-gray-200"
-                      }`}>
-                      <input type="checkbox" className="hidden"
-                        checked={checked}
-                        onChange={() => toggleAccount(a.aws_account_id)} />
-                      <div className={`w-3.5 h-3.5 rounded border flex-shrink-0 flex items-center justify-center ${
-                        checked ? "bg-white border-white" : "border-gray-400"
-                      }`}>
-                        {checked && <div className="w-2 h-2 rounded-sm bg-blue-900" />}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="truncate">{a.account_name}</div>
-                        <div className={`text-[10px] font-mono ${checked ? "text-white/70" : "text-gray-500"}`}>{a.aws_account_id}</div>
-                      </div>
-                    </label>
-                  );
-                })}
+              <div className="grid grid-cols-1 gap-1.5 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-2 bg-gray-50">
+                {towers.map((ct) => (
+                  <div key={ct.id}>
+                    {/* CT header */}
+                    <div className="flex items-center justify-between px-2 py-1.5 mb-1">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">{ct.name}</span>
+                      <button
+                        onClick={() => {
+                          const ctAccIds = (ct.sub_accounts || []).map((s) => s.aws_account_id);
+                          const allSelected = ctAccIds.every((a) => selectedAccounts.has(a));
+                          setSelectedAccounts((prev) => {
+                            const next = new Set(prev);
+                            ctAccIds.forEach((a) => allSelected ? next.delete(a) : next.add(a));
+                            return next;
+                          });
+                        }}
+                        className="text-[10px] font-bold text-blue-900 hover:underline">
+                        {(ct.sub_accounts || []).every((s) => selectedAccounts.has(s.aws_account_id)) ? "Deselect all" : "Select all"}
+                      </button>
+                    </div>
+                    {/* Sub-accounts */}
+                    <div className="grid grid-cols-2 gap-1 ml-2">
+                      {(ct.sub_accounts || []).map((acc) => {
+                        const checked = selectedAccounts.has(acc.aws_account_id);
+                        return (
+                          <label key={acc.aws_account_id}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer transition text-xs font-semibold ${
+                              checked ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-blue-50 border border-gray-200"
+                            }`}>
+                            <input type="checkbox" className="hidden" checked={checked}
+                              onChange={() => toggleAccount(acc.aws_account_id)} />
+                            <div className={`w-3.5 h-3.5 rounded border flex-shrink-0 flex items-center justify-center ${
+                              checked ? "bg-white border-white" : "border-gray-400"
+                            }`}>
+                              {checked && <div className="w-2 h-2 rounded-sm bg-blue-900" />}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="truncate">{acc.account_name}</div>
+                              <div className={`text-[10px] font-mono ${checked ? "text-white/70" : "text-gray-500"}`}>{acc.aws_account_id}</div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
               <div className="flex justify-end mt-2">
                 <button

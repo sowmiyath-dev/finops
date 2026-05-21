@@ -115,6 +115,11 @@ function ReportsContent() {
     (t.sub_accounts || []).map((s: any) => ({ ...s, ct_name: t.name }))
   );
 
+  // Filter accounts based on selected CTs
+  const filteredAccounts = selectedCTs.length > 0
+    ? allAccounts.filter((a: any) => selectedCTs.includes(a.ct_name))
+    : allAccounts;
+
   const defaultStart = (() => {
     const now = new Date();
     const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
@@ -129,6 +134,12 @@ function ReportsContent() {
   const [startDate, setStartDate] = useState(defaultStart);
   const [endDate, setEndDate] = useState(defaultEndLastMonth);
   const [selectedCTs, setSelectedCTs] = useState<string[]>(params.get("ct") ? [params.get("ct")!] : []);
+
+  // Clear account selection when CT changes
+  const handleCTChange = (cts: string[]) => {
+    setSelectedCTs(cts);
+    setSelectedAccounts([]);
+  };
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [selectedRegions, setSelectedRegions] = useState<string[]>([]);
@@ -347,8 +358,8 @@ function ReportsContent() {
                 </div>
               </div>
 
-              <MultiSelect label="Control Towers" options={towers.map((t: any) => t.name)} selected={selectedCTs} onChange={setSelectedCTs} />
-              <MultiSelect label="Accounts" options={allAccounts.map((a: any) => `${a.account_name} (${a.aws_account_id})`)} selected={selectedAccounts} onChange={setSelectedAccounts} />
+              <MultiSelect label="Control Towers" options={towers.map((t: any) => t.name)} selected={selectedCTs} onChange={handleCTChange} />
+              <MultiSelect label="Accounts" options={filteredAccounts.map((a: any) => `${a.account_name} (${a.aws_account_id})`)} selected={selectedAccounts} onChange={setSelectedAccounts} />
               <MultiSelect label="Services" options={services} selected={selectedServices} onChange={setSelectedServices} />
               <MultiSelect label="Regions" options={regions} selected={selectedRegions} onChange={setSelectedRegions} />
               <MultiSelect label="Purchase Types" options={["OnDemand", "Reserved", "SavingsPlan", "Spot"]} selected={selectedPurchaseTypes} onChange={setSelectedPurchaseTypes} />
