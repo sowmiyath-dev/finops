@@ -28,21 +28,26 @@ const TABS = [
 
 function getLastMonth() {
   const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const end = new Date(now.getFullYear(), now.getMonth(), 0); // day 0 = last day of prev month
-  return {
-    start: start.toISOString().slice(0, 10),
-    end: end.toISOString().slice(0, 10),
-  };
+  const y = now.getFullYear();
+  const m = now.getMonth(); // current month index (0-based)
+  // First day of last month
+  const start = new Date(y, m - 1, 1);
+  // Last day of last month = day 0 of current month
+  const end = new Date(y, m, 0);
+  // Format as YYYY-MM-DD using local date parts to avoid timezone shift
+  const fmt = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return { start: fmt(start), end: fmt(end) };
 }
 
 function getThisMonth(accurateUntil?: string) {
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  const end = accurateUntil ? accurateUntil : now.toISOString().slice(0, 10);
+  const fmt = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   return {
-    start: start.toISOString().slice(0, 10),
-    end,
+    start: fmt(start),
+    end: accurateUntil || fmt(now),
   };
 }
 
@@ -50,10 +55,9 @@ function getLast7Days(accurateUntil?: string) {
   const end = accurateUntil ? new Date(accurateUntil) : new Date();
   const start = new Date(end);
   start.setDate(start.getDate() - 6);
-  return {
-    start: start.toISOString().slice(0, 10),
-    end: end.toISOString().slice(0, 10),
-  };
+  const fmt = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return { start: fmt(start), end: fmt(end) };
 }
 
 function fmt(n: number) {

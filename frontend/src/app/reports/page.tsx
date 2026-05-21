@@ -115,14 +115,15 @@ function ReportsContent() {
     (t.sub_accounts || []).map((s: any) => ({ ...s, ct_name: t.name }))
   );
 
-  const defaultEnd = boundary?.accurate_until || new Date().toISOString().slice(0, 10);
   const defaultStart = (() => {
     const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 10);
+    const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-01`;
   })();
   const defaultEndLastMonth = (() => {
     const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), 0).toISOString().slice(0, 10);
+    const d = new Date(now.getFullYear(), now.getMonth(), 0);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
   })();
 
   const [startDate, setStartDate] = useState(defaultStart);
@@ -144,31 +145,30 @@ function ReportsContent() {
   const [filterKey, setFilterKey] = useState(0);
   const [activeFilter, setActiveFilter] = useState<any>(null);
 
-  // No auto-apply on boundary load — user picks dates manually
+  const fmtDate = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
   const applyQuickRange = (range: string) => {
     const now = new Date();
-    const accurate = boundary?.accurate_until || now.toISOString().slice(0, 10);
+    const accurate = boundary?.accurate_until || fmtDate(now);
     if (range === "this-month") {
-      setStartDate(new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10));
+      setStartDate(fmtDate(new Date(now.getFullYear(), now.getMonth(), 1)));
       setEndDate(accurate);
     } else if (range === "last-month") {
-      setStartDate(new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 10));
-      setEndDate(new Date(now.getFullYear(), now.getMonth(), 0).toISOString().slice(0, 10));
+      setStartDate(fmtDate(new Date(now.getFullYear(), now.getMonth() - 1, 1)));
+      setEndDate(fmtDate(new Date(now.getFullYear(), now.getMonth(), 0)));
     } else if (range === "7d") {
       const e = new Date(accurate);
       const s = new Date(e); s.setDate(s.getDate() - 6);
-      setStartDate(s.toISOString().slice(0, 10));
-      setEndDate(accurate);
+      setStartDate(fmtDate(s)); setEndDate(accurate);
     } else if (range === "30d") {
       const e = new Date(accurate);
       const s = new Date(e); s.setDate(s.getDate() - 29);
-      setStartDate(s.toISOString().slice(0, 10));
-      setEndDate(accurate);
+      setStartDate(fmtDate(s)); setEndDate(accurate);
     } else if (range === "90d") {
       const e = new Date(accurate);
       const s = new Date(e); s.setDate(s.getDate() - 89);
-      setStartDate(s.toISOString().slice(0, 10));
-      setEndDate(accurate);
+      setStartDate(fmtDate(s)); setEndDate(accurate);
     }
     setQuickRange(range);
   };
