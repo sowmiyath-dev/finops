@@ -34,7 +34,7 @@ class BusinessCreate(BaseModel):
     owner_email: Optional[str] = None
 
 
-
+class AppCreate(BaseModel):
     name: str
     description: Optional[str] = None
     color: str = "#0f2d5e"
