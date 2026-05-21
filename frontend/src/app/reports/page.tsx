@@ -6,7 +6,7 @@ import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
 import Navbar from "@/components/Navbar";
 import toast from "react-hot-toast";
-import { Download, Filter, RefreshCw, X, AlertCircle } from "lucide-react";
+import { Download, Filter, RefreshCw, X } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
 const COLORS = ["#0f2d5e","#1a6fa8","#ec7211","#1d8348","#c0392b","#8e44ad","#2980b9","#27ae60","#e67e22","#16a085"];
@@ -230,7 +230,7 @@ function ReportsContent() {
           <div>
             <h1 className="text-2xl font-bold text-black">Cost Reports</h1>
             <p className="text-sm mt-0.5 text-black">
-              {boundary && <>Data accurate up to <strong>{boundary.accurate_until}</strong> · Daily sync at 10:30 AM UTC</>}
+              {boundary && <>Last synced up to <strong>{boundary.accurate_until}</strong> · Daily sync at 10:30 AM IST</>}
             </p>
           </div>
           <button onClick={handleExport} disabled={exporting || !activeFilter}
@@ -240,13 +240,7 @@ function ReportsContent() {
           </button>
         </div>
 
-        {/* Boundary notice */}
-        {boundary && (
-          <div className="flex items-center gap-2 mb-5 px-4 py-3 rounded-lg border border-blue-300 bg-blue-50 text-blue-900 text-sm font-semibold">
-            <AlertCircle className="w-4 h-4 flex-shrink-0" />
-            Cost data is accurate up to <strong>{boundary.accurate_until}</strong>. Daily sync at <strong>10:30 AM UTC</strong>.
-          </div>
-        )}
+        {/* Boundary notice removed */}
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
 
@@ -450,90 +444,10 @@ function ReportsContent() {
                 <div className="bg-white rounded-lg border border-gray-300 shadow-sm overflow-hidden">
                   <div className="px-5 py-3 flex items-center justify-between bg-gray-100 border-b border-gray-300">
                     <span className="text-sm font-bold text-black capitalize">{groupBy}-wise Cost Breakdown</span>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs font-bold text-black">{reportData.length} rows</span>
-                      {groupBy === "account" && granularity === "daily" && (
-                        <div className="flex border border-gray-300 rounded-md overflow-hidden">
-                          <button onClick={() => setPivotView(false)}
-                            className={`px-3 py-1 text-xs font-bold transition ${!pivotView ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-gray-50"}`}>
-                            List
-                          </button>
-                          <button onClick={() => setPivotView(true)}
-                            className={`px-3 py-1 text-xs font-bold transition ${pivotView ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-gray-50"}`}>
-                            Pivot
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                    <span className="text-xs font-bold text-black">{reportData.length} rows</span>
                   </div>
                   <div className="overflow-x-auto">
-                    {/* Pivot table view */}
-                    {groupBy === "account" && granularity === "daily" && pivotView ? (
-                      (() => {
-                        // Build pivot: { accountId: { date: cost } }
-                        const accountMap: Record<string, { name: string; id: string; dates: Record<string, number> }> = {};
-                        const dateSet = new Set<string>();
-                        reportData.forEach((row: any) => {
-                          const key = row.aws_account_id;
-                          if (!accountMap[key]) accountMap[key] = { name: row.account_name || key, id: key, dates: {} };
-                          accountMap[key].dates[row.date] = (accountMap[key].dates[row.date] || 0) + row.cost;
-                          dateSet.add(row.date);
-                        });
-                        const dates = Array.from(dateSet).sort();
-                        const accounts = Object.values(accountMap);
-                        return (
-                          <table className="w-full">
-                            <thead>
-                              <tr className="bg-gray-100 border-b-2 border-gray-300">
-                                <th className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-black sticky left-0 bg-gray-100 z-10 min-w-[140px]">Account</th>
-                                <th className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-black sticky left-[140px] bg-gray-100 z-10 min-w-[120px]">Account ID</th>
-                                {dates.map((d) => (
-                                  <th key={d} className="text-right px-3 py-3 text-xs font-bold uppercase tracking-wider text-black min-w-[100px] whitespace-nowrap">
-                                    {d.slice(5).replace("-", "/")}
-                                  </th>
-                                ))}
-                                <th className="text-right px-4 py-3 text-xs font-bold uppercase tracking-wider text-black min-w-[110px] bg-blue-50">Total</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {accounts.map((acc, i) => {
-                                const total = Object.values(acc.dates).reduce((s, v) => s + v, 0);
-                                return (
-                                  <tr key={acc.id} className="border-b border-gray-200 hover:bg-blue-50 transition">
-                                    <td className="px-4 py-2.5 text-sm font-semibold text-black sticky left-0 bg-white hover:bg-blue-50 z-10">{acc.name}</td>
-                                    <td className="px-4 py-2.5 text-xs font-mono font-semibold text-black sticky left-[140px] bg-white hover:bg-blue-50 z-10">{acc.id}</td>
-                                    {dates.map((d) => (
-                                      <td key={d} className="px-3 py-2.5 text-right text-xs font-mono font-bold text-blue-900">
-                                        {acc.dates[d] ? `$${acc.dates[d].toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
-                                      </td>
-                                    ))}
-                                    <td className="px-4 py-2.5 text-right text-xs font-mono font-bold text-blue-900 bg-blue-50">
-                                      ${total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                              {/* Total row */}
-                              <tr className="border-t-2 border-gray-300 bg-gray-50">
-                                <td className="px-4 py-2.5 text-sm font-bold text-black sticky left-0 bg-gray-50 z-10">Total</td>
-                                <td className="px-4 py-2.5 sticky left-[140px] bg-gray-50 z-10" />
-                                {dates.map((d) => {
-                                  const dayTotal = accounts.reduce((s, a) => s + (a.dates[d] || 0), 0);
-                                  return (
-                                    <td key={d} className="px-3 py-2.5 text-right text-xs font-mono font-bold text-blue-900">
-                                      ${dayTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </td>
-                                  );
-                                })}
-                                <td className="px-4 py-2.5 text-right text-xs font-mono font-bold text-blue-900 bg-blue-50">
-                                  ${accounts.reduce((s, a) => s + Object.values(a.dates).reduce((x, v) => x + v, 0), 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </td>
-                              </tr>
-                            </tbody>
-                          </table>
-                        );
-                      })()
-                    ) : (
+                    <table className="w-full">
                       <thead>
                         <tr className="bg-gray-100 border-b-2 border-gray-300">
                           {groupBy === "account" && (
@@ -602,7 +516,6 @@ function ReportsContent() {
                         Showing 200 of {reportData.length} rows. Export CSV to get all data.
                       </div>
                     )}
-                    {groupBy === "account" && granularity === "daily" && pivotView ? null : null}
                   </div>
                 </div>
               </>
