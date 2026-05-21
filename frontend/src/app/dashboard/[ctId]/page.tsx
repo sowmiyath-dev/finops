@@ -83,7 +83,7 @@ export default function CTDetailPage() {
 
   // Main summary — subaccount costs
   const { data: summary, isLoading: summaryLoading } = useQuery({
-    queryKey: ["ct-summary", ctId, startDate, endDate, granularity, selectedAccount],
+    queryKey: ["ct-summary", ctId, startDate, endDate, granularity, selectedAccounts],
     queryFn: () => api.post("/reports/summary", filter).then((r) => r.data),
     enabled: !!token && !!ctId,
     staleTime: 2 * 60 * 1000,
