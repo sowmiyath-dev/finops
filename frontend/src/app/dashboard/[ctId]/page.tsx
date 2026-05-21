@@ -70,10 +70,21 @@ export default function CTDetailPage() {
   const router = useRouter();
 
   const lastMonth = getLastMonth();
+  const DEFAULT_CHARGE_TYPES = [
+    "Usage",
+    "SavingsPlanCoveredUsage",
+    "SavingsPlanRecurringFee",
+    "SavingsPlanNegation",
+    "RIFee",
+    "DiscountedUsage",
+  ];
+
   const [startDate, setStartDate] = useState(lastMonth.start);
   const [endDate, setEndDate] = useState(lastMonth.end);
   const [granularity, setGranularity] = useState("monthly");
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
+  const [selectedChargeTypes, setSelectedChargeTypes] = useState<string[]>(DEFAULT_CHARGE_TYPES);
+  const [chargeFilterOpen, setChargeFilterOpen] = useState(false);
   const [accountDropdownOpen, setAccountDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("service");
 
@@ -99,6 +110,7 @@ export default function CTDetailPage() {
   const filter = {
     control_tower_ids: [ctId],
     account_ids: selectedAccounts.length > 0 ? selectedAccounts : null,
+    charge_types: selectedChargeTypes.length > 0 ? selectedChargeTypes : null,
     start_date: startDate,
     end_date: endDate,
     granularity,
@@ -263,7 +275,70 @@ export default function CTDetailPage() {
           <div className="bg-white rounded-lg border border-gray-300 shadow-sm mb-6">
             <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between">
               <h2 className="text-sm font-bold text-black">Subaccount Costs</h2>
-              {/* Multi-select dropdown */}
+              <div className="flex items-center gap-3">
+                {/* Charge Type filter */}
+                <div className="relative">
+                  <button
+                    onClick={() => setChargeFilterOpen(!chargeFilterOpen)}
+                    className="flex items-center gap-2 px-3 py-1.5 border border-gray-400 rounded-md text-xs font-bold text-black bg-white hover:border-blue-900 transition">
+                    Charge Types
+                    <span className="bg-blue-900 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                      {selectedChargeTypes.length}
+                    </span>
+                  </button>
+                  {chargeFilterOpen && (
+                    <div className="absolute right-0 top-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-20 w-56">
+                      <div className="p-2 border-b border-gray-100 flex items-center justify-between">
+                        <span className="text-xs font-bold text-black">Charge Types</span>
+                        <button onClick={() => setChargeFilterOpen(false)} className="text-xs text-gray-400 hover:text-black">✕</button>
+                      </div>
+                      <div className="p-2 space-y-0.5 max-h-56 overflow-y-auto">
+                        {[
+                          { value: "Usage",                   label: "Usage" },
+                          { value: "SavingsPlanCoveredUsage", label: "Savings Plan Usage" },
+                          { value: "SavingsPlanRecurringFee", label: "Savings Plan Fee" },
+                          { value: "SavingsPlanNegation",     label: "Savings Plan Negation" },
+                          { value: "RIFee",                   label: "Reserved Instance Fee" },
+                          { value: "DiscountedUsage",         label: "Discounted Usage" },
+                          { value: "Tax",                     label: "Tax" },
+                          { value: "DistributorDiscount",     label: "Distributor Discount" },
+                          { value: "Credit",                  label: "Credit" },
+                          { value: "Refund",                  label: "Refund" },
+                          { value: "OCBLateFee",              label: "Late Fee (OCB)" },
+                          { value: "Fee",                     label: "Fee" },
+                        ].map((ct) => (
+                          <label key={ct.value} className="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer hover:bg-gray-50 transition">
+                            <input
+                              type="checkbox"
+                              checked={selectedChargeTypes.includes(ct.value)}
+                              onChange={() => setSelectedChargeTypes((prev) =>
+                                prev.includes(ct.value)
+                                  ? prev.filter((x) => x !== ct.value)
+                                  : [...prev, ct.value]
+                              )}
+                              className="w-3.5 h-3.5 accent-blue-900"
+                            />
+                            <span className="text-xs font-medium text-black">{ct.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                      <div className="p-2 border-t border-gray-100 flex gap-2">
+                        <button
+                          onClick={() => setSelectedChargeTypes(DEFAULT_CHARGE_TYPES)}
+                          className="flex-1 text-xs font-bold text-blue-900 hover:underline">
+                          Reset defaults
+                        </button>
+                        <button
+                          onClick={() => setSelectedChargeTypes(["Usage","SavingsPlanCoveredUsage","SavingsPlanRecurringFee","SavingsPlanNegation","RIFee","DiscountedUsage","Tax","DistributorDiscount","Credit","Refund","OCBLateFee","Fee"])}
+                          className="flex-1 text-xs font-bold text-gray-500 hover:underline">
+                          Select all
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Account multi-select dropdown */}
               <div className="relative">
                 <button
                   onClick={() => setAccountDropdownOpen(!accountDropdownOpen)}
@@ -322,6 +397,7 @@ export default function CTDetailPage() {
                   </div>
                 )}
               </div>
+              </div> {/* end flex items-center gap-3 */}
             </div>
             <table className="w-full">
               <thead>
