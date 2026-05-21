@@ -11,7 +11,7 @@ services:
       POSTGRES_INITDB_ARGS: "--encoding=UTF8"
     command: >
       postgres
-      -c max_connections=100
+      -c max_connections=200
       -c shared_buffers=512MB
       -c effective_cache_size=1536MB
       -c work_mem=16MB
@@ -19,7 +19,11 @@ services:
       -c random_page_cost=1.1
       -c effective_io_concurrency=200
       -c checkpoint_completion_target=0.9
-      -c wal_buffers=16MB
+      -c wal_buffers=64MB
+      -c max_wal_size=2GB
+      -c min_wal_size=256MB
+      -c checkpoint_timeout=15min
+      -c synchronous_commit=off
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -32,6 +36,9 @@ services:
         limits:
           cpus: "1.0"
           memory: 2048M
+        reservations:
+          cpus: "0.25"
+          memory: 512M
 
   backend:
     build: ./backend
@@ -39,6 +46,26 @@ services:
     ports:
       - "8000:8000"
     env_file: ./backend/.env
+    # Run with 2 uvicorn workers for concurrent API requests
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    depends_on:
+      db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1024M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+  worker:
+    build: ./backend
+    restart: always
+    env_file: ./backend/.env
+    # Runs sync scheduler only — completely separate from API
+    command: ["python", "-m", "worker"]
     depends_on:
       db:
         condition: service_healthy
@@ -46,7 +73,10 @@ services:
       resources:
         limits:
           cpus: "1.5"
-          memory: 2048M
+          memory: 3072M
+        reservations:
+          cpus: "0.25"
+          memory: 512M
 
   frontend:
     build: ./frontend
@@ -62,6 +92,9 @@ services:
         limits:
           cpus: "0.5"
           memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
 
 volumes:
   pgdata:
