@@ -20,7 +20,7 @@ function AuthForm() {
   const { setAuth, token } = useAuthStore();
   const router = useRouter();
 
-  useEffect(() => { if (token) router.push("/dashboard"); }, [token]);
+  useEffect(() => { if (token) router.push("/org"); }, [token]);
 
   const handleCredentials = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,7 +53,7 @@ function AuthForm() {
     try {
       const { data } = await api.post(`/auth/mfa/confirm?temp_token=${tempToken}`, { code });
       await setAuth(data.access_token);
-      router.push("/dashboard");
+      router.push("/org");
     } catch (err: any) { toast.error(err.response?.data?.detail || "Invalid code"); }
     finally { setLoading(false); }
   };
@@ -63,7 +63,7 @@ function AuthForm() {
     try {
       const { data } = await api.post("/auth/mfa/validate", { temp_token: tempToken, code });
       await setAuth(data.access_token);
-      router.push("/dashboard");
+      router.push("/org");
     } catch (err: any) { toast.error(err.response?.data?.detail || "Invalid code"); }
     finally { setLoading(false); }
   };
