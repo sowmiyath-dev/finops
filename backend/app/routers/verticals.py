@@ -4,6 +4,7 @@ from sqlalchemy import select, func
 from typing import Optional
 from pydantic import BaseModel
 from datetime import date, timedelta
+import json, hashlib, os
 
 from app.models.database import get_db
 from app.models.db_models import (
@@ -13,6 +14,54 @@ from app.models.db_models import (
 from app.services.auth_service import get_current_user
 
 router = APIRouter(prefix="/verticals", tags=["verticals"])
+
+# ── Redis cache (optional — gracefully skipped if Redis not available) ────────
+_redis = None
+
+async def _get_redis():
+    global _redis
+    if _redis is not None:
+        return _redis
+    try:
+        import redis.asyncio as aioredis
+        _redis = await aioredis.from_url(
+            os.getenv("REDIS_URL", "redis://redis:6379"),
+            encoding="utf-8", decode_responses=True,
+            socket_connect_timeout=2, socket_timeout=2,
+        )
+        await _redis.ping()
+        return _redis
+    except Exception:
+        _redis = None
+        return None
+
+async def _cache_get(key: str) -> Optional[dict]:
+    try:
+        r = await _get_redis()
+        if not r:
+            return None
+        val = await r.get(key)
+        return json.loads(val) if val else None
+    except Exception:
+        return None
+
+async def _cache_set(key: str, data, ttl: int = 300):
+    try:
+        r = await _get_redis()
+        if r:
+            await r.setex(key, ttl, json.dumps(data, default=str))
+    except Exception:
+        pass
+
+async def _cache_delete_pattern(pattern: str):
+    try:
+        r = await _get_redis()
+        if r:
+            keys = await r.keys(pattern)
+            if keys:
+                await r.delete(*keys)
+    except Exception:
+        pass
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -158,10 +207,11 @@ async def verticals_summary(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """
-    Single fast endpoint for the verticals overview page.
-    Returns total_cost per vertical using 2 SQL queries total — no N+1 loops.
-    """
+    cache_key = f"verticals:summary:{granularity}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     from sqlalchemy import or_, text
 
     start, end = _date_range(granularity)
@@ -229,6 +279,7 @@ async def verticals_summary(
             "start": str(start),
             "end": str(end),
         })
+    await _cache_set(cache_key, result, ttl=300)  # cache 5 minutes
     return result
 
 
@@ -717,6 +768,11 @@ async def vertical_cost(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    cache_key = f"verticals:cost:{vertical_id}:{granularity}:{start_date}:{end_date}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     start, end = _date_range(granularity)
     if start_date:
         start = date.fromisoformat(start_date)
@@ -793,7 +849,7 @@ async def vertical_cost(
             "trend": trend,
         })
 
-    return {
+    response = {
         "vertical_id": vertical_id,
         "granularity": granularity,
         "start": str(start),
@@ -802,6 +858,8 @@ async def vertical_cost(
         "tagged_account_ids": tagged_account_ids,
         "owners": result,
     }
+    await _cache_set(cache_key, response, ttl=300)  # cache 5 minutes
+    return response
 
 
 @router.get("/{vertical_id}/tagged-accounts")

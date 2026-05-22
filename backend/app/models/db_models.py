@@ -60,6 +60,8 @@ class CostRecord(Base):
         Index("ix_cr_service", "service"),
         Index("ix_cr_date", "date"),
         Index("ix_cr_aws_id_date", "aws_account_id", "date"),
+        Index("ix_cr_resource_id", "resource_id"),           # vertical cost queries
+        Index("ix_cr_resource_date", "resource_id", "date"), # vertical cost with date filter
     )
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     control_tower_id = Column(UUID(as_uuid=True), ForeignKey("control_towers.id"), nullable=False)
