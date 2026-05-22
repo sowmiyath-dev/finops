@@ -3,16 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import axios from "axios";
 import { useAuthStore } from "@/store/authStore";
-import { Layers, Users, Box, DollarSign, ChevronRight, Plus, RefreshCw } from "lucide-react";
+import { Layers, ChevronRight, Plus, RefreshCw } from "lucide-react";
 
 const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api").replace(/\/api$/, "");
-
-const VERTICAL_COLORS: Record<string, string> = {
-  Lending: "#0f2d5e",
-  Insurance: "#1d8348",
-  EBS: "#ec7211",
-  "L&D": "#8e44ad",
-};
 
 const GRANULARITY_OPTIONS = [
   { label: "Daily",   value: "daily" },
@@ -20,14 +13,17 @@ const GRANULARITY_OPTIONS = [
   { label: "Monthly", value: "monthly" },
 ];
 
-interface VerticalItem { id: string; name: string; color: string; description?: string; }
-interface OwnerCost {
-  owner_id: string; owner_name: string; app_count: number;
-  resource_count: number; total_cost: number;
-  trend: { period: string; cost: number }[];
+interface VerticalSummary {
+  id: string; name: string; color: string; description?: string;
+  total_cost: number; resource_count: number;
+  owner_count: number; app_count: number;
+  start: string; end: string;
 }
-interface VerticalCost {
-  vertical_id: string; owners: OwnerCost[];
+
+function fmt(n: number) {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000)     return `$${(n / 1_000).toFixed(2)}K`;
+  return `$${n.toFixed(2)}`;
 }
 
 export default function VerticalsPage() {
@@ -36,8 +32,7 @@ export default function VerticalsPage() {
   tokenRef.current = token;
 
   const router = useRouter();
-  const [verticals, setVerticals] = useState<VerticalItem[]>([]);
-  const [costMap, setCostMap] = useState<Record<string, VerticalCost>>({});
+  const [verticals, setVerticals] = useState<VerticalSummary[]>([]);
   const [granularity, setGranularity] = useState("monthly");
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
@@ -47,28 +42,12 @@ export default function VerticalsPage() {
   const load = async (gran?: string) => {
     const g = gran ?? granularity;
     setLoading(true);
-    setCostMap({});
     try {
-      const vertsRes = await axios.get(`${BASE}/api/verticals/`, { headers: getHeaders() });
-      const verts: VerticalItem[] = vertsRes.data;
-      setVerticals(verts);
-
-      if (verts.length > 0) {
-        // Fetch each vertical cost independently and update the map as each arrives
-        // This avoids race conditions from batching into a shared object
-        await Promise.all(
-          verts.map((v) =>
-            axios.get(`${BASE}/api/verticals/${v.id}/cost`, {
-              headers: getHeaders(),
-              params: { granularity: g },
-            })
-            .then((res) => {
-              setCostMap((prev) => ({ ...prev, [v.id]: res.data }));
-            })
-            .catch(() => { /* no cost data yet */ })
-          )
-        );
-      }
+      const res = await axios.get(`${BASE}/api/verticals/summary`, {
+        headers: getHeaders(),
+        params: { granularity: g },
+      });
+      setVerticals(res.data);
     } catch (err) {
       console.error("Failed to load verticals", err);
     } finally {
@@ -78,10 +57,7 @@ export default function VerticalsPage() {
 
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleGranularity = (g: string) => {
-    setGranularity(g);
-    load(g);
-  };
+  const handleGranularity = (g: string) => { setGranularity(g); load(g); };
 
   const seed = async () => {
     setSeeding(true);
@@ -89,18 +65,11 @@ export default function VerticalsPage() {
       await axios.post(`${BASE}/api/verticals/seed`, {}, { headers: getHeaders() });
       await load(granularity);
     } catch (err: any) {
-      console.error("Seed failed", err?.response?.data || err);
       alert(err?.response?.data?.detail || "Seed failed — check backend logs");
     } finally {
       setSeeding(false);
     }
   };
-
-  const totalCost = (v: VerticalItem) =>
-    (costMap[v.id]?.owners || []).reduce((s, o) => s + o.total_cost, 0);
-  const ownerCount = (v: VerticalItem) => costMap[v.id]?.owners.length ?? 0;
-  const appCount = (v: VerticalItem) =>
-    (costMap[v.id]?.owners || []).reduce((s, o) => s + o.app_count, 0);
 
   return (
     <div className="p-6">
@@ -140,14 +109,29 @@ export default function VerticalsPage() {
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center h-48 text-sm font-semibold text-black">
-          Loading verticals...
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="bg-white rounded-lg border border-gray-300 shadow-sm animate-pulse">
+              <div className="h-14 rounded-t-lg bg-gray-200" />
+              <div className="grid grid-cols-3 divide-x divide-gray-200 border-b border-gray-200">
+                {[1, 2, 3].map((j) => (
+                  <div key={j} className="px-4 py-3 text-center">
+                    <div className="h-2 bg-gray-200 rounded mx-auto w-16 mb-2" />
+                    <div className="h-4 bg-gray-200 rounded mx-auto w-20" />
+                  </div>
+                ))}
+              </div>
+              <div className="px-5 py-3">
+                <div className="h-3 bg-gray-200 rounded w-40" />
+              </div>
+            </div>
+          ))}
         </div>
       ) : verticals.length === 0 ? (
         <div className="bg-white rounded-lg border border-gray-300 p-12 text-center">
           <Layers className="w-12 h-12 text-gray-300 mx-auto mb-3" />
           <p className="text-sm font-bold text-black mb-1">No verticals yet</p>
-          <p className="text-xs text-black mb-4">Click "Seed Verticals" to create Lending, Insurance, EBS and L&D</p>
+          <p className="text-xs text-black mb-4">Click "Seed Verticals" to create the default verticals</p>
           <button onClick={seed} disabled={seeding}
             className="inline-flex items-center gap-2 px-5 py-2.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-md transition disabled:opacity-60">
             <Plus className="w-3.5 h-3.5" />
@@ -157,10 +141,7 @@ export default function VerticalsPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {verticals.map((v) => {
-            const color = VERTICAL_COLORS[v.name] || v.color || "#0f2d5e";
-            const owners = costMap[v.id]?.owners || [];
-            const total = totalCost(v);
-
+            const color = v.color || "#0f2d5e";
             return (
               <div key={v.id}
                 className="bg-white rounded-lg border border-gray-300 shadow-sm hover:shadow-md hover:border-blue-900 transition cursor-pointer"
@@ -175,9 +156,9 @@ export default function VerticalsPage() {
 
                 <div className="grid grid-cols-3 divide-x divide-gray-200 border-b border-gray-200">
                   {[
-                    { label: "Total Cost", value: `$${total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` },
-                    { label: "Owners",      value: ownerCount(v) },
-                    { label: "Applications", value: appCount(v) },
+                    { label: "Total Cost",    value: fmt(v.total_cost) },
+                    { label: "Owners",        value: v.owner_count },
+                    { label: "Applications",  value: v.app_count },
                   ].map((stat) => (
                     <div key={stat.label} className="px-4 py-3 text-center">
                       <div className="text-[10px] font-bold uppercase tracking-wider text-black mb-1">{stat.label}</div>
@@ -186,31 +167,11 @@ export default function VerticalsPage() {
                   ))}
                 </div>
 
-                <div className="p-4">
-                  {owners.length === 0 ? (
-                    <p className="text-xs text-black text-center py-2">No owners yet — click to add</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {owners.slice(0, 4).map((o) => (
-                        <div key={o.owner_id} className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold"
-                              style={{ background: color }}>
-                              {o.owner_name.charAt(0).toUpperCase()}
-                            </div>
-                            <span className="text-xs font-semibold text-black">{o.owner_name}</span>
-                            <span className="text-[10px] text-black bg-gray-100 px-1.5 py-0.5 rounded">{o.app_count} apps</span>
-                          </div>
-                          <span className="text-xs font-bold font-mono text-blue-900">
-                            ${o.total_cost.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </span>
-                        </div>
-                      ))}
-                      {owners.length > 4 && (
-                        <p className="text-[10px] text-black text-right">+{owners.length - 4} more owners</p>
-                      )}
-                    </div>
-                  )}
+                <div className="px-5 py-3 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-black">
+                    {v.resource_count.toLocaleString()} tagged resources
+                  </span>
+                  <span className="text-[10px] text-gray-400">{v.start} → {v.end}</span>
                 </div>
               </div>
             );

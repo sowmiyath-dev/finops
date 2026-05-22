@@ -152,6 +152,86 @@ async def _cost_for_resources_and_accounts(
 # STATIC ROUTES FIRST
 # ═════════════════════════════════════════════════════════════════════════════
 
+@router.get("/summary")
+async def verticals_summary(
+    granularity: str = "monthly",
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Single fast endpoint for the verticals overview page.
+    Returns total_cost per vertical using 2 SQL queries total — no N+1 loops.
+    """
+    from sqlalchemy import or_, text
+
+    start, end = _date_range(granularity)
+
+    # 1. Load all verticals
+    verticals = (await db.execute(select(Vertical).order_by(Vertical.name))).scalars().all()
+    if not verticals:
+        return []
+
+    # 2. One query: for each vertical name, sum cost of all tagged resource_ids
+    #    Join resource_tag_mappings → custom_tags → cost_records in one shot
+    #    Group by vertical name (tag_value)
+    tagged_cost_rows = (await db.execute(
+        select(
+            CustomTag.tag_value.label("vertical_name"),
+            func.sum(CostRecord.unblended_cost).label("cost"),
+            func.count(func.distinct(ResourceTagMapping.resource_id)).label("resource_count"),
+        )
+        .join(ResourceTagMapping, ResourceTagMapping.custom_tag_id == CustomTag.id)
+        .join(CostRecord, CostRecord.resource_id == ResourceTagMapping.resource_id)
+        .where(
+            func.lower(CustomTag.tag_key) == "vertical",
+            CostRecord.date >= start,
+            CostRecord.date <= end,
+        )
+        .group_by(CustomTag.tag_value)
+    )).all()
+
+    # Build lookup: vertical_name (lowercase) → {cost, resource_count}
+    cost_by_name: dict = {}
+    for r in tagged_cost_rows:
+        cost_by_name[r.vertical_name.lower()] = {
+            "total_cost": float(r.cost or 0),
+            "resource_count": int(r.resource_count or 0),
+        }
+
+    # 3. Owner + app counts per vertical (cheap metadata query)
+    owner_rows = (await db.execute(
+        select(
+            Owner.vertical_id,
+            func.count(func.distinct(Owner.id)).label("owner_count"),
+            func.count(func.distinct(Application.id)).label("app_count"),
+        )
+        .outerjoin(Application, Application.owner_id == Owner.id)
+        .group_by(Owner.vertical_id)
+    )).all()
+    meta_by_vid: dict = {
+        str(r.vertical_id): {"owner_count": r.owner_count, "app_count": r.app_count}
+        for r in owner_rows
+    }
+
+    result = []
+    for v in verticals:
+        c = cost_by_name.get(v.name.lower(), {"total_cost": 0.0, "resource_count": 0})
+        m = meta_by_vid.get(str(v.id), {"owner_count": 0, "app_count": 0})
+        result.append({
+            "id": str(v.id),
+            "name": v.name,
+            "color": v.color,
+            "description": v.description,
+            "total_cost": c["total_cost"],
+            "resource_count": c["resource_count"],
+            "owner_count": m["owner_count"],
+            "app_count": m["app_count"],
+            "start": str(start),
+            "end": str(end),
+        })
+    return result
+
+
 @router.post("/seed", status_code=201)
 async def seed_verticals(
     db: AsyncSession = Depends(get_db),
