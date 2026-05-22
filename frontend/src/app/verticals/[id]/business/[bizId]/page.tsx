@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import axios from "axios";
 import { useAuthStore } from "@/store/authStore";
-import { ChevronRight, DollarSign, RefreshCw, X, Users } from "lucide-react";
+import { ChevronRight, DollarSign, RefreshCw, X, Users, Tag, CheckSquare, Square } from "lucide-react";
 
 const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api").replace(/\/api$/, "");
 const COLORS = ["#0f2d5e","#ec7211","#1d8348","#8e44ad","#1a6fa8","#c0392b","#16a085","#e67e22"];
@@ -29,6 +29,8 @@ const PRESETS = [
   { label: "Last 30d", fn: () => { const n=new Date(); const s=new Date(n); s.setDate(s.getDate()-29); return { start: fmtDate(s), end: fmtDate(n) }; }},
 ];
 
+interface Resource { resource_id: string; service: string; region: string; account_id?: string; }
+
 export default function BusinessDetailPage() {
   const { id: verticalId, bizId } = useParams<{ id: string; bizId: string }>();
   const router = useRouter();
@@ -45,9 +47,19 @@ export default function BusinessDetailPage() {
   const [costData, setCostData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
+  // Owner modal
   const [showAddOwner, setShowAddOwner] = useState(false);
   const [ownerName, setOwnerName] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Billing tag modal
+  const [tagModal, setTagModal] = useState<{ accountId: string; accountName: string } | null>(null);
+  const [billingValue, setBillingValue] = useState("");
+  const [resources, setResources] = useState<Resource[]>([]);
+  const [selectedResources, setSelectedResources] = useState<Set<string>>(new Set());
+  const [loadingRes, setLoadingRes] = useState(false);
+  const [serviceFilter, setServiceFilter] = useState("");
+  const [tagging, setTagging] = useState(false);
 
   const load = async (start = startDate, end = endDate) => {
     setLoading(true);
@@ -92,6 +104,47 @@ export default function BusinessDetailPage() {
     } finally { setSaving(false); }
   };
 
+  // Open billing tag modal for an account
+  const openTagModal = async (accountId: string, accountName: string) => {
+    setTagModal({ accountId, accountName });
+    setBillingValue("");
+    setResources([]);
+    setSelectedResources(new Set());
+    setServiceFilter("");
+    setLoadingRes(true);
+    try {
+      const res = await axios.get(`${BASE}/api/reports/meta/resources-by-account`, {
+        headers, params: { account_id: accountId },
+      });
+      const list = (res.data as Resource[]).map((r) => ({ ...r, account_id: accountId }));
+      setResources(list);
+      setSelectedResources(new Set(list.map((r) => r.resource_id)));
+    } finally { setLoadingRes(false); }
+  };
+
+  const filteredRes = resources.filter((r) =>
+    !serviceFilter || r.service.toLowerCase().includes(serviceFilter.toLowerCase())
+  );
+
+  const applyBillingTag = async () => {
+    if (!tagModal || !billingValue.trim() || selectedResources.size === 0) return;
+    setTagging(true);
+    try {
+      const res = await axios.post(`${BASE}/api/verticals/bulk-tag-account`, {
+        vertical_id: verticalId,
+        business_id: bizId,
+        billing_tag: billingValue.trim(),
+        aws_account_id: tagModal.accountId,
+        resource_ids: Array.from(selectedResources),
+        cloud_provider: "aws",
+      }, { headers });
+      alert(`✓ Tagged ${res.data.tagged} resources with Billing=${billingValue.trim()}`);
+      setTagModal(null);
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || "Tagging failed");
+    } finally { setTagging(false); }
+  };
+
   const perAccount: any[] = costData?.per_account || [];
   const totalCost = costData?.total_cost || 0;
 
@@ -129,7 +182,6 @@ export default function BusinessDetailPage() {
 
         {/* Date filter */}
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Presets */}
           <div className="flex border border-gray-300 rounded-md overflow-hidden">
             {PRESETS.map((p) => (
               <button key={p.label} onClick={() => applyPreset(p)}
@@ -140,7 +192,6 @@ export default function BusinessDetailPage() {
               </button>
             ))}
           </div>
-          {/* Custom range */}
           <input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setActivePreset(""); }}
             className="border border-gray-400 rounded-md px-3 py-2 text-xs text-black focus:border-blue-900 outline-none" />
           <span className="text-xs text-black">to</span>
@@ -189,7 +240,7 @@ export default function BusinessDetailPage() {
             <table className="w-full">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
-                  {["Account", "Account ID", "Cost", "% of Total"].map((h) => (
+                  {["Account", "Account ID", "Cost", "% of Total", ""].map((h) => (
                     <th key={h} className="text-left text-xs font-bold uppercase tracking-wider text-black px-5 py-3">{h}</th>
                   ))}
                 </tr>
@@ -218,6 +269,13 @@ export default function BusinessDetailPage() {
                           <span className="text-xs font-bold text-black">{pct.toFixed(1)}%</span>
                         </div>
                       </td>
+                      <td className="px-5 py-3">
+                        <button
+                          onClick={() => openTagModal(acc.aws_account_id, acc.account_name)}
+                          className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold border border-gray-300 rounded-md hover:bg-orange-50 hover:border-orange-400 text-black transition">
+                          <Tag className="w-3 h-3 text-orange-600" /> Add Billing Tag
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -225,6 +283,7 @@ export default function BusinessDetailPage() {
                   <td className="px-5 py-3 text-sm font-bold text-black" colSpan={2}>Total</td>
                   <td className="px-5 py-3 text-sm font-bold font-mono text-blue-900">{fmt(totalCost)}</td>
                   <td className="px-5 py-3 text-xs font-bold text-black">100%</td>
+                  <td />
                 </tr>
               </tbody>
             </table>
@@ -252,6 +311,122 @@ export default function BusinessDetailPage() {
               <button onClick={saveOwner} disabled={saving || !ownerName.trim()}
                 className="px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold rounded-md transition disabled:opacity-50">
                 {saving ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Billing Tag Modal */}
+      {tagModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg border border-gray-300 shadow-lg w-full max-w-2xl p-6 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between mb-4 flex-shrink-0">
+              <div>
+                <h3 className="text-sm font-bold text-black flex items-center gap-2">
+                  <Tag className="w-4 h-4 text-orange-600" /> Add Billing Tag — {tagModal.accountName}
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5 font-mono">{tagModal.accountId}</p>
+              </div>
+              <button onClick={() => setTagModal(null)}><X className="w-4 h-4 text-black" /></button>
+            </div>
+
+            {/* Billing value input */}
+            <div className="mb-4 flex-shrink-0">
+              <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">
+                Billing Tag Value *
+              </label>
+              <input
+                value={billingValue}
+                onChange={(e) => setBillingValue(e.target.value)}
+                className="w-full border border-gray-400 rounded-md px-3 py-2 text-sm text-black focus:border-blue-900 outline-none"
+                placeholder="e.g. INDOSTAR-PROD, EBS-Q1-2025"
+                autoFocus
+              />
+              <p className="text-[10px] text-gray-500 mt-1">
+                This will apply <span className="font-bold text-orange-700">Billing={billingValue || "..."}</span> tag to selected resources for future CSV reports
+              </p>
+            </div>
+
+            {/* Resources list */}
+            {loadingRes ? (
+              <div className="flex items-center justify-center py-10">
+                <RefreshCw className="w-5 h-5 animate-spin text-blue-900" />
+                <span className="ml-2 text-sm text-black">Loading resources...</span>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-2 flex-shrink-0">
+                  <div className="flex items-center gap-3">
+                    <input
+                      value={serviceFilter}
+                      onChange={(e) => setServiceFilter(e.target.value)}
+                      placeholder="Filter by service..."
+                      className="border border-gray-400 rounded-md px-3 py-1.5 text-xs text-black focus:border-blue-900 outline-none w-44"
+                    />
+                    <span className="text-xs text-black font-semibold">
+                      {filteredRes.length} resources · {selectedResources.size} selected
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => setSelectedResources(new Set(filteredRes.map((r) => r.resource_id)))}
+                      className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold border border-gray-300 rounded-md hover:bg-blue-50 text-black transition">
+                      <CheckSquare className="w-3.5 h-3.5" /> All
+                    </button>
+                    <button onClick={() => setSelectedResources(new Set())}
+                      className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold border border-gray-300 rounded-md hover:bg-gray-50 text-black transition">
+                      <Square className="w-3.5 h-3.5" /> None
+                    </button>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto border border-gray-200 rounded-lg mb-4 min-h-0">
+                  {filteredRes.length === 0 ? (
+                    <div className="p-6 text-center text-sm text-gray-500">No resources found for this account</div>
+                  ) : (
+                    <table className="w-full">
+                      <thead className="sticky top-0">
+                        <tr className="bg-gray-50 border-b border-gray-200">
+                          <th className="w-10 px-3 py-2" />
+                          {["Resource ID", "Service", "Region"].map((h) => (
+                            <th key={h} className="text-left text-xs font-bold uppercase tracking-wider text-black px-3 py-2">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredRes.map((r) => {
+                          const checked = selectedResources.has(r.resource_id);
+                          return (
+                            <tr key={r.resource_id}
+                              className={`border-b border-gray-100 cursor-pointer transition ${checked ? "bg-blue-50" : "hover:bg-gray-50"}`}
+                              onClick={() => setSelectedResources((prev) => { const n = new Set(prev); n.has(r.resource_id) ? n.delete(r.resource_id) : n.add(r.resource_id); return n; })}>
+                              <td className="px-3 py-2">
+                                {checked ? <CheckSquare className="w-4 h-4 text-blue-900" /> : <Square className="w-4 h-4 text-gray-400" />}
+                              </td>
+                              <td className="px-3 py-2 text-xs font-mono font-semibold text-black">{r.resource_id}</td>
+                              <td className="px-3 py-2">
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-900">{r.service}</span>
+                              </td>
+                              <td className="px-3 py-2 text-xs text-black">{r.region || "—"}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </>
+            )}
+
+            <div className="flex justify-end gap-3 flex-shrink-0 border-t border-gray-200 pt-4">
+              <button onClick={() => setTagModal(null)}
+                className="px-4 py-2 border border-gray-300 rounded-md text-xs font-bold text-black hover:bg-gray-50 transition">
+                Cancel
+              </button>
+              <button
+                onClick={applyBillingTag}
+                disabled={tagging || !billingValue.trim() || selectedResources.size === 0}
+                className="px-5 py-2 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-md transition disabled:opacity-50">
+                {tagging ? "Tagging..." : `Apply Billing Tag to ${selectedResources.size} Resource${selectedResources.size !== 1 ? "s" : ""}`}
               </button>
             </div>
           </div>

@@ -38,6 +38,7 @@ export default function VerticalDetailPage() {
   const [vertical, setVertical] = useState<{ id: string; name: string; color: string } | null>(null);
   const [owners, setOwners] = useState<Owner[]>([]);
   const [businesses, setBusinesses] = useState<{id:string;name:string;color:string;owner_name?:string;owner_email?:string}[]>([]);
+  const [bizCosts, setBizCosts] = useState<Record<string, number>>({});
   const [costData, setCostData] = useState<OwnerCost[]>([]);
   const [taggedCount, setTaggedCount] = useState(0);
   const [taggedAccounts, setTaggedAccounts] = useState<{aws_account_id: string; account_name: string; resource_count: number}[]>([]);
@@ -87,7 +88,8 @@ export default function VerticalDetailPage() {
       setOwners(ownersRes.data);
       setCostData(costRes.data.owners || []);
       setTaggedCount(costRes.data.tagged_resource_count || 0);
-      setBusinesses(bizRes.data || []);
+      const bizList = bizRes.data || [];
+      setBusinesses(bizList);
       // Load vertical name + tagged accounts in background
       axios.get(`${BASE}/api/verticals/`, { headers }).then((r) => {
         const v = (r.data as any[]).find((x: any) => x.id === id);
@@ -95,6 +97,19 @@ export default function VerticalDetailPage() {
       });
       axios.get(`${BASE}/api/verticals/${id}/tagged-accounts`, { headers }).then((r) => {
         setTaggedAccounts(r.data || []);
+      });
+      // Load last month cost for each business in parallel
+      const lm = (() => { const n=new Date(); return { start: `${n.getFullYear()}-${String(n.getMonth()).padStart(2,"0")}-01`, end: `${n.getFullYear()}-${String(n.getMonth()).padStart(2,"0")}-${new Date(n.getFullYear(),n.getMonth(),0).getDate()}` }; })();
+      Promise.all(
+        bizList.map((b: any) =>
+          axios.get(`${BASE}/api/verticals/${id}/businesses/${b.id}/cost`, {
+            headers, params: { granularity: "monthly", start_date: lm.start, end_date: lm.end },
+          }).then((r) => ({ id: b.id, cost: r.data.total_cost || 0 })).catch(() => ({ id: b.id, cost: 0 }))
+        )
+      ).then((results) => {
+        const map: Record<string, number> = {};
+        results.forEach((r) => { map[r.id] = r.cost; });
+        setBizCosts(map);
       });
     } finally {
       setLoading(false);
@@ -427,7 +442,9 @@ export default function VerticalDetailPage() {
                     {b.owner_name ? <span className="font-semibold">{b.owner_name}</span> : <span className="text-gray-400 text-xs">No owner</span>}
                   </td>
                   <td className="px-5 py-3 text-sm font-bold font-mono text-blue-900">
-                    <span className="text-xs text-gray-400">See details</span>
+                    {bizCosts[b.id] !== undefined
+                      ? `$${bizCosts[b.id].toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                      : <span className="text-gray-400 text-xs">Loading...</span>}
                   </td>
                   <td className="px-5 py-3">
                     <button onClick={() => router.push(`/verticals/${id}/business/${b.id}`)}

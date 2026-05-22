@@ -49,6 +49,7 @@ class AppResourceAssign(BaseModel):
 class BulkTagByAccount(BaseModel):
     vertical_id: str
     business_id: Optional[str] = None
+    billing_tag: Optional[str] = None
     aws_account_id: str
     resource_ids: list[str]
     cloud_provider: str = "aws"
@@ -235,9 +236,14 @@ async def bulk_tag_account(
     if business_name:
         business_tag = await _get_or_create_tag("Business", business_name, vertical.color)
 
+    # Create Billing tag if provided
+    billing_tag = None
+    if payload.billing_tag and payload.billing_tag.strip():
+        billing_tag = await _get_or_create_tag("Billing", payload.billing_tag.strip(), "#16a085")
+
     added = 0
     for rid in payload.resource_ids:
-        for tag in [t for t in [vertical_tag, business_tag] if t]:
+        for tag in [t for t in [vertical_tag, business_tag, billing_tag] if t]:
             exists = (await db.execute(
                 select(ResourceTagMapping).where(
                     ResourceTagMapping.resource_id == rid,
@@ -258,6 +264,8 @@ async def bulk_tag_account(
     tags_created = f"Vertical={vertical.name}"
     if business_name:
         tags_created += f", Business={business_name}"
+    if payload.billing_tag:
+        tags_created += f", Billing={payload.billing_tag}"
     return {"tagged": added, "tags": tags_created, "account": payload.aws_account_id}
 
 
