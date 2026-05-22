@@ -47,25 +47,27 @@ export default function VerticalsPage() {
   const load = async (gran?: string) => {
     const g = gran ?? granularity;
     setLoading(true);
+    setCostMap({});
     try {
       const vertsRes = await axios.get(`${BASE}/api/verticals/`, { headers: getHeaders() });
       const verts: VerticalItem[] = vertsRes.data;
       setVerticals(verts);
 
       if (verts.length > 0) {
-        const costs: Record<string, VerticalCost> = {};
+        // Fetch each vertical cost independently and update the map as each arrives
+        // This avoids race conditions from batching into a shared object
         await Promise.all(
-          verts.map(async (v) => {
-            try {
-              const res = await axios.get(`${BASE}/api/verticals/${v.id}/cost`, {
-                headers: getHeaders(),
-                params: { granularity: g },
-              });
-              costs[v.id] = res.data;
-            } catch { /* no cost data yet */ }
-          })
+          verts.map((v) =>
+            axios.get(`${BASE}/api/verticals/${v.id}/cost`, {
+              headers: getHeaders(),
+              params: { granularity: g },
+            })
+            .then((res) => {
+              setCostMap((prev) => ({ ...prev, [v.id]: res.data }));
+            })
+            .catch(() => { /* no cost data yet */ })
+          )
         );
-        setCostMap(costs);
       }
     } catch (err) {
       console.error("Failed to load verticals", err);
