@@ -4,9 +4,22 @@ import { useParams, useRouter } from "next/navigation";
 import axios from "axios";
 import { useAuthStore } from "@/store/authStore";
 import { ChevronRight, DollarSign, RefreshCw, X, Users, Tag, CheckSquare, Square } from "lucide-react";
+import {
+  BarChart, Bar, LineChart, Line, AreaChart, Area,
+  XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
+  PieChart, Pie,
+} from "recharts";
 
 const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api").replace(/\/api$/, "");
-const COLORS = ["#0f2d5e","#ec7211","#1d8348","#8e44ad","#1a6fa8","#c0392b","#16a085","#e67e22"];
+const COLORS = ["#0f2d5e","#1a6fa8","#ec7211","#1d8348","#c0392b","#8e44ad","#2980b9","#27ae60","#e67e22","#16a085"];
+
+type ChartType = "bar" | "line" | "area" | "pie";
+const CHART_TYPES: { value: ChartType; label: string }[] = [
+  { value: "bar",  label: "Bar" },
+  { value: "line", label: "Line" },
+  { value: "area", label: "Area" },
+  { value: "pie",  label: "Pie" },
+];
 
 function fmtDate(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
@@ -19,8 +32,41 @@ function getLastMonth() {
   };
 }
 function fmt(n: number) {
-  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000)     return `$${(n / 1_000).toFixed(1)}K`;
+  return `$${n.toFixed(2)}`;
 }
+
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg shadow-lg p-3 min-w-[160px]">
+      <p className="text-xs font-bold text-black mb-2 border-b border-gray-100 pb-1.5">{label}</p>
+      {payload.map((p: any) => (
+        <div key={p.dataKey || p.name} className="flex items-center justify-between gap-4 py-0.5">
+          <div className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: p.color || p.fill }} />
+            <span className="text-xs text-black truncate max-w-[120px]">{p.dataKey || p.name}</span>
+          </div>
+          <span className="text-xs font-bold font-mono text-blue-900">{fmt(p.value || 0)}</span>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const PieLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) => {
+  if (percent < 0.04) return null;
+  const RADIAN = Math.PI / 180;
+  const r = innerRadius + (outerRadius - innerRadius) * 0.5;
+  const x = cx + r * Math.cos(-midAngle * RADIAN);
+  const y = cy + r * Math.sin(-midAngle * RADIAN);
+  return (
+    <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize={10} fontWeight={700}>
+      {`${(percent * 100).toFixed(0)}%`}
+    </text>
+  );
+};
 
 const PRESETS = [
   { label: "This Month", fn: () => { const n=new Date(); return { start: fmtDate(new Date(n.getFullYear(),n.getMonth(),1)), end: fmtDate(n) }; }},
@@ -60,6 +106,12 @@ export default function BusinessDetailPage() {
   const [loadingRes, setLoadingRes] = useState(false);
   const [serviceFilter, setServiceFilter] = useState("");
   const [tagging, setTagging] = useState(false);
+  const [chartType, setChartType] = useState<ChartType>("bar");
+  const [hiddenAccounts, setHiddenAccounts] = useState<Set<string>>(new Set());
+
+  const toggleAccountViz = (id: string) => {
+    setHiddenAccounts((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  };
 
   const load = async (start = startDate, end = endDate) => {
     setLoading(true);
@@ -220,6 +272,134 @@ export default function BusinessDetailPage() {
           <div className="text-xs text-black mt-0.5">{costData?.resource_count || 0} tagged resources</div>
         </div>
       </div>
+
+      {/* ── Chart Panel ─────────────────────────────────────────────── */}
+      {!loading && perAccount.length > 0 && (() => {
+        const visibleAccounts = perAccount.filter((a: any) => !hiddenAccounts.has(a.aws_account_id));
+        const barData = visibleAccounts.map((a: any, i: number) => ({
+          name: a.account_name || a.aws_account_id,
+          cost: a.cost,
+          fill: COLORS[perAccount.indexOf(a) % COLORS.length],
+        }));
+        const pieData = perAccount.map((a: any, i: number) => ({
+          name: a.account_name || a.aws_account_id,
+          value: a.cost,
+          fill: COLORS[i % COLORS.length],
+        }));
+        return (
+          <div className="bg-white rounded-lg border border-gray-300 shadow-sm mb-5 overflow-hidden">
+            {/* Header */}
+            <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between flex-wrap gap-3"
+              style={{ background: "linear-gradient(135deg, #f8fafc 0%, #f1f4f9 100%)" }}>
+              <div>
+                <h2 className="text-sm font-bold text-black">Cost by Account</h2>
+                <p className="text-[10px] text-gray-500 mt-0.5">{startDate} → {endDate}</p>
+              </div>
+              <div className="flex border border-gray-300 rounded-md overflow-hidden">
+                {CHART_TYPES.map((ct) => (
+                  <button key={ct.value} onClick={() => setChartType(ct.value)}
+                    className={`px-3 py-1.5 text-xs font-bold transition ${
+                      chartType === ct.value ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-gray-50"
+                    }`}>
+                    {ct.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Account toggles (not for pie) */}
+            {chartType !== "pie" && (
+              <div className="px-5 py-2.5 border-b border-gray-100 flex items-center gap-2 flex-wrap" style={{ background: "#fafbfc" }}>
+                {perAccount.map((a: any, i: number) => {
+                  const hidden = hiddenAccounts.has(a.aws_account_id);
+                  return (
+                    <button key={a.aws_account_id} onClick={() => toggleAccountViz(a.aws_account_id)}
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition ${
+                        hidden ? "bg-white border-gray-200 text-gray-400" : "border-transparent text-white"
+                      }`}
+                      style={hidden ? {} : { background: COLORS[i % COLORS.length] }}>
+                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${hidden ? "bg-gray-300" : "bg-white/60"}`} />
+                      {a.account_name || a.aws_account_id}
+                    </button>
+                  );
+                })}
+                {hiddenAccounts.size > 0 && (
+                  <button onClick={() => setHiddenAccounts(new Set())} className="text-[10px] font-bold text-blue-900 hover:underline ml-1">Show all</button>
+                )}
+              </div>
+            )}
+
+            {/* Chart */}
+            <div className="p-5">
+              <ResponsiveContainer width="100%" height={260}>
+                {chartType === "bar" ? (
+                  <BarChart data={barData} margin={{ top: 4, right: 8, left: 8, bottom: 40 }} barCategoryGap="35%">
+                    <defs>
+                      {barData.map((d, i) => (
+                        <linearGradient key={d.name} id={`bg-${i}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={d.fill} stopOpacity={1} />
+                          <stop offset="100%" stopColor={d.fill} stopOpacity={0.7} />
+                        </linearGradient>
+                      ))}
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                    <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#374151" }} axisLine={false} tickLine={false} angle={-30} textAnchor="end" interval={0} />
+                    <YAxis tick={{ fontSize: 11, fill: "#374151" }} tickFormatter={fmt} axisLine={false} tickLine={false} width={60} />
+                    <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(15,45,94,0.04)" }} />
+                    <Bar dataKey="cost" radius={[4, 4, 0, 0]}>
+                      {barData.map((d, i) => <Cell key={d.name} fill={`url(#bg-${i})`} />)}
+                    </Bar>
+                  </BarChart>
+                ) : chartType === "line" ? (
+                  <LineChart data={barData} margin={{ top: 4, right: 8, left: 8, bottom: 40 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                    <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#374151" }} axisLine={false} tickLine={false} angle={-30} textAnchor="end" interval={0} />
+                    <YAxis tick={{ fontSize: 11, fill: "#374151" }} tickFormatter={fmt} axisLine={false} tickLine={false} width={60} />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Line type="monotone" dataKey="cost" stroke="#0f2d5e" strokeWidth={2.5}
+                      dot={({ cx, cy, index }: any) => <circle key={index} cx={cx} cy={cy} r={4} fill={barData[index]?.fill || "#0f2d5e"} strokeWidth={0} />}
+                      activeDot={{ r: 6, strokeWidth: 0 }} />
+                  </LineChart>
+                ) : chartType === "area" ? (
+                  <AreaChart data={barData} margin={{ top: 4, right: 8, left: 8, bottom: 40 }}>
+                    <defs>
+                      <linearGradient id="area-biz" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#0f2d5e" stopOpacity={0.2} />
+                        <stop offset="95%" stopColor="#0f2d5e" stopOpacity={0.02} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                    <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#374151" }} axisLine={false} tickLine={false} angle={-30} textAnchor="end" interval={0} />
+                    <YAxis tick={{ fontSize: 11, fill: "#374151" }} tickFormatter={fmt} axisLine={false} tickLine={false} width={60} />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Area type="monotone" dataKey="cost" stroke="#0f2d5e" strokeWidth={2.5}
+                      fill="url(#area-biz)" dot={{ r: 3, strokeWidth: 0, fill: "#0f2d5e" }} activeDot={{ r: 5, strokeWidth: 0 }} />
+                  </AreaChart>
+                ) : (
+                  <PieChart>
+                    <Pie data={pieData} cx="50%" cy="50%" outerRadius={100} innerRadius={40}
+                      dataKey="value" labelLine={false} label={PieLabel}>
+                      {pieData.map((d: any, i: number) => <Cell key={d.name} fill={d.fill} />)}
+                    </Pie>
+                    <Tooltip formatter={(v: number) => fmt(v)} />
+                  </PieChart>
+                )}
+              </ResponsiveContainer>
+            </div>
+
+            {/* Pie legend / summary bar */}
+            <div className="px-5 py-3 border-t border-gray-100 flex items-center gap-4 flex-wrap justify-center" style={{ background: "#f8fafc" }}>
+              {(chartType === "pie" ? pieData : barData).map((d: any) => (
+                <div key={d.name} className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: d.fill }} />
+                  <span className="text-xs font-semibold text-black">{d.name}</span>
+                  <span className="text-xs font-bold font-mono text-blue-900">{fmt(d.cost ?? d.value)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Subaccount cost table */}
       {loading ? (

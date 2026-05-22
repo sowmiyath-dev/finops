@@ -7,7 +7,10 @@ import {
   Layers, Users, Box, DollarSign, ChevronRight, Plus, Trash2, X,
   ChevronLeft, Tag, Server, CheckSquare, Square, RefreshCw,
 } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import {
+  BarChart, Bar, LineChart, Line, AreaChart, Area,
+  XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
+} from "recharts";
 
 const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api").replace(/\/api$/, "");
 
@@ -17,7 +20,48 @@ const GRANULARITY_OPTIONS = [
   { label: "Monthly", value: "monthly" },
 ];
 
-const COLORS = ["#0f2d5e", "#1d8348", "#ec7211", "#8e44ad", "#1a6fa8", "#c0392b"];
+const COLORS = ["#0f2d5e","#1a6fa8","#ec7211","#1d8348","#c0392b","#8e44ad","#2980b9","#27ae60","#e67e22","#16a085"];
+
+type ChartType = "stacked-bar" | "grouped-bar" | "line" | "area";
+type ViewBy = "owner" | "business";
+
+const CHART_TYPES: { value: ChartType; label: string }[] = [
+  { value: "stacked-bar", label: "Stacked Bar" },
+  { value: "grouped-bar", label: "Grouped Bar" },
+  { value: "line",        label: "Line" },
+  { value: "area",        label: "Area" },
+];
+
+function fmt(n: number) {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000)     return `$${(n / 1_000).toFixed(1)}K`;
+  return `$${n.toFixed(2)}`;
+}
+
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
+  const total = payload.reduce((s: number, p: any) => s + (p.value || 0), 0);
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg shadow-lg p-3 min-w-[160px]">
+      <p className="text-xs font-bold text-black mb-2 border-b border-gray-100 pb-1.5">{label}</p>
+      {payload.map((p: any) => (
+        <div key={p.dataKey} className="flex items-center justify-between gap-4 py-0.5">
+          <div className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: p.color }} />
+            <span className="text-xs text-black truncate max-w-[100px]">{p.dataKey}</span>
+          </div>
+          <span className="text-xs font-bold font-mono text-blue-900">{fmt(p.value || 0)}</span>
+        </div>
+      ))}
+      {payload.length > 1 && (
+        <div className="flex items-center justify-between gap-4 pt-1.5 mt-1 border-t border-gray-100">
+          <span className="text-xs font-bold text-black">Total</span>
+          <span className="text-xs font-bold font-mono text-blue-900">{fmt(total)}</span>
+        </div>
+      )}
+    </div>
+  );
+};
 
 interface Owner { id: string; name: string; email?: string; }
 interface OwnerCost {
@@ -272,20 +316,56 @@ export default function VerticalDetailPage() {
     }
   };
 
+  const [chartType, setChartType] = useState<ChartType>("stacked-bar");
+  const [viewBy, setViewBy] = useState<ViewBy>("owner");
+  const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(new Set());
+
   const totalCost = costData.reduce((s, o) => s + o.total_cost, 0);
   const unassigned = costData.find((c) => c.owner_id === "unassigned");
   const assignedOwners = costData.filter((c) => c.owner_id !== "unassigned");
 
+  // Build chart series — owner view uses costData, business view uses bizCosts trend (flat)
+  const ownerSeries = costData.map((o) => o.owner_name);
+  const bizSeries = businesses.map((b) => b.name);
+  const activeSeries = viewBy === "owner" ? ownerSeries : bizSeries;
+
   const trendMap: Record<string, Record<string, number>> = {};
-  costData.forEach((o) => {
-    o.trend.forEach((t) => {
-      if (!trendMap[t.period]) trendMap[t.period] = {};
-      trendMap[t.period][o.owner_name] = (trendMap[t.period][o.owner_name] || 0) + t.cost;
+  if (viewBy === "owner") {
+    costData.forEach((o) => {
+      o.trend.forEach((t) => {
+        if (!trendMap[t.period]) trendMap[t.period] = {};
+        trendMap[t.period][o.owner_name] = (trendMap[t.period][o.owner_name] || 0) + t.cost;
+      });
     });
-  });
+  } else {
+    // Business view: aggregate owner trends by business name match
+    // Use bizCosts as totals but spread across periods from owner trends
+    costData.forEach((o) => {
+      o.trend.forEach((t) => {
+        if (!trendMap[t.period]) trendMap[t.period] = {};
+        // Map owner to business — use "Other" if no match
+        const biz = businesses.find((b) =>
+          b.owner_name?.toLowerCase() === o.owner_name.toLowerCase() ||
+          b.name.toLowerCase() === o.owner_name.toLowerCase()
+        );
+        const key = biz ? biz.name : o.owner_name;
+        trendMap[t.period][key] = (trendMap[t.period][key] || 0) + t.cost;
+      });
+    });
+  }
   const chartData = Object.entries(trendMap)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([period, vals]) => ({ period, ...vals }));
+
+  const visibleSeries = activeSeries.filter((s) => !hiddenSeries.has(s));
+
+  const toggleSeries = (name: string) => {
+    setHiddenSeries((prev) => {
+      const next = new Set(prev);
+      next.has(name) ? next.delete(name) : next.add(name);
+      return next;
+    });
+  };
 
   if (loading) return (
     <div className="flex items-center justify-center h-48 text-sm font-semibold text-black">Loading...</div>
@@ -394,21 +474,180 @@ export default function VerticalDetailPage() {
         </div>
       )}
 
-      {/* Chart */}
+      {/* ── Chart Panel ─────────────────────────────────────────────────── */}
       {chartData.length > 0 && (
-        <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5 mb-6">
-          <h2 className="text-sm font-bold text-black mb-4">Cost by Owner — {granularity.charAt(0).toUpperCase() + granularity.slice(1)}</h2>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={chartData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              <XAxis dataKey="period" tick={{ fontSize: 11, fill: "#000" }} />
-              <YAxis tick={{ fontSize: 11, fill: "#000" }} tickFormatter={(v) => `$${v.toLocaleString()}`} />
-              <Tooltip formatter={(v: number) => [`$${v.toFixed(2)}`, ""]} />
-              {costData.map((o, i) => (
-                <Bar key={o.owner_id} dataKey={o.owner_name} stackId="a" fill={COLORS[i % COLORS.length]} />
-              ))}
-            </BarChart>
-          </ResponsiveContainer>
+        <div className="bg-white rounded-lg border border-gray-300 shadow-sm mb-6 overflow-hidden">
+          {/* Chart header */}
+          <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between flex-wrap gap-3"
+            style={{ background: "linear-gradient(135deg, #f8fafc 0%, #f1f4f9 100%)" }}>
+            <div>
+              <h2 className="text-sm font-bold text-black">
+                Cost Trend — {granularity.charAt(0).toUpperCase() + granularity.slice(1)}
+              </h2>
+              <p className="text-[10px] text-gray-500 mt-0.5">
+                {visibleSeries.length} of {activeSeries.length} {viewBy === "owner" ? "owners" : "businesses"} visible
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* View By */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">View by</span>
+                <div className="flex border border-gray-300 rounded-md overflow-hidden">
+                  {(["owner", "business"] as ViewBy[]).map((v) => (
+                    <button key={v} onClick={() => setViewBy(v)}
+                      className={`px-3 py-1.5 text-xs font-bold transition capitalize ${
+                        viewBy === v ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-gray-50"
+                      }`}>
+                      {v}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Chart type */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Chart</span>
+                <div className="flex border border-gray-300 rounded-md overflow-hidden">
+                  {CHART_TYPES.map((ct) => (
+                    <button key={ct.value} onClick={() => setChartType(ct.value)}
+                      title={ct.label}
+                      className={`px-3 py-1.5 text-xs font-bold transition ${
+                        chartType === ct.value ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-gray-50"
+                      }`}>
+                      {ct.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Series legend / toggles */}
+          <div className="px-5 py-2.5 border-b border-gray-100 flex items-center gap-2 flex-wrap"
+            style={{ background: "#fafbfc" }}>
+            {activeSeries.map((name, i) => {
+              const hidden = hiddenSeries.has(name);
+              return (
+                <button key={name} onClick={() => toggleSeries(name)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition ${
+                    hidden
+                      ? "bg-white border-gray-200 text-gray-400"
+                      : "border-transparent text-white"
+                  }`}
+                  style={hidden ? {} : { background: COLORS[i % COLORS.length] }}>
+                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                    hidden ? "bg-gray-300" : "bg-white/60"
+                  }`} />
+                  {name}
+                </button>
+              );
+            })}
+            {hiddenSeries.size > 0 && (
+              <button onClick={() => setHiddenSeries(new Set())}
+                className="text-[10px] font-bold text-blue-900 hover:underline ml-1">
+                Show all
+              </button>
+            )}
+          </div>
+
+          {/* Chart */}
+          <div className="p-5">
+            <ResponsiveContainer width="100%" height={280}>
+              {chartType === "stacked-bar" ? (
+                <BarChart data={chartData} margin={{ top: 4, right: 8, left: 8, bottom: 0 }} barCategoryGap="30%">
+                  <defs>
+                    {visibleSeries.map((name, i) => (
+                      <linearGradient key={name} id={`grad-${i}`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={COLORS[activeSeries.indexOf(name) % COLORS.length]} stopOpacity={1} />
+                        <stop offset="100%" stopColor={COLORS[activeSeries.indexOf(name) % COLORS.length]} stopOpacity={0.75} />
+                      </linearGradient>
+                    ))}
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                  <XAxis dataKey="period" tick={{ fontSize: 11, fill: "#374151" }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: "#374151" }} tickFormatter={fmt} axisLine={false} tickLine={false} width={60} />
+                  <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(15,45,94,0.04)" }} />
+                  {visibleSeries.map((name, i) => (
+                    <Bar key={name} dataKey={name} stackId="a"
+                      fill={`url(#grad-${i})`}
+                      radius={i === visibleSeries.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]} />
+                  ))}
+                </BarChart>
+              ) : chartType === "grouped-bar" ? (
+                <BarChart data={chartData} margin={{ top: 4, right: 8, left: 8, bottom: 0 }} barCategoryGap="25%" barGap={2}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                  <XAxis dataKey="period" tick={{ fontSize: 11, fill: "#374151" }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: "#374151" }} tickFormatter={fmt} axisLine={false} tickLine={false} width={60} />
+                  <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(15,45,94,0.04)" }} />
+                  {visibleSeries.map((name, i) => (
+                    <Bar key={name} dataKey={name}
+                      fill={COLORS[activeSeries.indexOf(name) % COLORS.length]}
+                      radius={[3, 3, 0, 0]} />
+                  ))}
+                </BarChart>
+              ) : chartType === "line" ? (
+                <LineChart data={chartData} margin={{ top: 4, right: 8, left: 8, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                  <XAxis dataKey="period" tick={{ fontSize: 11, fill: "#374151" }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: "#374151" }} tickFormatter={fmt} axisLine={false} tickLine={false} width={60} />
+                  <Tooltip content={<CustomTooltip />} />
+                  {visibleSeries.map((name, i) => (
+                    <Line key={name} type="monotone" dataKey={name}
+                      stroke={COLORS[activeSeries.indexOf(name) % COLORS.length]}
+                      strokeWidth={2.5} dot={{ r: 3.5, strokeWidth: 0 }}
+                      activeDot={{ r: 5, strokeWidth: 0 }} />
+                  ))}
+                </LineChart>
+              ) : (
+                <AreaChart data={chartData} margin={{ top: 4, right: 8, left: 8, bottom: 0 }}>
+                  <defs>
+                    {visibleSeries.map((name, i) => {
+                      const color = COLORS[activeSeries.indexOf(name) % COLORS.length];
+                      return (
+                        <linearGradient key={name} id={`area-${i}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={color} stopOpacity={0.25} />
+                          <stop offset="95%" stopColor={color} stopOpacity={0.02} />
+                        </linearGradient>
+                      );
+                    })}
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                  <XAxis dataKey="period" tick={{ fontSize: 11, fill: "#374151" }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: "#374151" }} tickFormatter={fmt} axisLine={false} tickLine={false} width={60} />
+                  <Tooltip content={<CustomTooltip />} />
+                  {visibleSeries.map((name, i) => {
+                    const color = COLORS[activeSeries.indexOf(name) % COLORS.length];
+                    return (
+                      <Area key={name} type="monotone" dataKey={name}
+                        stroke={color} strokeWidth={2.5}
+                        fill={`url(#area-${i})`}
+                        dot={{ r: 3, strokeWidth: 0, fill: color }}
+                        activeDot={{ r: 5, strokeWidth: 0 }} />
+                    );
+                  })}
+                </AreaChart>
+              )}
+            </ResponsiveContainer>
+          </div>
+
+          {/* Mini summary bar */}
+          <div className="px-5 py-3 border-t border-gray-100 flex items-center gap-6 flex-wrap"
+            style={{ background: "#f8fafc" }}>
+            {visibleSeries.map((name, i) => {
+              const color = COLORS[activeSeries.indexOf(name) % COLORS.length];
+              const seriesTotal = chartData.reduce((s, d) => s + ((d as any)[name] || 0), 0);
+              const pct = totalCost > 0 ? (seriesTotal / totalCost) * 100 : 0;
+              return (
+                <div key={name} className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: color }} />
+                  <span className="text-xs font-semibold text-black">{name}</span>
+                  <span className="text-xs font-bold font-mono text-blue-900">{fmt(seriesTotal)}</span>
+                  <span className="text-[10px] text-gray-500">({pct.toFixed(1)}%)</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
