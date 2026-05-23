@@ -120,7 +120,7 @@ export default function CTDetailPage() {
 
   // Main summary — subaccount costs
   const { data: summary, isLoading: summaryLoading } = useQuery({
-    queryKey: ["ct-summary", ctId, startDate, endDate, granularity, selectedAccounts],
+    queryKey: ["ct-summary", ctId, startDate, endDate, granularity, selectedAccounts, selectedChargeTypes],
     queryFn: () => api.post("/reports/summary", filter).then((r) => r.data),
     enabled: !!token && !!ctId,
     staleTime: 2 * 60 * 1000,
@@ -138,7 +138,7 @@ export default function CTDetailPage() {
   };
 
   const { data: tabData = [], isLoading: tabLoading } = useQuery({
-    queryKey: ["ct-tab", ctId, activeTab, startDate, endDate, selectedAccounts],
+    queryKey: ["ct-tab", ctId, activeTab, startDate, endDate, selectedAccounts, selectedChargeTypes],
     queryFn: () => api.post(tabEndpoint, tabFilter).then((r) => r.data),
     enabled: !!token && !!ctId,
     staleTime: 2 * 60 * 1000,
