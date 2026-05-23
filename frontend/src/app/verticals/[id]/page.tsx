@@ -91,6 +91,7 @@ export default function VerticalDetailPage() {
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [loading, setLoading] = useState(true);
+  const [costLoading, setCostLoading] = useState(true);
 
   // Add Business modal
   const [showAddBusiness, setShowAddBusiness] = useState(false);
@@ -123,39 +124,57 @@ export default function VerticalDetailPage() {
       const params: any = { granularity: gran };
       if (start) params.start_date = start;
       if (end) params.end_date = end;
-      // Run cost + owners in parallel, tagged accounts separately (less critical)
-      const [ownersRes, costRes, bizRes] = await Promise.all([
+
+      // Step 1 — fast metadata (owners, businesses, vertical name) in parallel
+      const [ownersRes, bizRes, vertsRes] = await Promise.all([
         axios.get(`${BASE}/api/verticals/${id}/owners`, { headers }),
-        axios.get(`${BASE}/api/verticals/${id}/cost`, { headers, params }),
         axios.get(`${BASE}/api/verticals/${id}/businesses`, { headers }),
+        axios.get(`${BASE}/api/verticals/`, { headers }),
       ]);
       setOwners(ownersRes.data);
-      setCostData(costRes.data.owners || []);
-      setTaggedCount(costRes.data.tagged_resource_count || 0);
       const bizList = bizRes.data || [];
       setBusinesses(bizList);
-      // Load vertical name + tagged accounts in background
-      axios.get(`${BASE}/api/verticals/`, { headers }).then((r) => {
-        const v = (r.data as any[]).find((x: any) => x.id === id);
-        setVertical(v || null);
-      });
-      axios.get(`${BASE}/api/verticals/${id}/tagged-accounts`, { headers }).then((r) => {
-        setTaggedAccounts(r.data || []);
-      });
-      // Load last month cost for each business in parallel
-      const lm = (() => { const n=new Date(); return { start: `${n.getFullYear()}-${String(n.getMonth()).padStart(2,"0")}-01`, end: `${n.getFullYear()}-${String(n.getMonth()).padStart(2,"0")}-${new Date(n.getFullYear(),n.getMonth(),0).getDate()}` }; })();
-      Promise.all(
-        bizList.map((b: any) =>
-          axios.get(`${BASE}/api/verticals/${id}/businesses/${b.id}/cost`, {
-            headers, params: { granularity: "monthly", start_date: lm.start, end_date: lm.end },
-          }).then((r) => ({ id: b.id, cost: r.data.total_cost || 0 })).catch(() => ({ id: b.id, cost: 0 }))
-        )
-      ).then((results) => {
-        const map: Record<string, number> = {};
-        results.forEach((r) => { map[r.id] = r.cost; });
-        setBizCosts(map);
-      });
-    } finally {
+      const v = (vertsRes.data as any[]).find((x: any) => x.id === id);
+      setVertical(v || null);
+
+      // Show page immediately — cost loads in background
+      setLoading(false);
+
+      // Step 2 — slow cost query in background (doesn't block page render)
+      setCostLoading(true);
+      axios.get(`${BASE}/api/verticals/${id}/cost`, { headers, params })
+        .then((costRes) => {
+          setCostData(costRes.data.owners || []);
+          setTaggedCount(costRes.data.tagged_resource_count || 0);
+          setCostLoading(false);
+        })
+        .catch(() => { setCostLoading(false); });
+
+      // Step 3 — tagged accounts in background
+      axios.get(`${BASE}/api/verticals/${id}/tagged-accounts`, { headers })
+        .then((r) => setTaggedAccounts(r.data || []))
+        .catch(() => {});
+
+      // Step 4 — business costs in background
+      if (bizList.length > 0) {
+        const now = new Date();
+        const lm = {
+          start: `${now.getFullYear()}-${String(now.getMonth()).padStart(2, "0")}-01`,
+          end: `${now.getFullYear()}-${String(now.getMonth()).padStart(2, "0")}-${new Date(now.getFullYear(), now.getMonth(), 0).getDate()}`,
+        };
+        Promise.all(
+          bizList.map((b: any) =>
+            axios.get(`${BASE}/api/verticals/${id}/businesses/${b.id}/cost`, {
+              headers, params: { granularity: "monthly", start_date: lm.start, end_date: lm.end },
+            }).then((r) => ({ id: b.id, cost: r.data.total_cost || 0 })).catch(() => ({ id: b.id, cost: 0 }))
+          )
+        ).then((results) => {
+          const map: Record<string, number> = {};
+          results.forEach((r) => { map[r.id] = r.cost; });
+          setBizCosts(map);
+        });
+      }
+    } catch {
       setLoading(false);
     }
   };
@@ -449,17 +468,20 @@ export default function VerticalDetailPage() {
       {/* KPI row */}
       <div className="grid grid-cols-4 gap-4 mb-6">
         {[
-          { label: "Total Cost",       value: `$${totalCost.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, icon: DollarSign },
+          { label: "Total Cost",       value: costLoading ? null : `$${totalCost.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, icon: DollarSign },
           { label: "Owners",           value: owners.length, icon: Users },
           { label: "Applications",     value: assignedOwners.reduce((s, o) => s + o.app_count, 0), icon: Box },
-          { label: "Tagged Resources", value: taggedCount, icon: Tag },
+          { label: "Tagged Resources", value: costLoading ? null : taggedCount, icon: Tag },
         ].map((k) => (
           <div key={k.label} className="bg-white rounded-lg border border-gray-300 shadow-sm p-5">
             <div className="flex items-center gap-2 mb-2">
               <k.icon className="w-4 h-4 text-blue-900" />
               <span className="text-[10px] font-bold uppercase tracking-wider text-black">{k.label}</span>
             </div>
-            <div className="text-2xl font-bold text-blue-900 font-mono">{k.value}</div>
+            {k.value === null
+              ? <div className="h-8 w-24 bg-gray-200 rounded animate-pulse" />
+              : <div className="text-2xl font-bold text-blue-900 font-mono">{k.value}</div>
+            }
           </div>
         ))}
       </div>
