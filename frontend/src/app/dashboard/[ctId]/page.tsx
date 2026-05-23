@@ -15,6 +15,21 @@ import {
 
 const COLORS = ["#0f2d5e","#ec7211","#1d8348","#8e44ad","#1a6fa8","#c0392b","#16a085","#e67e22","#2980b9","#27ae60"];
 
+const DEFAULT_CHARGE_TYPES = [
+  "Usage",
+  "SavingsPlanCoveredUsage",
+  "SavingsPlanRecurringFee",
+  "SavingsPlanNegation",
+  "RIFee",
+  "DiscountedUsage",
+];
+
+const ALL_CHARGE_TYPES = [
+  "Usage", "SavingsPlanCoveredUsage", "SavingsPlanRecurringFee",
+  "SavingsPlanNegation", "RIFee", "DiscountedUsage",
+  "Tax", "DistributorDiscount", "Credit", "Refund", "OCBLateFee", "Fee",
+];
+
 const GRANULARITY = [
   { label: "Daily", value: "daily" },
   { label: "Monthly", value: "monthly" },
@@ -70,14 +85,6 @@ export default function CTDetailPage() {
   const router = useRouter();
 
   const lastMonth = getLastMonth();
-  const DEFAULT_CHARGE_TYPES = [
-    "Usage",
-    "SavingsPlanCoveredUsage",
-    "SavingsPlanRecurringFee",
-    "SavingsPlanNegation",
-    "RIFee",
-    "DiscountedUsage",
-  ];
 
   const [startDate, setStartDate] = useState(lastMonth.start);
   const [endDate, setEndDate] = useState(lastMonth.end);
@@ -324,12 +331,12 @@ export default function CTDetailPage() {
                       </div>
                       <div className="p-2 border-t border-gray-100 flex gap-2">
                         <button
-                          onClick={() => setSelectedChargeTypes(DEFAULT_CHARGE_TYPES)}
+                          onClick={() => { setSelectedChargeTypes([...DEFAULT_CHARGE_TYPES]); setChargeFilterOpen(false); }}
                           className="flex-1 text-xs font-bold text-blue-900 hover:underline">
                           Reset defaults
                         </button>
                         <button
-                          onClick={() => setSelectedChargeTypes(["Usage","SavingsPlanCoveredUsage","SavingsPlanRecurringFee","SavingsPlanNegation","RIFee","DiscountedUsage","Tax","DistributorDiscount","Credit","Refund","OCBLateFee","Fee"])}
+                          onClick={() => { setSelectedChargeTypes([...ALL_CHARGE_TYPES]); setChargeFilterOpen(false); }}
                           className="flex-1 text-xs font-bold text-gray-500 hover:underline">
                           Select all
                         </button>
