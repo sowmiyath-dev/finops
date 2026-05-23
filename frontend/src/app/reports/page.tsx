@@ -217,13 +217,27 @@ function ReportsContent() {
   const applyFilters = () => { setActiveFilter(buildFilter()); setFilterKey((k) => k + 1); };
 
   const resetFilters = () => {
-    setSelectedCTs([]); setSelectedAccounts([]); setSelectedServices([]);
-    setSelectedRegions([]); setSelectedPurchaseTypes([]); setSelectedChargeTypes(DEFAULT_CHARGE_TYPES); setMarketplaceOnly("all");
-    setTagKey(""); setTagValue("");
-    setMetric("unblended_cost"); setGroupBy("account"); setGranularity("daily");
-    applyQuickRange("last-month");
-    // Re-run the query with reset defaults immediately
-    setActiveFilter({
+    const now = new Date();
+    const rStart = fmtDate(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+    const rEnd = fmtDate(new Date(now.getFullYear(), now.getMonth(), 0));
+
+    setSelectedCTs([]);
+    setSelectedAccounts([]);
+    setSelectedServices([]);
+    setSelectedRegions([]);
+    setSelectedPurchaseTypes([]);
+    setSelectedChargeTypes(DEFAULT_CHARGE_TYPES);
+    setMarketplaceOnly("all");
+    setTagKey("");
+    setTagValue("");
+    setMetric("unblended_cost");
+    setGroupBy("account");
+    setGranularity("daily");
+    setQuickRange("last-month");
+    setStartDate(rStart);
+    setEndDate(rEnd);
+
+    const resetFilter = {
       control_tower_ids: null,
       account_ids: null,
       services: null,
@@ -233,12 +247,13 @@ function ReportsContent() {
       marketplace_only: null,
       tag_key: null,
       tag_value: null,
-      start_date: defaultStart,
-      end_date: defaultEndLastMonth,
+      start_date: rStart,
+      end_date: rEnd,
       granularity: "daily",
       metric: "unblended_cost",
       group_by: "account",
-    });
+    };
+    setActiveFilter(resetFilter);
     setFilterKey((k) => k + 1);
   };
 
