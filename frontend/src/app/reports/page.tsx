@@ -222,6 +222,24 @@ function ReportsContent() {
     setTagKey(""); setTagValue("");
     setMetric("unblended_cost"); setGroupBy("account"); setGranularity("daily");
     applyQuickRange("last-month");
+    // Re-run the query with reset defaults immediately
+    setActiveFilter({
+      control_tower_ids: null,
+      account_ids: null,
+      services: null,
+      regions: null,
+      purchase_types: null,
+      charge_types: DEFAULT_CHARGE_TYPES,
+      marketplace_only: null,
+      tag_key: null,
+      tag_value: null,
+      start_date: defaultStart,
+      end_date: defaultEndLastMonth,
+      granularity: "daily",
+      metric: "unblended_cost",
+      group_by: "account",
+    });
+    setFilterKey((k) => k + 1);
   };
 
   const endpoint = groupBy === "account" ? "/reports/account-wise"
