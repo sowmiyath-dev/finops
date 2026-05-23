@@ -785,61 +785,146 @@ async def vertical_cost(
     if not vertical:
         raise HTTPException(404)
 
-    tagged_ids = await _tagged_resource_ids_for_vertical(db, vertical.name)
+    if granularity == "monthly":
+        period_expr = func.to_char(CostRecord.date, "YYYY-MM").label("period")
+    elif granularity == "weekly":
+        period_expr = func.to_char(func.date_trunc("week", CostRecord.date), "YYYY-MM-DD").label("period")
+    else:
+        period_expr = func.cast(CostRecord.date, CostRecord.date.type).label("period")
 
-    # Get tagged account IDs so we can include account-level charges (null resource_id)
-    tagged_account_ids = list(set(
-        (await db.execute(
-            select(ResourceTagMapping.aws_account_id)
-            .join(CustomTag, ResourceTagMapping.custom_tag_id == CustomTag.id)
-            .where(
-                func.lower(CustomTag.tag_key) == "vertical",
-                func.lower(CustomTag.tag_value) == vertical.name.lower(),
-                ResourceTagMapping.aws_account_id.isnot(None),
-            )
-        )).scalars().all()
-    ))
-
-    owners = (await db.execute(
-        select(Owner).where(Owner.vertical_id == vertical_id).order_by(Owner.name)
-    )).scalars().all()
-
-    result = []
-    owner_resource_ids = set()
-
-    for owner in owners:
-        apps = (await db.execute(
-            select(Application).where(Application.owner_id == owner.id)
-        )).scalars().all()
-
-        all_resource_ids = []
-        for app in apps:
-            res = (await db.execute(
-                select(ApplicationResource.resource_id)
-                .where(ApplicationResource.application_id == app.id)
-            )).scalars().all()
-            all_resource_ids.extend(res)
-
-        owner_resource_ids.update(all_resource_ids)
-        merged = list(set(all_resource_ids))
-        trend = await _cost_for_resources(db, merged, start, end, granularity)
-        total = sum(p["cost"] for p in trend)
-        result.append({
-            "owner_id": str(owner.id),
-            "owner_name": owner.name,
-            "app_count": len(apps),
-            "resource_count": len(merged),
-            "total_cost": total,
-            "trend": trend,
-        })
-
-    # Unassigned: tagged resources not under any owner + account-level charges
-    unassigned_ids = [r for r in tagged_ids if r not in owner_resource_ids]
-    if unassigned_ids or tagged_account_ids:
-        trend = await _cost_for_resources_and_accounts(
-            db, unassigned_ids, tagged_account_ids, start, end, granularity
+    # ── Query 1: all tagged resource IDs + account IDs for this vertical ──
+    tag_rows = (await db.execute(
+        select(
+            ResourceTagMapping.resource_id,
+            ResourceTagMapping.aws_account_id,
         )
-        total = sum(p["cost"] for p in trend)
+        .join(CustomTag, ResourceTagMapping.custom_tag_id == CustomTag.id)
+        .where(
+            func.lower(CustomTag.tag_key) == "vertical",
+            func.lower(CustomTag.tag_value) == vertical.name.lower(),
+        )
+    )).all()
+
+    all_tagged_resource_ids = list(set(r.resource_id for r in tag_rows))
+    tagged_account_ids = list(set(r.aws_account_id for r in tag_rows if r.aws_account_id))
+
+    # ── Query 2: all owner→app→resource mappings in one shot ──────────────
+    owner_app_res_rows = (await db.execute(
+        select(
+            Owner.id.label("owner_id"),
+            Owner.name.label("owner_name"),
+            Application.id.label("app_id"),
+            ApplicationResource.resource_id,
+        )
+        .join(Application, Application.owner_id == Owner.id)
+        .join(ApplicationResource, ApplicationResource.application_id == Application.id)
+        .where(Owner.vertical_id == vertical_id)
+    )).all()
+
+    # ── Query 3: app counts per owner (for owners with no resources too) ──
+    owner_app_count_rows = (await db.execute(
+        select(
+            Owner.id.label("owner_id"),
+            Owner.name.label("owner_name"),
+            func.count(Application.id).label("app_count"),
+        )
+        .outerjoin(Application, Application.owner_id == Owner.id)
+        .where(Owner.vertical_id == vertical_id)
+        .group_by(Owner.id, Owner.name)
+        .order_by(Owner.name)
+    )).all()
+
+    # Build owner → resource_ids map
+    owner_resources: dict[str, set] = {}
+    owner_names: dict[str, str] = {}
+    for row in owner_app_res_rows:
+        oid = str(row.owner_id)
+        if oid not in owner_resources:
+            owner_resources[oid] = set()
+            owner_names[oid] = row.owner_name
+        owner_resources[oid].add(row.resource_id)
+
+    all_owner_resource_ids = set(rid for rids in owner_resources.values() for rid in rids)
+
+    # ── Query 4: cost for ALL owner resources in ONE query grouped by owner ──
+    from sqlalchemy import case, literal_column
+    result = []
+
+    if owner_app_count_rows:
+        # Get all resource_ids per owner as a flat list with owner label
+        # Build: resource_id → owner_id mapping
+        res_to_owner: dict[str, str] = {}
+        for row in owner_app_res_rows:
+            res_to_owner[row.resource_id] = str(row.owner_id)
+
+        # Single cost query for all owner resources
+        if all_owner_resource_ids:
+            cost_rows = (await db.execute(
+                select(
+                    period_expr,
+                    CostRecord.resource_id,
+                    func.sum(CostRecord.unblended_cost).label("cost"),
+                )
+                .where(
+                    CostRecord.resource_id.in_(list(all_owner_resource_ids)),
+                    CostRecord.date >= start,
+                    CostRecord.date <= end,
+                )
+                .group_by("period", CostRecord.resource_id)
+                .order_by("period")
+            )).all()
+
+            # Aggregate by owner
+            owner_period_cost: dict[str, dict[str, float]] = {}
+            for row in cost_rows:
+                oid = res_to_owner.get(row.resource_id)
+                if not oid:
+                    continue
+                if oid not in owner_period_cost:
+                    owner_period_cost[oid] = {}
+                p = str(row.period)
+                owner_period_cost[oid][p] = owner_period_cost[oid].get(p, 0) + float(row.cost or 0)
+        else:
+            owner_period_cost = {}
+
+        for row in owner_app_count_rows:
+            oid = str(row.owner_id)
+            period_map = owner_period_cost.get(oid, {})
+            trend = [{ "period": p, "cost": c } for p, c in sorted(period_map.items())]
+            total = sum(period_map.values())
+            result.append({
+                "owner_id": oid,
+                "owner_name": row.owner_name,
+                "app_count": row.app_count,
+                "resource_count": len(owner_resources.get(oid, set())),
+                "total_cost": total,
+                "trend": trend,
+            })
+
+    # ── Unassigned: tagged resources not under any owner ──────────────────
+    unassigned_ids = [r for r in all_tagged_resource_ids if r not in all_owner_resource_ids]
+
+    if unassigned_ids or tagged_account_ids:
+        from sqlalchemy import or_
+        clauses = []
+        if unassigned_ids:
+            clauses.append(CostRecord.resource_id.in_(unassigned_ids))
+        if tagged_account_ids:
+            clauses.append(CostRecord.aws_account_id.in_(tagged_account_ids))
+
+        unassigned_rows = (await db.execute(
+            select(period_expr, func.sum(CostRecord.unblended_cost).label("cost"))
+            .where(
+                CostRecord.date >= start,
+                CostRecord.date <= end,
+                or_(*clauses),
+            )
+            .group_by("period")
+            .order_by("period")
+        )).all()
+
+        trend = [{"period": str(r.period), "cost": float(r.cost or 0)} for r in unassigned_rows]
+        total = sum(t["cost"] for t in trend)
         result.append({
             "owner_id": "unassigned",
             "owner_name": "Unassigned (via Tag)",
@@ -854,11 +939,11 @@ async def vertical_cost(
         "granularity": granularity,
         "start": str(start),
         "end": str(end),
-        "tagged_resource_count": len(tagged_ids),
+        "tagged_resource_count": len(all_tagged_resource_ids),
         "tagged_account_ids": tagged_account_ids,
         "owners": result,
     }
-    await _cache_set(cache_key, response, ttl=300)  # cache 5 minutes
+    await _cache_set(cache_key, response, ttl=300)
     return response
 
 
