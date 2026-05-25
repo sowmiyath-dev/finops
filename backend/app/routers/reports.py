@@ -1,5 +1,6 @@
 import csv, io, json, time
 from datetime import date, timedelta
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -485,3 +486,209 @@ async def data_boundary():
     """Returns the most recent date for which cost data is accurate."""
     accurate_until = date.today() - timedelta(days=COST_LAG_DAYS)
     return {"accurate_until": str(accurate_until), "lag_days": COST_LAG_DAYS}
+
+
+@router.get("/savings/summary")
+async def savings_summary(
+    start_date: str,
+    end_date: str,
+    account_ids: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Savings Plan allocation summary.
+    For each account:
+      - usage_cost       = sum of Usage line items (unblended)
+      - sp_covered_cost  = sum of SavingsPlanCoveredUsage amortized_cost
+                           (this IS the allocated SP fee for that account)
+      - true_cost        = usage_cost + sp_covered_cost
+      - on_demand_equiv  = usage_cost + SavingsPlanCoveredUsage unblended_cost
+      - savings          = on_demand_equiv - true_cost
+      - savings_pct      = savings / on_demand_equiv * 100
+    """
+    ct_ids = await _get_user_ct_ids(db, user)
+    start = date.fromisoformat(start_date)
+    end   = date.fromisoformat(end_date)
+    acc_filter = account_ids.split(",") if account_ids else None
+
+    base = [
+        CostRecord.control_tower_id.in_(ct_ids),
+        CostRecord.date >= start,
+        CostRecord.date <= end,
+    ]
+    if acc_filter:
+        base.append(CostRecord.aws_account_id.in_(acc_filter))
+
+    # ── Usage cost per account (exclude SP/RI fee rows) ──────────────────
+    usage_rows = (await db.execute(
+        select(
+            CostRecord.aws_account_id,
+            CostRecord.account_name,
+            func.sum(CostRecord.unblended_cost).label("usage_cost"),
+        )
+        .where(
+            *base,
+            CostRecord.line_item_type.in_(["Usage", "DiscountedUsage"]),
+        )
+        .group_by(CostRecord.aws_account_id, CostRecord.account_name)
+    )).all()
+
+    # ── SP covered usage per account ─────────────────────────────────────
+    sp_rows = (await db.execute(
+        select(
+            CostRecord.aws_account_id,
+            CostRecord.account_name,
+            func.sum(CostRecord.unblended_cost).label("on_demand_equiv"),  # what it would cost on-demand
+            func.sum(CostRecord.amortized_cost).label("sp_allocated"),     # actual SP cost allocated
+            func.count(func.distinct(CostRecord.resource_id)).label("sp_resource_count"),
+        )
+        .where(
+            *base,
+            CostRecord.line_item_type == "SavingsPlanCoveredUsage",
+        )
+        .group_by(CostRecord.aws_account_id, CostRecord.account_name)
+    )).all()
+
+    # ── Total SP recurring fee (sits in payer account) ───────────────────
+    sp_fee_row = (await db.execute(
+        select(func.sum(CostRecord.unblended_cost).label("total_sp_fee"))
+        .where(
+            CostRecord.control_tower_id.in_(ct_ids),
+            CostRecord.date >= start,
+            CostRecord.date <= end,
+            CostRecord.line_item_type == "SavingsPlanRecurringFee",
+        )
+    )).scalar() or 0
+
+    # Build maps
+    usage_map  = {r.aws_account_id: float(r.usage_cost or 0) for r in usage_rows}
+    name_map   = {r.aws_account_id: r.account_name for r in usage_rows}
+    sp_map     = {r.aws_account_id: {
+        "on_demand_equiv": float(r.on_demand_equiv or 0),
+        "sp_allocated":    float(r.sp_allocated or 0),
+        "sp_resource_count": int(r.sp_resource_count or 0),
+    } for r in sp_rows}
+    for r in sp_rows:
+        name_map[r.aws_account_id] = r.account_name
+
+    all_accounts = set(usage_map.keys()) | set(sp_map.keys())
+
+    # Total on-demand equivalent across all accounts (for % calculation)
+    total_on_demand_equiv = sum(v["on_demand_equiv"] for v in sp_map.values())
+
+    per_account = []
+    for acc_id in all_accounts:
+        usage_cost      = usage_map.get(acc_id, 0)
+        sp              = sp_map.get(acc_id, {"on_demand_equiv": 0, "sp_allocated": 0, "sp_resource_count": 0})
+        on_demand_equiv = sp["on_demand_equiv"]
+        sp_allocated    = sp["sp_allocated"]
+        true_cost       = usage_cost + sp_allocated
+        on_demand_total = usage_cost + on_demand_equiv
+        savings         = on_demand_equiv - sp_allocated  # saving vs on-demand for SP-covered resources
+        savings_pct     = round(savings / on_demand_equiv * 100, 2) if on_demand_equiv > 0 else 0
+        sp_share_pct    = round(on_demand_equiv / total_on_demand_equiv * 100, 2) if total_on_demand_equiv > 0 else 0
+
+        per_account.append({
+            "aws_account_id":    acc_id,
+            "account_name":      name_map.get(acc_id, acc_id),
+            "usage_cost":        round(usage_cost, 4),
+            "sp_on_demand_equiv": round(on_demand_equiv, 4),  # what SP resources would cost on-demand
+            "sp_allocated_cost": round(sp_allocated, 4),       # actual SP cost allocated to this account
+            "true_cost":         round(true_cost, 4),           # usage + SP allocated
+            "on_demand_total":   round(on_demand_total, 4),     # what everything would cost on-demand
+            "savings":           round(savings, 4),
+            "savings_pct":       savings_pct,
+            "sp_share_pct":      sp_share_pct,                  # this account's % of total SP usage
+            "sp_resource_count": sp["sp_resource_count"],
+        })
+
+    per_account.sort(key=lambda x: x["true_cost"], reverse=True)
+
+    total_usage      = sum(a["usage_cost"] for a in per_account)
+    total_sp_alloc   = sum(a["sp_allocated_cost"] for a in per_account)
+    total_true       = sum(a["true_cost"] for a in per_account)
+    total_savings    = sum(a["savings"] for a in per_account)
+    total_od_equiv   = sum(a["on_demand_total"] for a in per_account)
+    overall_savings_pct = round(total_savings / total_od_equiv * 100, 2) if total_od_equiv > 0 else 0
+
+    return {
+        "start": start_date,
+        "end": end_date,
+        "total_sp_recurring_fee": round(float(sp_fee_row), 4),
+        "total_usage_cost":       round(total_usage, 4),
+        "total_sp_allocated":     round(total_sp_alloc, 4),
+        "total_true_cost":        round(total_true, 4),
+        "total_savings":          round(total_savings, 4),
+        "overall_savings_pct":    overall_savings_pct,
+        "per_account":            per_account,
+    }
+
+
+@router.get("/savings/resources")
+async def savings_resources(
+    start_date: str,
+    end_date: str,
+    account_ids: Optional[str] = None,
+    services: Optional[str] = None,
+    limit: int = 500,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Per-resource savings breakdown."""
+    ct_ids = await _get_user_ct_ids(db, user)
+    start = date.fromisoformat(start_date)
+    end   = date.fromisoformat(end_date)
+
+    conditions = [
+        CostRecord.line_item_type == "SavingsPlanCoveredUsage",
+        CostRecord.control_tower_id.in_(ct_ids),
+        CostRecord.date >= start,
+        CostRecord.date <= end,
+        CostRecord.resource_id.isnot(None),
+        CostRecord.resource_id != "",
+    ]
+    if account_ids:
+        conditions.append(CostRecord.aws_account_id.in_(account_ids.split(",")))
+    if services:
+        conditions.append(CostRecord.service.in_(services.split(",")))
+
+    rows = (await db.execute(
+        select(
+            CostRecord.resource_id,
+            CostRecord.aws_account_id,
+            CostRecord.account_name,
+            CostRecord.service,
+            CostRecord.region,
+            CostRecord.usage_type,
+            func.sum(CostRecord.unblended_cost).label("on_demand_cost"),
+            func.sum(CostRecord.amortized_cost).label("sp_allocated_cost"),
+        )
+        .where(and_(*conditions))
+        .group_by(
+            CostRecord.resource_id, CostRecord.aws_account_id,
+            CostRecord.account_name, CostRecord.service,
+            CostRecord.region, CostRecord.usage_type,
+        )
+        .order_by(func.sum(CostRecord.unblended_cost).desc())
+        .limit(limit)
+    )).all()
+
+    return [
+        {
+            "resource_id":       r.resource_id,
+            "aws_account_id":    r.aws_account_id,
+            "account_name":      r.account_name or r.aws_account_id,
+            "service":           r.service,
+            "region":            r.region or "",
+            "usage_type":        r.usage_type or "",
+            "on_demand_cost":    float(r.on_demand_cost or 0),
+            "sp_allocated_cost": float(r.sp_allocated_cost or 0),
+            "savings":           float(r.on_demand_cost or 0) - float(r.sp_allocated_cost or 0),
+            "savings_pct":       round(
+                (float(r.on_demand_cost or 0) - float(r.sp_allocated_cost or 0))
+                / float(r.on_demand_cost or 1) * 100, 2
+            ),
+        }
+        for r in rows
+    ]

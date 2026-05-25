@@ -7,7 +7,7 @@ import axios from "axios";
 import {
   Building2, Cloud, Tag, Bell, Settings, ChevronRight, ChevronDown,
   Menu, X, Users, Mail, AlertTriangle, Zap, Globe, DollarSign,
-  LayoutDashboard, Layers,
+  LayoutDashboard, Layers, TrendingDown,
 } from "lucide-react";
 
 const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api").replace(/\/api$/, "");
@@ -27,6 +27,15 @@ const STATIC_NAV: NavItem[] = [
     label: "Organization",
     icon: Building2,
     href: "/org",
+  },
+  {
+    id: "reports",
+    label: "Cost Reports",
+    icon: DollarSign,
+    children: [
+      { id: "reports-main",    label: "Cost Reports",      icon: DollarSign,  href: "/reports" },
+      { id: "reports-savings", label: "Savings Allocation", icon: TrendingDown, href: "/reports/savings" },
+    ],
   },
   {
     id: "verticals",
