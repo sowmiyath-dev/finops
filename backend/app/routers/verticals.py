@@ -528,6 +528,10 @@ async def bulk_tag_account(
 
     added = 0
     for rid in payload.resource_ids:
+        # Skip wildcard, empty or obviously invalid resource IDs
+        if not rid or rid.strip() in ("*", "-", "—", "null", "none", ""):
+            continue
+        rid = rid.strip()
         for tag in [t for t in [vertical_tag, business_tag, billing_tag] if t]:
             exists = (await db.execute(
                 select(ResourceTagMapping).where(
@@ -627,6 +631,9 @@ async def assign_resources(
         raise HTTPException(403)
     added = 0
     for rid in payload.resource_ids:
+        if not rid or rid.strip() in ("*", "-", "—", "null", "none", ""):
+            continue
+        rid = rid.strip()
         exists = (await db.execute(
             select(ApplicationResource).where(
                 ApplicationResource.application_id == app_id,

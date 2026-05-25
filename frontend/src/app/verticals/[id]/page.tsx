@@ -273,7 +273,9 @@ export default function VerticalDetailPage() {
       );
       // Merge and deduplicate by resource_id
       const merged = new Map<string, Resource>();
-      results.flat().forEach((r) => merged.set(r.resource_id, r));
+      results.flat()
+        .filter((r) => r.resource_id && r.resource_id !== "*" && r.resource_id.trim() !== "")
+        .forEach((r) => merged.set(r.resource_id, r));
       setAccountResources(Array.from(merged.values()));
     } finally {
       setLoadingResources(false);
