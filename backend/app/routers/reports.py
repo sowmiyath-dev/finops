@@ -425,7 +425,16 @@ async def get_resources_by_account(
     user: User = Depends(get_current_user),
 ):
     """Get all distinct resource IDs for a given AWS account ID."""
+    # Cache per account — resources don't change between syncs
+    cache_key = f"res_by_acc_{account_id}"
+    if (cached := _cache_get(cache_key)) is not None:
+        return cached
+
     ct_ids = await _get_user_ct_ids(db, user)
+
+    # Use last 90 days only — avoids full table scan on 6M rows
+    since = date.today() - timedelta(days=90)
+
     result = await db.execute(
         select(
             CostRecord.resource_id,
@@ -437,16 +446,19 @@ async def get_resources_by_account(
             CostRecord.aws_account_id == account_id,
             CostRecord.resource_id.isnot(None),
             CostRecord.resource_id != "",
+            CostRecord.date >= since,
         )
         .group_by(CostRecord.resource_id, CostRecord.service, CostRecord.region)
         .order_by(CostRecord.service, CostRecord.resource_id)
-        .limit(2000)
+        .limit(5000)
     )
     rows = result.all()
-    return [
+    data = [
         {"resource_id": r.resource_id, "service": r.service, "region": r.region or ""}
         for r in rows
     ]
+    _cache_set(cache_key, data)  # cache for 10 minutes
+    return data
 
 
 @router.get("/meta/accounts")
