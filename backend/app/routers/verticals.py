@@ -205,39 +205,104 @@ async def _cost_for_resources_and_accounts(
 async def vertical_report(
     start_date: str,
     end_date: str,
-    group_by: str = "vertical",  # vertical | business | owner | billing
-    vertical_ids: Optional[str] = None,   # comma-separated vertical IDs
+    group_by: str = "vertical",
+    vertical_ids: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """
-    Flat report for CSV export and table view.
-    group_by: vertical | business | owner | billing
-    Returns rows with: vertical, business, owner, billing_tag, total_cost, resource_count
-    """
-    from sqlalchemy import or_, text as sa_text
+    from sqlalchemy import or_
 
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
 
-    # Filter vertical IDs if provided
-    vid_filter = []
-    if vertical_ids:
-        vid_filter = [v.strip() for v in vertical_ids.split(",") if v.strip()]
+    vid_filter = [v.strip() for v in vertical_ids.split(",") if v.strip()] if vertical_ids else []
 
-    # ── Get all verticals ───────────────────────────────────────────────────
+    # Load all verticals
     vert_q = select(Vertical)
     if vid_filter:
         vert_q = vert_q.where(Vertical.id.in_(vid_filter))
     verticals = (await db.execute(vert_q.order_by(Vertical.name))).scalars().all()
-    vert_map = {str(v.id): v.name for v in verticals}
-    vert_names = list(vert_map.values())
-
+    vert_names = [v.name for v in verticals]
     if not vert_names:
         return {"rows": [], "total": 0, "start": start_date, "end": end_date, "group_by": group_by}
 
-    # ── One query: resource_tag_mappings joined to custom_tags ─────────────────
-    # Get all tag mappings for these verticals (Vertical + Business + Billing tags)
+    # ── OWNER group_by: use businesses.owner_name ─────────────────────────────────────────────
+    if group_by == "owner":
+        # Get all businesses with owner_name for the selected verticals
+        biz_rows = (await db.execute(
+            select(Business.id, Business.name, Business.owner_name, Vertical.name.label("vertical_name"))
+            .join(Vertical, Vertical.id == Business.vertical_id)
+            .where(
+                Vertical.name.in_(vert_names),
+                Business.owner_name.isnot(None),
+                Business.owner_name != "",
+            )
+            .order_by(Business.owner_name)
+        )).all()
+
+        if not biz_rows:
+            return {"rows": [], "total": 0, "start": start_date, "end": end_date, "group_by": group_by}
+
+        # Group businesses by owner_name
+        # owner_name → {verticals: set, businesses: set, biz_names: list}
+        owner_map: dict[str, dict] = {}
+        for b in biz_rows:
+            oname = b.owner_name.strip()
+            if oname not in owner_map:
+                owner_map[oname] = {"verticals": set(), "businesses": set(), "biz_ids": []}
+            owner_map[oname]["verticals"].add(b.vertical_name)
+            owner_map[oname]["businesses"].add(b.name)
+            owner_map[oname]["biz_ids"].append(str(b.id))
+
+        # For each owner, get cost via Business tag on resources
+        result_rows = []
+        for oname, info in owner_map.items():
+            biz_names_lower = [b.lower() for b in info["businesses"]]
+
+            # Get resource IDs tagged with any of this owner's businesses
+            biz_tag_ids_subq = (
+                select(CustomTag.id)
+                .where(
+                    func.lower(CustomTag.tag_key) == "business",
+                    func.lower(CustomTag.tag_value).in_(biz_names_lower),
+                )
+                .scalar_subquery()
+            )
+            res_subq = (
+                select(ResourceTagMapping.resource_id)
+                .where(ResourceTagMapping.custom_tag_id.in_(biz_tag_ids_subq))
+                .scalar_subquery()
+            )
+            cost_row = (await db.execute(
+                select(
+                    func.sum(CostRecord.unblended_cost).label("cost"),
+                    func.count(func.distinct(CostRecord.resource_id)).label("resource_count"),
+                )
+                .where(
+                    CostRecord.resource_id.in_(res_subq),
+                    CostRecord.date >= start,
+                    CostRecord.date <= end,
+                )
+            )).one()
+
+            result_rows.append({
+                "owner": oname,
+                "verticals": ", ".join(sorted(info["verticals"])),
+                "businesses": ", ".join(sorted(info["businesses"])),
+                "vertical": ", ".join(sorted(info["verticals"])),
+                "business": ", ".join(sorted(info["businesses"])),
+                "billing_tag": "—",
+                "label": oname,
+                "total_cost": float(cost_row.cost or 0),
+                "resource_count": int(cost_row.resource_count or 0),
+            })
+
+        result_rows.sort(key=lambda x: x["total_cost"], reverse=True)
+        total = sum(r["total_cost"] for r in result_rows)
+        return {"rows": result_rows, "total": total, "start": start_date, "end": end_date, "group_by": group_by}
+
+    # ── All other group_by modes (vertical / business / billing) ──────────────────────────────
+    # Get all tag mappings
     tag_rows = (await db.execute(
         select(
             ResourceTagMapping.resource_id,
@@ -246,69 +311,45 @@ async def vertical_report(
             CustomTag.tag_value,
         )
         .join(CustomTag, ResourceTagMapping.custom_tag_id == CustomTag.id)
-        .where(
-            func.lower(CustomTag.tag_key).in_(["vertical", "business", "billing"]),
-            func.lower(CustomTag.tag_value).in_([n.lower() for n in vert_names])
-            if func.lower(CustomTag.tag_key) == "vertical"
-            else True,
-        )
+        .where(func.lower(CustomTag.tag_key).in_(["vertical", "business", "billing"]))
     )).all()
 
-    # Build resource → {vertical, business, billing} map
     res_tags: dict[str, dict] = {}
     for row in tag_rows:
         rid = row.resource_id
         if rid not in res_tags:
-            res_tags[rid] = {"vertical": None, "business": None, "billing": None, "account_id": row.aws_account_id}
+            res_tags[rid] = {"vertical": None, "business": None, "billing": None}
         key = row.tag_key.lower()
         if key in ("vertical", "business", "billing"):
             res_tags[rid][key] = row.tag_value
 
-    # Filter to only resources that have a vertical tag matching our verticals
     valid_resource_ids = [
         rid for rid, tags in res_tags.items()
         if tags["vertical"] and tags["vertical"].lower() in [n.lower() for n in vert_names]
     ]
-
     if not valid_resource_ids:
         return {"rows": [], "total": 0, "start": start_date, "end": end_date, "group_by": group_by}
 
-    # ── Cost query using subquery ───────────────────────────────────────────────
-    # Use subquery to avoid sending thousands of IDs over the wire
     vert_tag_ids_subq = (
         select(CustomTag.id)
         .where(
             func.lower(CustomTag.tag_key) == "vertical",
             func.lower(CustomTag.tag_value).in_([n.lower() for n in vert_names]),
-        )
-        .scalar_subquery()
+        ).scalar_subquery()
     )
     res_subq = (
         select(ResourceTagMapping.resource_id)
         .where(ResourceTagMapping.custom_tag_id.in_(vert_tag_ids_subq))
         .scalar_subquery()
     )
-
     cost_rows = (await db.execute(
-        select(
-            CostRecord.resource_id,
-            func.sum(CostRecord.unblended_cost).label("cost"),
-            func.count(func.distinct(CostRecord.date)).label("days"),
-        )
-        .where(
-            CostRecord.resource_id.in_(res_subq),
-            CostRecord.date >= start,
-            CostRecord.date <= end,
-        )
+        select(CostRecord.resource_id, func.sum(CostRecord.unblended_cost).label("cost"))
+        .where(CostRecord.resource_id.in_(res_subq), CostRecord.date >= start, CostRecord.date <= end)
         .group_by(CostRecord.resource_id)
     )).all()
-
-    # Build resource → cost map
     res_cost: dict[str, float] = {row.resource_id: float(row.cost or 0) for row in cost_rows}
 
-    # ── Aggregate by group_by dimension ─────────────────────────────────────────────
     agg: dict[str, dict] = {}
-
     for rid in valid_resource_ids:
         tags = res_tags.get(rid, {})
         cost = res_cost.get(rid, 0)
@@ -320,10 +361,6 @@ async def vertical_report(
             key = vertical_name
             label = vertical_name
         elif group_by == "business":
-            key = f"{vertical_name}|{business_name}"
-            label = business_name
-        elif group_by == "owner":
-            # Owner is not a tag — use business as proxy for now
             key = f"{vertical_name}|{business_name}"
             label = business_name
         else:  # billing
@@ -344,15 +381,7 @@ async def vertical_report(
 
     rows = sorted(agg.values(), key=lambda x: x["total_cost"], reverse=True)
     total = sum(r["total_cost"] for r in rows)
-
-    return {
-        "rows": rows,
-        "total": total,
-        "start": start_date,
-        "end": end_date,
-        "group_by": group_by,
-        "row_count": len(rows),
-    }
+    return {"rows": rows, "total": total, "start": start_date, "end": end_date, "group_by": group_by}
 
 
 @router.get("/summary")

@@ -44,11 +44,11 @@ const labelCls = "block text-xs font-bold mb-1 uppercase tracking-wide text-blac
 // Column config per group_by:
 // primary = first column (the grouped dimension)
 // secondary = second column (vertical as context badge)
-const COL_CONFIG: Record<string, { primary: string; secondary: string | null }> = {
-  vertical: { primary: "Vertical",    secondary: null },
-  business: { primary: "Business",    secondary: "Vertical" },
-  owner:    { primary: "Owner",       secondary: "Vertical" },
-  billing:  { primary: "Billing Tag", secondary: "Vertical" },
+const COL_CONFIG: Record<string, { primary: string; secondary: string | null; tertiary: string | null }> = {
+  vertical: { primary: "Vertical",    secondary: null,       tertiary: null },
+  business: { primary: "Business",    secondary: "Vertical", tertiary: null },
+  owner:    { primary: "Owner",       secondary: "Vertical", tertiary: "Business" },
+  billing:  { primary: "Billing Tag", secondary: "Vertical", tertiary: null },
 };
 
 export default function VerticalReportPage() {
@@ -363,11 +363,12 @@ export default function VerticalReportPage() {
                       <thead>
                         <tr className="bg-gray-100 border-b-2 border-gray-300">
                           <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-black">#</th>
-                          {/* Primary column — the grouped dimension */}
                           <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-black">{col.primary}</th>
-                          {/* Secondary column — Vertical as context (for non-vertical group by) */}
                           {col.secondary && (
                             <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-black">{col.secondary}</th>
+                          )}
+                          {col.tertiary && (
+                            <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-black">{col.tertiary}</th>
                           )}
                           <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-black">Resources</th>
                           <th className="text-right px-5 py-3 text-xs font-bold uppercase tracking-wider text-black">Cost (USD)</th>
@@ -379,6 +380,9 @@ export default function VerticalReportPage() {
                           const pct = total > 0 ? (row.total_cost / total) * 100 : 0;
                           const color = COLORS[i % COLORS.length];
                           const primaryVal = getPrimary(row);
+                          // Split comma-separated values into badge arrays
+                          const vertBadges = row.vertical ? row.vertical.split(",").map((s: string) => s.trim()).filter(Boolean) : [];
+                          const bizBadges  = row.business ? row.business.split(",").map((s: string) => s.trim()).filter(Boolean) : [];
                           return (
                             <tr key={i} className="border-b border-gray-200 hover:bg-blue-50 transition">
                               <td className="px-5 py-3 text-xs font-bold text-gray-400">{i + 1}</td>
@@ -391,12 +395,25 @@ export default function VerticalReportPage() {
                                 </div>
                               </td>
 
-                              {/* Secondary cell — Vertical badge */}
+                              {/* Secondary — Vertical as badges (supports multiple) */}
                               {col.secondary && (
                                 <td className="px-5 py-3">
-                                  <span className="text-xs font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-900 border border-blue-200">
-                                    {row.vertical}
-                                  </span>
+                                  <div className="flex flex-wrap gap-1">
+                                    {vertBadges.map((v: string) => (
+                                      <span key={v} className="text-xs font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-900 border border-blue-200">{v}</span>
+                                    ))}
+                                  </div>
+                                </td>
+                              )}
+
+                              {/* Tertiary — Business as badges (supports multiple) */}
+                              {col.tertiary && (
+                                <td className="px-5 py-3">
+                                  <div className="flex flex-wrap gap-1">
+                                    {bizBadges.map((b: string) => (
+                                      <span key={b} className="text-xs font-bold px-2 py-0.5 rounded bg-orange-100 text-orange-800 border border-orange-200">{b}</span>
+                                    ))}
+                                  </div>
                                 </td>
                               )}
 
@@ -415,7 +432,7 @@ export default function VerticalReportPage() {
                         })}
                         {/* Total row */}
                         <tr className="bg-gray-50 border-t-2 border-gray-300">
-                          <td className="px-5 py-3" colSpan={col.secondary ? 4 : 3}>
+                          <td className="px-5 py-3" colSpan={col.tertiary ? 5 : col.secondary ? 4 : 3}>
                             <span className="text-sm font-bold text-black">Total</span>
                           </td>
                           <td className="px-5 py-3 text-right text-sm font-bold font-mono text-blue-900">{fmtCost(total)}</td>
