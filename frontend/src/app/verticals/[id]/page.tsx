@@ -179,7 +179,10 @@ export default function VerticalDetailPage() {
     }
   };
 
-  useEffect(() => { load(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!token) return;
+    load();
+  }, [id, token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleGranularity = (g: string) => { setGranularity(g); load(g, customStart || undefined, customEnd || undefined); };
 

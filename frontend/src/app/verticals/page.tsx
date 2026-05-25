@@ -55,7 +55,10 @@ export default function VerticalsPage() {
     }
   };
 
-  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!token) return; // wait for token to be available
+    load();
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleGranularity = (g: string) => { setGranularity(g); load(g); };
 
