@@ -6,11 +6,11 @@ import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
 import Link from "next/link";
 import {
-  ChevronRight, DollarSign, RefreshCw,
+  ChevronRight, DollarSign, RefreshCw, TrendingDown,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  CartesianGrid, Cell,
+  CartesianGrid, Cell, Legend,
 } from "recharts";
 
 const COLORS = ["#0f2d5e","#ec7211","#1d8348","#8e44ad","#1a6fa8","#c0392b","#16a085","#e67e22","#2980b9","#27ae60"];
@@ -94,6 +94,7 @@ export default function CTDetailPage() {
   const [chargeFilterOpen, setChargeFilterOpen] = useState(false);
   const [accountDropdownOpen, setAccountDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("service");
+  const [showTrueCost, setShowTrueCost] = useState(false);
 
   useEffect(() => { if (!token) router.push("/auth"); }, [token]);
 
@@ -132,6 +133,19 @@ export default function CTDetailPage() {
     enabled: !!token && !!ctId,
     staleTime: 2 * 60 * 1000,
   });
+
+  // True cost with SP allocation — uses CT-specific distribution endpoint
+  const { data: spDist, isLoading: spLoading } = useQuery({
+    queryKey: ["ct-sp-dist", ctId, startDate, endDate],
+    queryFn: () => api.get(`/reports/savings/ct-distribution`, {
+      params: { ct_id: ctId, start_date: startDate, end_date: endDate }
+    }).then((r) => r.data),
+    enabled: !!token && !!ctId && showTrueCost,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const trueCostData: any[] = spDist?.sub_accounts || [];
+  const trueCostLoading = spLoading;
 
   // Tab data
   const tabEndpoint = activeTab === "service" ? "/reports/service-wise"
@@ -281,7 +295,25 @@ export default function CTDetailPage() {
           {/* Subaccount table + filter */}
           <div className="bg-white rounded-lg border border-gray-300 shadow-sm mb-6">
             <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between">
-              <h2 className="text-sm font-bold text-black">Subaccount Costs</h2>
+              <div className="flex items-center gap-3">
+                <h2 className="text-sm font-bold text-black">Subaccount Costs</h2>
+                {/* True Cost toggle */}
+                <button
+                  onClick={() => setShowTrueCost(!showTrueCost)}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border transition ${
+                    showTrueCost
+                      ? "bg-green-700 text-white border-green-700"
+                      : "bg-white text-black border-gray-300 hover:border-green-700 hover:text-green-700"
+                  }`}>
+                  <TrendingDown className="w-3 h-3" />
+                  {showTrueCost ? "True Cost (SP Allocated)" : "Show True Cost"}
+                </button>
+                {showTrueCost && (
+                  <span className="text-[10px] text-gray-500">
+                    Usage + SP amortized cost distributed by usage
+                  </span>
+                )}
+              </div>
               <div className="flex items-center gap-3">
                 {/* Charge Type filter */}
                 <div className="relative">
@@ -406,6 +438,102 @@ export default function CTDetailPage() {
               </div>
               </div> {/* end flex items-center gap-3 */}
             </div>
+            {/* True cost table */}
+            {showTrueCost ? (
+              <>
+                {/* Payer account banner */}
+                {spDist?.payer_accounts?.length > 0 && (
+                  <div className="mx-5 mt-3 bg-orange-50 border border-orange-200 border-l-4 border-l-orange-500 rounded-lg px-4 py-3">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <TrendingDown className="w-4 h-4 text-orange-600 flex-shrink-0" />
+                      <span className="text-xs font-bold text-orange-900">
+                        SP Fee in payer account{spDist.payer_accounts.length > 1 ? "s" : ""}:
+                      </span>
+                      {spDist.payer_accounts.map((p: any) => (
+                        <span key={p.aws_account_id} className="text-xs font-mono font-bold text-orange-800 bg-orange-100 px-2 py-0.5 rounded">
+                          {p.account_name} = {fmt(p.sp_fee)}
+                        </span>
+                      ))}
+                      <span className="text-xs font-semibold text-orange-900 ml-2">
+                        Total {fmt(spDist.total_sp_fee)} → distributed to sub-accounts below based on SP usage
+                      </span>
+                    </div>
+                  </div>
+                )}
+                <table className="w-full mt-2">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      {["Account", "Account ID", "Usage Cost", "SP Allocated", "True Cost", "Savings", "Savings %", "SP Resources"].map((h) => (
+                        <th key={h} className="text-left text-xs font-bold uppercase tracking-wider text-black px-5 py-3">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {trueCostLoading ? (
+                      <tr><td colSpan={8} className="px-5 py-8 text-center">
+                        <RefreshCw className="w-5 h-5 animate-spin text-blue-900 mx-auto" />
+                      </td></tr>
+                    ) : (
+                      trueCostData
+                        .filter((acc: any) => selectedAccounts.length === 0 || selectedAccounts.includes(acc.aws_account_id))
+                        .map((acc: any) => (
+                          <tr key={acc.aws_account_id} className="border-b border-gray-200 hover:bg-blue-50 transition">
+                            <td className="px-5 py-3">
+                              <div className="flex items-center gap-2">
+                                <div className="w-7 h-7 rounded-lg bg-blue-900 flex items-center justify-center text-xs font-bold text-white">
+                                  {(acc.account_name || "?")[0].toUpperCase()}
+                                </div>
+                                <span className="text-sm font-bold text-black">{acc.account_name}</span>
+                              </div>
+                            </td>
+                            <td className="px-5 py-3 text-xs font-mono font-semibold text-black">{acc.aws_account_id}</td>
+                            <td className="px-5 py-3 text-sm font-mono font-semibold text-black">{fmt(acc.usage_cost)}</td>
+                            <td className="px-5 py-3">
+                              {acc.sp_allocated > 0 ? (
+                                <div>
+                                  <span className="text-sm font-bold font-mono text-orange-700">+{fmt(acc.sp_allocated)}</span>
+                                  <div className="text-[10px] text-gray-500">{acc.sp_share_pct}% of SP pool</div>
+                                </div>
+                              ) : <span className="text-xs text-gray-400">—</span>}
+                            </td>
+                            <td className="px-5 py-3">
+                              <span className="text-sm font-bold font-mono text-blue-900">{fmt(acc.true_cost)}</span>
+                            </td>
+                            <td className="px-5 py-3">
+                              {acc.savings > 0
+                                ? <span className="text-sm font-bold font-mono text-green-700">{fmt(acc.savings)}</span>
+                                : <span className="text-xs text-gray-400">—</span>}
+                            </td>
+                            <td className="px-5 py-3">
+                              {acc.savings_pct > 0 ? (
+                                <div className="flex items-center gap-2">
+                                  <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                    <div className="h-full rounded-full bg-green-600" style={{ width: `${Math.min(acc.savings_pct, 100)}%` }} />
+                                  </div>
+                                  <span className="text-xs font-bold text-green-700">{acc.savings_pct}%</span>
+                                </div>
+                              ) : <span className="text-xs text-gray-400">—</span>}
+                            </td>
+                            <td className="px-5 py-3 text-sm font-semibold text-black">
+                              {acc.sp_resources > 0 ? acc.sp_resources.toLocaleString() : "—"}
+                            </td>
+                          </tr>
+                        ))
+                    )}
+                    {!trueCostLoading && spDist && (
+                      <tr className="bg-gray-50 border-t-2 border-gray-300">
+                        <td className="px-5 py-3 text-sm font-bold text-black" colSpan={2}>Total</td>
+                        <td className="px-5 py-3 text-sm font-bold font-mono text-black">{fmt(spDist.total_usage_cost)}</td>
+                        <td className="px-5 py-3 text-sm font-bold font-mono text-orange-700">+{fmt(spDist.total_sp_allocated)}</td>
+                        <td className="px-5 py-3 text-sm font-bold font-mono text-blue-900">{fmt(spDist.total_true_cost)}</td>
+                        <td className="px-5 py-3 text-sm font-bold font-mono text-green-700">{fmt(spDist.total_savings)}</td>
+                        <td className="px-5 py-3" colSpan={2} />
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </>
+            ) : (
             <table className="w-full">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
@@ -444,6 +572,7 @@ export default function CTDetailPage() {
                   })}
               </tbody>
             </table>
+            )}
           </div>
 
           {/* Service / Resource / Tag tabs */}

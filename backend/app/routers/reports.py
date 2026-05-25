@@ -105,6 +105,101 @@ async def account_wise(f: ReportFilter, db: AsyncSession = Depends(get_db), user
     return data
 
 
+@router.post("/account-wise-true-cost")
+async def account_wise_true_cost(
+    f: ReportFilter,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    True cost per account = Usage cost + SP amortized cost.
+    Excludes SavingsPlanRecurringFee (payer account fee) and SavingsPlanNegation.
+    SP cost is already allocated per sub-account via amortized_cost in SavingsPlanCoveredUsage rows.
+    """
+    ct_ids = await _get_user_ct_ids(db, user)
+    if not ct_ids:
+        return []
+
+    start = date.fromisoformat(f.start_date)
+    end   = date.fromisoformat(f.end_date)
+
+    base = [
+        CostRecord.control_tower_id.in_(ct_ids),
+        CostRecord.date >= start,
+        CostRecord.date <= end,
+    ]
+    if f.control_tower_ids:
+        base.append(CostRecord.control_tower_id.in_(f.control_tower_ids))
+    if f.account_ids:
+        base.append(CostRecord.aws_account_id.in_(f.account_ids))
+
+    # Usage cost — all line items EXCEPT SP fee, SP negation, SP covered usage
+    # (SP covered usage is handled separately via amortized_cost)
+    usage_rows = (await db.execute(
+        select(
+            CostRecord.aws_account_id,
+            CostRecord.account_name,
+            func.sum(CostRecord.unblended_cost).label("usage_cost"),
+        )
+        .where(
+            *base,
+            CostRecord.line_item_type.notin_([
+                "SavingsPlanRecurringFee",
+                "SavingsPlanNegation",
+                "SavingsPlanCoveredUsage",
+            ]),
+        )
+        .group_by(CostRecord.aws_account_id, CostRecord.account_name)
+    )).all()
+
+    # SP allocated cost per account — use amortized_cost from SavingsPlanCoveredUsage
+    sp_rows = (await db.execute(
+        select(
+            CostRecord.aws_account_id,
+            func.sum(CostRecord.amortized_cost).label("sp_cost"),
+            func.sum(CostRecord.unblended_cost).label("sp_on_demand"),
+            func.count(func.distinct(CostRecord.resource_id)).label("sp_resources"),
+        )
+        .where(
+            *base,
+            CostRecord.line_item_type == "SavingsPlanCoveredUsage",
+        )
+        .group_by(CostRecord.aws_account_id)
+    )).all()
+
+    sp_map = {
+        r.aws_account_id: {
+            "sp_cost":      float(r.sp_cost or 0),
+            "sp_on_demand": float(r.sp_on_demand or 0),
+            "sp_resources": int(r.sp_resources or 0),
+        }
+        for r in sp_rows
+    }
+
+    result = []
+    for row in usage_rows:
+        sp = sp_map.get(row.aws_account_id, {"sp_cost": 0, "sp_on_demand": 0, "sp_resources": 0})
+        usage_cost  = float(row.usage_cost or 0)
+        sp_cost     = sp["sp_cost"]
+        sp_on_demand = sp["sp_on_demand"]
+        true_cost   = usage_cost + sp_cost
+        savings     = sp_on_demand - sp_cost
+        result.append({
+            "aws_account_id": row.aws_account_id,
+            "account_name":   row.account_name or row.aws_account_id,
+            "usage_cost":     round(usage_cost, 4),
+            "sp_cost":        round(sp_cost, 4),
+            "sp_on_demand":   round(sp_on_demand, 4),
+            "true_cost":      round(true_cost, 4),
+            "savings":        round(savings, 4),
+            "savings_pct":    round(savings / sp_on_demand * 100, 2) if sp_on_demand > 0 else 0,
+            "sp_resources":   sp["sp_resources"],
+        })
+
+    result.sort(key=lambda x: x["true_cost"], reverse=True)
+    return result
+
+
 # ── Service-wise report ───────────────────────────────────────────────────────
 
 @router.post("/service-wise")
@@ -488,7 +583,134 @@ async def data_boundary():
     return {"accurate_until": str(accurate_until), "lag_days": COST_LAG_DAYS}
 
 
-@router.get("/savings/summary")
+@router.get("/savings/ct-distribution")
+async def savings_ct_distribution(
+    ct_id: str,
+    start_date: str,
+    end_date: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    For a specific CT:
+    - Shows payer account SP fee (e.g. Redington $8,043.84)
+    - Shows how it is distributed to each sub-account via amortized_cost
+    - Each sub-account row: usage_cost + sp_allocated = true_cost
+    - Resources that got SP benefit per account
+    """
+    ct_ids = await _get_user_ct_ids(db, user)
+    start = date.fromisoformat(start_date)
+    end   = date.fromisoformat(end_date)
+
+    base = [
+        CostRecord.control_tower_id == ct_id,
+        CostRecord.date >= start,
+        CostRecord.date <= end,
+    ]
+
+    # Payer account SP fee
+    payer_rows = (await db.execute(
+        select(
+            CostRecord.aws_account_id,
+            CostRecord.account_name,
+            func.sum(CostRecord.unblended_cost).label("sp_fee"),
+        )
+        .where(*base, CostRecord.line_item_type == "SavingsPlanRecurringFee")
+        .group_by(CostRecord.aws_account_id, CostRecord.account_name)
+    )).all()
+
+    total_sp_fee = sum(float(r.sp_fee or 0) for r in payer_rows)
+    payer_accounts = [
+        {"aws_account_id": r.aws_account_id, "account_name": r.account_name, "sp_fee": float(r.sp_fee or 0)}
+        for r in payer_rows
+    ]
+
+    # Usage cost per sub-account (exclude SP rows)
+    usage_rows = (await db.execute(
+        select(
+            CostRecord.aws_account_id,
+            CostRecord.account_name,
+            func.sum(CostRecord.unblended_cost).label("usage_cost"),
+        )
+        .where(
+            *base,
+            CostRecord.line_item_type.notin_([
+                "SavingsPlanRecurringFee",
+                "SavingsPlanNegation",
+                "SavingsPlanCoveredUsage",
+            ]),
+        )
+        .group_by(CostRecord.aws_account_id, CostRecord.account_name)
+    )).all()
+
+    # SP allocated per sub-account (amortized_cost from SavingsPlanCoveredUsage)
+    sp_rows = (await db.execute(
+        select(
+            CostRecord.aws_account_id,
+            CostRecord.account_name,
+            func.sum(CostRecord.amortized_cost).label("sp_allocated"),
+            func.sum(CostRecord.unblended_cost).label("sp_on_demand"),
+            func.count(func.distinct(CostRecord.resource_id)).label("sp_resources"),
+        )
+        .where(*base, CostRecord.line_item_type == "SavingsPlanCoveredUsage")
+        .group_by(CostRecord.aws_account_id, CostRecord.account_name)
+    )).all()
+
+    sp_map = {
+        r.aws_account_id: {
+            "sp_allocated": float(r.sp_allocated or 0),
+            "sp_on_demand": float(r.sp_on_demand or 0),
+            "sp_resources": int(r.sp_resources or 0),
+            "account_name": r.account_name,
+        }
+        for r in sp_rows
+    }
+
+    # Build per-account result
+    payer_ids = {r["aws_account_id"] for r in payer_accounts}
+    sub_accounts = []
+    for row in usage_rows:
+        if row.aws_account_id in payer_ids:
+            continue  # skip payer account from sub-account list
+        sp = sp_map.get(row.aws_account_id, {"sp_allocated": 0, "sp_on_demand": 0, "sp_resources": 0})
+        usage_cost   = float(row.usage_cost or 0)
+        sp_allocated = sp["sp_allocated"]
+        sp_on_demand = sp["sp_on_demand"]
+        true_cost    = usage_cost + sp_allocated
+        savings      = sp_on_demand - sp_allocated
+        sub_accounts.append({
+            "aws_account_id": row.aws_account_id,
+            "account_name":   row.account_name or row.aws_account_id,
+            "usage_cost":     round(usage_cost, 2),
+            "sp_allocated":   round(sp_allocated, 2),
+            "sp_on_demand":   round(sp_on_demand, 2),
+            "true_cost":      round(true_cost, 2),
+            "savings":        round(savings, 2),
+            "savings_pct":    round(savings / sp_on_demand * 100, 2) if sp_on_demand > 0 else 0,
+            "sp_resources":   sp["sp_resources"],
+            "sp_share_pct":   round(sp_on_demand / sum(v["sp_on_demand"] for v in sp_map.values()) * 100, 2)
+                              if sp_map else 0,
+        })
+
+    sub_accounts.sort(key=lambda x: x["true_cost"], reverse=True)
+
+    total_usage     = sum(a["usage_cost"] for a in sub_accounts)
+    total_sp_alloc  = sum(a["sp_allocated"] for a in sub_accounts)
+    total_true      = sum(a["true_cost"] for a in sub_accounts)
+    total_savings   = sum(a["savings"] for a in sub_accounts)
+
+    return {
+        "ct_id": ct_id,
+        "start": start_date,
+        "end": end_date,
+        "total_sp_fee": round(total_sp_fee, 2),
+        "payer_accounts": payer_accounts,
+        "total_usage_cost": round(total_usage, 2),
+        "total_sp_allocated": round(total_sp_alloc, 2),
+        "total_true_cost": round(total_true, 2),
+        "total_savings": round(total_savings, 2),
+        "sub_accounts": sub_accounts,
+    }
 async def savings_summary(
     start_date: str,
     end_date: str,

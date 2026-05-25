@@ -144,12 +144,26 @@ async def _cost_for_resources(
     else:
         period_expr = func.cast(CostRecord.date, CostRecord.date.type).label("period")
 
+    # True cost = Usage (unblended) + SP covered (amortized) + RI discounted (unblended)
+    # Exclude SavingsPlanNegation and SavingsPlanRecurringFee
+    from sqlalchemy import case
+    true_cost_expr = func.sum(
+        case(
+            (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.amortized_cost),
+            else_=case(
+                (CostRecord.line_item_type.in_(["SavingsPlanNegation", "SavingsPlanRecurringFee"]), 0),
+                else_=CostRecord.unblended_cost,
+            )
+        )
+    ).label("cost")
+
     stmt = (
-        select(period_expr, func.sum(CostRecord.unblended_cost).label("cost"))
+        select(period_expr, true_cost_expr)
         .where(
             CostRecord.resource_id.in_(resource_ids),
             CostRecord.date >= start,
             CostRecord.date <= end,
+            CostRecord.line_item_type.notin_(["SavingsPlanNegation", "SavingsPlanRecurringFee"]),
         )
         .group_by("period")
         .order_by("period")
@@ -166,10 +180,7 @@ async def _cost_for_resources_and_accounts(
     end: date,
     granularity: str,
 ) -> list[dict]:
-    """Sum cost for given resource IDs PLUS all records for given account IDs.
-    This captures account-level charges (support, tax, credits) with no resource_id.
-    """
-    from sqlalchemy import or_
+    from sqlalchemy import or_, case
     if not resource_ids and not account_ids:
         return []
     if granularity == "monthly":
@@ -179,7 +190,23 @@ async def _cost_for_resources_and_accounts(
     else:
         period_expr = func.cast(CostRecord.date, CostRecord.date.type).label("period")
 
-    conditions = [CostRecord.date >= start, CostRecord.date <= end]
+    # True cost: SP covered uses amortized, everything else uses unblended
+    # Exclude SavingsPlanNegation and SavingsPlanRecurringFee
+    true_cost_expr = func.sum(
+        case(
+            (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.amortized_cost),
+            else_=case(
+                (CostRecord.line_item_type.in_(["SavingsPlanNegation", "SavingsPlanRecurringFee"]), 0),
+                else_=CostRecord.unblended_cost,
+            )
+        )
+    ).label("cost")
+
+    conditions = [
+        CostRecord.date >= start,
+        CostRecord.date <= end,
+        CostRecord.line_item_type.notin_(["SavingsPlanNegation", "SavingsPlanRecurringFee"]),
+    ]
     clauses = []
     if resource_ids:
         clauses.append(CostRecord.resource_id.in_(resource_ids))
@@ -188,7 +215,7 @@ async def _cost_for_resources_and_accounts(
     conditions.append(or_(*clauses))
 
     stmt = (
-        select(period_expr, func.sum(CostRecord.unblended_cost).label("cost"))
+        select(period_expr, true_cost_expr)
         .where(*conditions)
         .group_by("period")
         .order_by("period")
