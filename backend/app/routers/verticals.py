@@ -847,18 +847,31 @@ async def vertical_cost(
     all_owner_resource_ids = set(rid for rids in owner_resources.values() for rid in rids)
 
     # ── Query 4: cost for ALL owner resources in ONE query grouped by owner ──
-    from sqlalchemy import case, literal_column
     result = []
 
     if owner_app_count_rows:
-        # Get all resource_ids per owner as a flat list with owner label
-        # Build: resource_id → owner_id mapping
+        # Build resource_id → owner_id mapping in Python
         res_to_owner: dict[str, str] = {}
         for row in owner_app_res_rows:
             res_to_owner[row.resource_id] = str(row.owner_id)
 
-        # Single cost query for all owner resources
+        # Single cost query using a subquery instead of IN(list) to avoid
+        # sending thousands of parameters over the wire
         if all_owner_resource_ids:
+            # Use subquery: SELECT resource_id FROM application_resources
+            # WHERE application_id IN (SELECT id FROM applications WHERE owner_id IN (...))
+            owner_ids = list(owner_resources.keys())
+            app_subq = (
+                select(Application.id)
+                .join(Owner, Owner.id == Application.owner_id)
+                .where(Owner.vertical_id == vertical_id)
+                .scalar_subquery()
+            )
+            res_subq = (
+                select(ApplicationResource.resource_id)
+                .where(ApplicationResource.application_id.in_(app_subq))
+                .scalar_subquery()
+            )
             cost_rows = (await db.execute(
                 select(
                     period_expr,
@@ -866,7 +879,7 @@ async def vertical_cost(
                     func.sum(CostRecord.unblended_cost).label("cost"),
                 )
                 .where(
-                    CostRecord.resource_id.in_(list(all_owner_resource_ids)),
+                    CostRecord.resource_id.in_(res_subq),
                     CostRecord.date >= start,
                     CostRecord.date <= end,
                 )
@@ -874,7 +887,7 @@ async def vertical_cost(
                 .order_by("period")
             )).all()
 
-            # Aggregate by owner
+            # Aggregate by owner in Python
             owner_period_cost: dict[str, dict[str, float]] = {}
             for row in cost_rows:
                 oid = res_to_owner.get(row.resource_id)
@@ -890,7 +903,7 @@ async def vertical_cost(
         for row in owner_app_count_rows:
             oid = str(row.owner_id)
             period_map = owner_period_cost.get(oid, {})
-            trend = [{ "period": p, "cost": c } for p, c in sorted(period_map.items())]
+            trend = [{"period": p, "cost": c} for p, c in sorted(period_map.items())]
             total = sum(period_map.values())
             result.append({
                 "owner_id": oid,

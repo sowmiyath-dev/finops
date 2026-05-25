@@ -13,7 +13,7 @@ engine = create_async_engine(
     pool_timeout=30,
     connect_args={
         "server_settings": {"timezone": "UTC"},
-        "command_timeout": 60,  # 60s query timeout
+        "command_timeout": 120,  # 120s query timeout
     },
 )
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
