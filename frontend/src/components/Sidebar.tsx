@@ -32,7 +32,10 @@ const STATIC_NAV: NavItem[] = [
     id: "verticals",
     label: "Verticals",
     icon: Layers,
-    href: "/verticals",
+    children: [
+      { id: "verticals-overview", label: "Overview",    icon: Layers,    href: "/verticals" },
+      { id: "verticals-report",   label: "Cost Report", icon: DollarSign, href: "/verticals/report" },
+    ],
   },
   {
     id: "tags",

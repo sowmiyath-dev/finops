@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import axios from "axios";
 import { useAuthStore } from "@/store/authStore";
-import { Layers, ChevronRight, Plus, RefreshCw } from "lucide-react";
+import { Layers, ChevronRight, Plus, RefreshCw, BarChart2 } from "lucide-react";
 
 const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api").replace(/\/api$/, "");
 
@@ -107,6 +107,10 @@ export default function VerticalsPage() {
           <button onClick={() => load()} title="Refresh"
             className="p-2 border border-gray-300 rounded-md hover:bg-gray-50 transition">
             <RefreshCw className={`w-4 h-4 text-black ${loading ? "animate-spin" : ""}`} />
+          </button>
+          <button onClick={() => router.push("/verticals/report")}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold rounded-md transition">
+            <BarChart2 className="w-3.5 h-3.5" /> Cost Report
           </button>
         </div>
       </div>
