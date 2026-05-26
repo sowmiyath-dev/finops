@@ -144,16 +144,14 @@ async def _cost_for_resources(
     else:
         period_expr = func.cast(CostRecord.date, CostRecord.date.type).label("period")
 
-    # True cost = Usage (unblended) + SP covered (amortized) + RI discounted (unblended)
-    # Exclude SavingsPlanNegation and SavingsPlanRecurringFee
-    from sqlalchemy import case
+    # True cost = Usage/DiscountedUsage/RIFee (unblended) + SP covered (amortized)
+    # Exclude Tax, Credit, Refund, Fee, Negation, RecurringFee
+    from sqlalchemy import case, literal
     true_cost_expr = func.sum(
         case(
             (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.amortized_cost),
-            else_=case(
-                (CostRecord.line_item_type.in_(["SavingsPlanNegation", "SavingsPlanRecurringFee"]), 0),
-                else_=CostRecord.unblended_cost,
-            )
+            (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
+            else_=literal(0),
         )
     ).label("cost")
 
@@ -163,7 +161,6 @@ async def _cost_for_resources(
             CostRecord.resource_id.in_(resource_ids),
             CostRecord.date >= start,
             CostRecord.date <= end,
-            CostRecord.line_item_type.notin_(["SavingsPlanNegation", "SavingsPlanRecurringFee"]),
         )
         .group_by("period")
         .order_by("period")
@@ -190,22 +187,20 @@ async def _cost_for_resources_and_accounts(
     else:
         period_expr = func.cast(CostRecord.date, CostRecord.date.type).label("period")
 
-    # True cost: SP covered uses amortized, everything else uses unblended
-    # Exclude SavingsPlanNegation and SavingsPlanRecurringFee
+    # True cost: SP covered uses amortized, Usage/DiscountedUsage/RIFee uses unblended
+    # Exclude Tax, Credit, Refund, Fee, Negation, RecurringFee
+    from sqlalchemy import or_, case, literal
     true_cost_expr = func.sum(
         case(
             (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.amortized_cost),
-            else_=case(
-                (CostRecord.line_item_type.in_(["SavingsPlanNegation", "SavingsPlanRecurringFee"]), 0),
-                else_=CostRecord.unblended_cost,
-            )
+            (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
+            else_=literal(0),
         )
     ).label("cost")
 
     conditions = [
         CostRecord.date >= start,
         CostRecord.date <= end,
-        CostRecord.line_item_type.notin_(["SavingsPlanNegation", "SavingsPlanRecurringFee"]),
     ]
     clauses = []
     if resource_ids:
@@ -300,9 +295,15 @@ async def vertical_report(
                 .where(ResourceTagMapping.custom_tag_id.in_(biz_tag_ids_subq))
                 .scalar_subquery()
             )
+            from sqlalchemy import case as sa_case6, literal as sa_literal6
+            true_cost_col6 = sa_case6(
+                (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.amortized_cost),
+                (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
+                else_=sa_literal6(0),
+            )
             cost_row = (await db.execute(
                 select(
-                    func.sum(CostRecord.unblended_cost).label("cost"),
+                    func.sum(true_cost_col6).label("cost"),
                     func.count(func.distinct(CostRecord.resource_id)).label("resource_count"),
                 )
                 .where(
@@ -369,8 +370,14 @@ async def vertical_report(
         .where(ResourceTagMapping.custom_tag_id.in_(vert_tag_ids_subq))
         .scalar_subquery()
     )
+    from sqlalchemy import or_, case as sa_case4, literal as sa_literal4
+    true_cost_col4 = sa_case4(
+        (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.amortized_cost),
+        (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
+        else_=sa_literal4(0),
+    )
     cost_rows = (await db.execute(
-        select(CostRecord.resource_id, func.sum(CostRecord.unblended_cost).label("cost"))
+        select(CostRecord.resource_id, func.sum(true_cost_col4).label("cost"))
         .where(CostRecord.resource_id.in_(res_subq), CostRecord.date >= start, CostRecord.date <= end)
         .group_by(CostRecord.resource_id)
     )).all()
@@ -422,7 +429,7 @@ async def verticals_summary(
     if cached is not None:
         return cached
 
-    from sqlalchemy import or_, text
+    from sqlalchemy import or_, text, case as sa_case3, literal as sa_literal3
 
     start, end = _date_range(granularity)
 
@@ -431,13 +438,16 @@ async def verticals_summary(
     if not verticals:
         return []
 
-    # 2. One query: for each vertical name, sum cost of all tagged resource_ids
-    #    Join resource_tag_mappings → custom_tags → cost_records in one shot
-    #    Group by vertical name (tag_value)
+    # 2. True cost per vertical: SP covered = amortized, Usage/DiscountedUsage/RIFee = unblended, else = 0
+    true_cost_col3 = sa_case3(
+        (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.amortized_cost),
+        (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
+        else_=sa_literal3(0),
+    )
     tagged_cost_rows = (await db.execute(
         select(
             CustomTag.tag_value.label("vertical_name"),
-            func.sum(CostRecord.unblended_cost).label("cost"),
+            func.sum(true_cost_col3).label("cost"),
             func.count(func.distinct(ResourceTagMapping.resource_id)).label("resource_count"),
         )
         .join(ResourceTagMapping, ResourceTagMapping.custom_tag_id == CustomTag.id)
@@ -906,15 +916,20 @@ async def business_cost(
     trend = await _cost_for_resources_and_accounts(db, resource_ids, account_ids, start, end, granularity)
     total = sum(p["cost"] for p in trend)
 
-    # Per-account cost breakdown
+    # Per-account cost breakdown using true cost
     per_account = []
     if account_ids:
-        from sqlalchemy import or_
+        from sqlalchemy import or_, case as sa_case5, literal as sa_literal5
+        true_cost_col5 = sa_case5(
+            (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.amortized_cost),
+            (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
+            else_=sa_literal5(0),
+        )
         acc_stmt = (
             select(
                 CostRecord.aws_account_id,
                 CostRecord.account_name,
-                func.sum(CostRecord.unblended_cost).label("cost"),
+                func.sum(true_cost_col5).label("cost"),
             )
             .where(
                 CostRecord.date >= start,
@@ -925,7 +940,7 @@ async def business_cost(
                 )
             )
             .group_by(CostRecord.aws_account_id, CostRecord.account_name)
-            .order_by(func.sum(CostRecord.unblended_cost).desc())
+            .order_by(func.sum(true_cost_col5).desc())
         )
         acc_rows = (await db.execute(acc_stmt)).all()
         per_account = [
@@ -1089,11 +1104,17 @@ async def vertical_cost(
                 .where(ApplicationResource.application_id.in_(app_subq))
                 .scalar_subquery()
             )
+            from sqlalchemy import case as sa_case, literal as sa_literal
+            true_cost_col = sa_case(
+                (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.amortized_cost),
+                (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
+                else_=sa_literal(0),
+            )
             cost_rows = (await db.execute(
                 select(
                     period_expr,
                     CostRecord.resource_id,
-                    func.sum(CostRecord.unblended_cost).label("cost"),
+                    func.sum(true_cost_col).label("cost"),
                 )
                 .where(
                     CostRecord.resource_id.in_(res_subq),
@@ -1142,8 +1163,14 @@ async def vertical_cost(
         if tagged_account_ids:
             clauses.append(CostRecord.aws_account_id.in_(tagged_account_ids))
 
+        from sqlalchemy import or_, case as sa_case2, literal as sa_literal2
+        unassigned_cost_col = sa_case2(
+            (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.amortized_cost),
+            (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
+            else_=sa_literal2(0),
+        )
         unassigned_rows = (await db.execute(
-            select(period_expr, func.sum(CostRecord.unblended_cost).label("cost"))
+            select(period_expr, func.sum(unassigned_cost_col).label("cost"))
             .where(
                 CostRecord.date >= start,
                 CostRecord.date <= end,
