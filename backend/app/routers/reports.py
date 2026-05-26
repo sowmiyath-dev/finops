@@ -591,7 +591,7 @@ async def savings_ct_distribution(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    from sqlalchemy import case
+    from sqlalchemy import case, literal
     ct_ids = await _get_user_ct_ids(db, user)
     start = date.fromisoformat(start_date)
     end   = date.fromisoformat(end_date)
@@ -621,16 +621,15 @@ async def savings_ct_distribution(
     payer_ids = {r["aws_account_id"] for r in payer_accounts}
 
     # TRUE COST per account in ONE query:
-    # - SavingsPlanCoveredUsage  → amortized_cost (SP allocated share)
-    # - SavingsPlanRecurringFee  → 0 (payer fee, excluded from sub-accounts)
-    # - SavingsPlanNegation      → 0 (cancels covered usage, already handled above)
-    # - Everything else          → unblended_cost
+    # - SavingsPlanCoveredUsage         -> amortized_cost (SP allocated share)
+    # - Usage / DiscountedUsage / RIFee -> unblended_cost (actual usage charges)
+    # - Everything else                 -> 0 (Tax, Credit, Refund, Fee, Negation, RecurringFee excluded)
+    from sqlalchemy import case, literal
     true_cost_expr = func.sum(
         case(
-            (CostRecord.line_item_type == "SavingsPlanCoveredUsage",  CostRecord.amortized_cost),
-            (CostRecord.line_item_type == "SavingsPlanRecurringFee",  0),
-            (CostRecord.line_item_type == "SavingsPlanNegation",      0),
-            else_=CostRecord.unblended_cost,
+            (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.amortized_cost),
+            (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
+            else_=literal(0),
         )
     ).label("true_cost")
 
@@ -638,14 +637,14 @@ async def savings_ct_distribution(
     sp_allocated_expr = func.sum(
         case(
             (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.amortized_cost),
-            else_=0,
+            else_=literal(0),
         )
     ).label("sp_allocated")
 
     sp_on_demand_expr = func.sum(
         case(
             (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.unblended_cost),
-            else_=0,
+            else_=literal(0),
         )
     ).label("sp_on_demand")
 
