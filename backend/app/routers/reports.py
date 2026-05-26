@@ -666,31 +666,53 @@ async def savings_ct_distribution(
         for r in sp_rows
     }
 
-    # Build per-account result
+    # Build per-account result — include payer account with remaining cost
     payer_ids = {r["aws_account_id"] for r in payer_accounts}
     sub_accounts = []
     for row in usage_rows:
-        if row.aws_account_id in payer_ids:
-            continue  # skip payer account from sub-account list
         sp = sp_map.get(row.aws_account_id, {"sp_allocated": 0, "sp_on_demand": 0, "sp_resources": 0})
         usage_cost   = float(row.usage_cost or 0)
         sp_allocated = sp["sp_allocated"]
         sp_on_demand = sp["sp_on_demand"]
-        true_cost    = usage_cost + sp_allocated
-        savings      = sp_on_demand - sp_allocated
-        sub_accounts.append({
-            "aws_account_id": row.aws_account_id,
-            "account_name":   row.account_name or row.aws_account_id,
-            "usage_cost":     round(usage_cost, 2),
-            "sp_allocated":   round(sp_allocated, 2),
-            "sp_on_demand":   round(sp_on_demand, 2),
-            "true_cost":      round(true_cost, 2),
-            "savings":        round(savings, 2),
-            "savings_pct":    round(savings / sp_on_demand * 100, 2) if sp_on_demand > 0 else 0,
-            "sp_resources":   sp["sp_resources"],
-            "sp_share_pct":   round(sp_on_demand / sum(v["sp_on_demand"] for v in sp_map.values()) * 100, 2)
-                              if sp_map else 0,
-        })
+        is_payer     = row.aws_account_id in payer_ids
+
+        if is_payer:
+            # Payer account: usage_cost already excludes SP fee rows (we filtered them out)
+            # Show remaining cost = usage_cost (non-SP charges like support, tax etc)
+            # SP fee is distributed to sub-accounts — show it as negative/distributed
+            payer_sp_fee = next((p["sp_fee"] for p in payer_accounts if p["aws_account_id"] == row.aws_account_id), 0)
+            sub_accounts.append({
+                "aws_account_id": row.aws_account_id,
+                "account_name":   (row.account_name or row.aws_account_id) + " (Payer)",
+                "usage_cost":     round(usage_cost, 2),
+                "sp_allocated":   0,
+                "sp_on_demand":   0,
+                "true_cost":      round(usage_cost, 2),
+                "savings":        0,
+                "savings_pct":    0,
+                "sp_resources":   0,
+                "sp_share_pct":   0,
+                "is_payer":       True,
+                "sp_fee_distributed": round(payer_sp_fee, 2),
+            })
+        else:
+            true_cost    = usage_cost + sp_allocated
+            savings      = sp_on_demand - sp_allocated
+            sub_accounts.append({
+                "aws_account_id": row.aws_account_id,
+                "account_name":   row.account_name or row.aws_account_id,
+                "usage_cost":     round(usage_cost, 2),
+                "sp_allocated":   round(sp_allocated, 2),
+                "sp_on_demand":   round(sp_on_demand, 2),
+                "true_cost":      round(true_cost, 2),
+                "savings":        round(savings, 2),
+                "savings_pct":    round(savings / sp_on_demand * 100, 2) if sp_on_demand > 0 else 0,
+                "sp_resources":   sp["sp_resources"],
+                "sp_share_pct":   round(sp_on_demand / sum(v["sp_on_demand"] for v in sp_map.values()) * 100, 2)
+                                  if sp_map else 0,
+                "is_payer":       False,
+                "sp_fee_distributed": 0,
+            })
 
     sub_accounts.sort(key=lambda x: x["true_cost"], reverse=True)
 

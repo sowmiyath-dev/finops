@@ -493,19 +493,35 @@ export default function CTDetailPage() {
                       trueCostData
                         .filter((acc: any) => selectedAccounts.length === 0 || selectedAccounts.includes(acc.aws_account_id))
                         .map((acc: any) => (
-                          <tr key={acc.aws_account_id} className="border-b border-gray-200 hover:bg-blue-50 transition">
+                          <tr key={acc.aws_account_id}
+                            className={`border-b border-gray-200 transition ${
+                              acc.is_payer ? "bg-orange-50 hover:bg-orange-100" : "hover:bg-blue-50"
+                            }`}>
                             <td className="px-5 py-3">
                               <div className="flex items-center gap-2">
-                                <div className="w-7 h-7 rounded-lg bg-blue-900 flex items-center justify-center text-xs font-bold text-white">
+                                <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-white ${
+                                  acc.is_payer ? "bg-orange-600" : "bg-blue-900"
+                                }`}>
                                   {(acc.account_name || "?")[0].toUpperCase()}
                                 </div>
-                                <span className="text-sm font-bold text-black">{acc.account_name}</span>
+                                <div>
+                                  <span className="text-sm font-bold text-black">{acc.account_name}</span>
+                                  {acc.is_payer && (
+                                    <div className="text-[10px] text-orange-700 font-semibold">
+                                      SP fee {fmt(acc.sp_fee_distributed)} distributed to sub-accounts
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             </td>
                             <td className="px-5 py-3 text-xs font-mono font-semibold text-black">{acc.aws_account_id}</td>
                             <td className="px-5 py-3 text-sm font-mono font-semibold text-black">{fmt(acc.usage_cost)}</td>
                             <td className="px-5 py-3">
-                              {acc.sp_allocated > 0 ? (
+                              {acc.is_payer ? (
+                                <span className="text-xs font-bold text-orange-700 bg-orange-100 px-2 py-0.5 rounded">
+                                  −{fmt(acc.sp_fee_distributed)} distributed
+                                </span>
+                              ) : acc.sp_allocated > 0 ? (
                                 <div>
                                   <span className="text-sm font-bold font-mono text-orange-700">+{fmt(acc.sp_allocated)}</span>
                                   <div className="text-[10px] text-gray-500">{acc.sp_share_pct}% of SP pool</div>
@@ -516,12 +532,12 @@ export default function CTDetailPage() {
                               <span className="text-sm font-bold font-mono text-blue-900">{fmt(acc.true_cost)}</span>
                             </td>
                             <td className="px-5 py-3">
-                              {acc.savings > 0
+                              {!acc.is_payer && acc.savings > 0
                                 ? <span className="text-sm font-bold font-mono text-green-700">{fmt(acc.savings)}</span>
                                 : <span className="text-xs text-gray-400">—</span>}
                             </td>
                             <td className="px-5 py-3">
-                              {acc.savings_pct > 0 ? (
+                              {!acc.is_payer && acc.savings_pct > 0 ? (
                                 <div className="flex items-center gap-2">
                                   <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
                                     <div className="h-full rounded-full bg-green-600" style={{ width: `${Math.min(acc.savings_pct, 100)}%` }} />
@@ -531,7 +547,7 @@ export default function CTDetailPage() {
                               ) : <span className="text-xs text-gray-400">—</span>}
                             </td>
                             <td className="px-5 py-3 text-sm font-semibold text-black">
-                              {acc.sp_resources > 0 ? (
+                              {!acc.is_payer && acc.sp_resources > 0 ? (
                                 <button
                                   onClick={() => openSpResources(acc.aws_account_id, acc.account_name)}
                                   className="flex items-center gap-1.5 text-xs font-bold text-blue-900 hover:underline">
