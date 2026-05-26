@@ -479,7 +479,7 @@ export default function CTDetailPage() {
                 <table className="w-full mt-2">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200">
-                      {["Account", "Account ID", "True Cost", "SP Allocated", "Savings", "Savings %", "SP Resources"].map((h) => (
+                      {["Account", "Account ID", "Usage Cost", "SP Allocated", "True Cost", "Savings", "Savings %", "SP Resources"].map((h) => (
                         <th key={h} className="text-left text-xs font-bold uppercase tracking-wider text-black px-5 py-3">{h}</th>
                       ))}
                     </tr>
@@ -515,9 +515,11 @@ export default function CTDetailPage() {
                               </div>
                             </td>
                             <td className="px-5 py-3 text-xs font-mono font-semibold text-black">{acc.aws_account_id}</td>
-                            <td className="px-5 py-3">
-                              <span className="text-sm font-bold font-mono text-blue-900">{fmt(acc.true_cost)}</span>
+                            {/* Usage Cost */}
+                            <td className="px-5 py-3 text-sm font-mono font-semibold text-black">
+                              {fmt(acc.usage_cost)}
                             </td>
+                            {/* SP Allocated */}
                             <td className="px-5 py-3">
                               {acc.is_payer ? (
                                 <span className="text-xs font-bold text-orange-700 bg-orange-100 px-2 py-0.5 rounded">
@@ -530,11 +532,17 @@ export default function CTDetailPage() {
                                 </div>
                               ) : <span className="text-xs text-gray-400">—</span>}
                             </td>
+                            {/* True Cost */}
+                            <td className="px-5 py-3">
+                              <span className="text-sm font-bold font-mono text-blue-900">{fmt(acc.true_cost)}</span>
+                            </td>
+                            {/* Savings */}
                             <td className="px-5 py-3">
                               {!acc.is_payer && acc.savings > 0
                                 ? <span className="text-sm font-bold font-mono text-green-700">{fmt(acc.savings)}</span>
                                 : <span className="text-xs text-gray-400">—</span>}
                             </td>
+                            {/* Savings % */}
                             <td className="px-5 py-3">
                               {!acc.is_payer && acc.savings_pct > 0 ? (
                                 <div className="flex items-center gap-2">
@@ -545,6 +553,7 @@ export default function CTDetailPage() {
                                 </div>
                               ) : <span className="text-xs text-gray-400">—</span>}
                             </td>
+                            {/* SP Resources */}
                             <td className="px-5 py-3 text-sm font-semibold text-black">
                               {!acc.is_payer && acc.sp_resources > 0 ? (
                                 <button
@@ -561,8 +570,9 @@ export default function CTDetailPage() {
                     {!trueCostLoading && spDist && (
                       <tr className="bg-gray-50 border-t-2 border-gray-300">
                         <td className="px-5 py-3 text-sm font-bold text-black" colSpan={2}>Total</td>
-                        <td className="px-5 py-3 text-sm font-bold font-mono text-blue-900">{fmt(spDist.total_true_cost)}</td>
+                        <td className="px-5 py-3 text-sm font-bold font-mono text-black">{fmt(spDist.total_usage_cost || 0)}</td>
                         <td className="px-5 py-3 text-sm font-bold font-mono text-orange-700">+{fmt(spDist.total_sp_allocated)}</td>
+                        <td className="px-5 py-3 text-sm font-bold font-mono text-blue-900">{fmt(spDist.total_true_cost)}</td>
                         <td className="px-5 py-3 text-sm font-bold font-mono text-green-700">{fmt(spDist.total_savings)}</td>
                         <td className="px-5 py-3" colSpan={2} />
                       </tr>

@@ -620,6 +620,14 @@ async def savings_ct_distribution(
     ]
     payer_ids = {r["aws_account_id"] for r in payer_accounts}
 
+    # USAGE COST = Usage + DiscountedUsage + RIFee only (no SP, no Tax/Credit/Refund)
+    usage_cost_expr = func.sum(
+        case(
+            (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
+            else_=literal(0),
+        )
+    ).label("usage_cost")
+
     # TRUE COST per account in ONE query:
     # - SavingsPlanCoveredUsage         -> amortized_cost (SP allocated share)
     # - Usage / DiscountedUsage / RIFee -> unblended_cost (actual usage charges)
@@ -661,6 +669,7 @@ async def savings_ct_distribution(
         select(
             CostRecord.aws_account_id,
             CostRecord.account_name,
+            usage_cost_expr,
             true_cost_expr,
             sp_allocated_expr,
             sp_on_demand_expr,
@@ -675,6 +684,7 @@ async def savings_ct_distribution(
     sub_accounts = []
     for row in all_rows:
         true_cost    = float(row.true_cost or 0)
+        usage_cost   = float(row.usage_cost or 0)
         sp_allocated = float(row.sp_allocated or 0)
         sp_on_demand = float(row.sp_on_demand or 0)
         savings      = sp_on_demand - sp_allocated
@@ -684,6 +694,7 @@ async def savings_ct_distribution(
         sub_accounts.append({
             "aws_account_id":      row.aws_account_id,
             "account_name":        (row.account_name or row.aws_account_id) + (" (Payer)" if is_payer else ""),
+            "usage_cost":          round(usage_cost, 2),
             "true_cost":           round(true_cost, 2),
             "sp_allocated":        round(sp_allocated, 2),
             "sp_on_demand":        round(sp_on_demand, 2),
@@ -697,6 +708,7 @@ async def savings_ct_distribution(
 
     sub_accounts.sort(key=lambda x: x["true_cost"], reverse=True)
 
+    total_usage    = sum(a["usage_cost"] for a in sub_accounts if not a["is_payer"])
     total_true     = sum(a["true_cost"] for a in sub_accounts)
     total_sp_alloc = sum(a["sp_allocated"] for a in sub_accounts)
     total_savings  = sum(a["savings"] for a in sub_accounts)
@@ -707,6 +719,7 @@ async def savings_ct_distribution(
         "end":                end_date,
         "total_sp_fee":       round(total_sp_fee, 2),
         "payer_accounts":     payer_accounts,
+        "total_usage_cost":   round(total_usage, 2),
         "total_true_cost":    round(total_true, 2),
         "total_sp_allocated": round(total_sp_alloc, 2),
         "total_savings":      round(total_savings, 2),
