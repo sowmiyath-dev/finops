@@ -95,6 +95,22 @@ export default function CTDetailPage() {
   const [accountDropdownOpen, setAccountDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("service");
   const [showTrueCost, setShowTrueCost] = useState(false);
+  const [spResourceModal, setSpResourceModal] = useState<{ accountId: string; accountName: string } | null>(null);
+  const [spResources, setSpResources] = useState<any[]>([]);
+  const [spResLoading, setSpResLoading] = useState(false);
+
+  const openSpResources = async (accountId: string, accountName: string) => {
+    setSpResourceModal({ accountId, accountName });
+    setSpResources([]);
+    setSpResLoading(true);
+    try {
+      const res = await api.get("/reports/savings/resources", {
+        params: { start_date: startDate, end_date: endDate, account_ids: accountId, limit: 500 },
+      });
+      setSpResources(res.data);
+    } catch (e) { console.error(e); }
+    finally { setSpResLoading(false); }
+  };
 
   useEffect(() => { if (!token) router.push("/auth"); }, [token]);
 
@@ -515,7 +531,14 @@ export default function CTDetailPage() {
                               ) : <span className="text-xs text-gray-400">—</span>}
                             </td>
                             <td className="px-5 py-3 text-sm font-semibold text-black">
-                              {acc.sp_resources > 0 ? acc.sp_resources.toLocaleString() : "—"}
+                              {acc.sp_resources > 0 ? (
+                                <button
+                                  onClick={() => openSpResources(acc.aws_account_id, acc.account_name)}
+                                  className="flex items-center gap-1.5 text-xs font-bold text-blue-900 hover:underline">
+                                  {acc.sp_resources.toLocaleString()} resources
+                                  <ChevronRight className="w-3 h-3" />
+                                </button>
+                              ) : "—"}
                             </td>
                           </tr>
                         ))
@@ -680,6 +703,74 @@ export default function CTDetailPage() {
             </div>
           </div>
         </>
+      )}
+      {/* SP Resources Modal */}
+      {spResourceModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg border border-gray-300 shadow-lg w-full max-w-4xl max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 flex-shrink-0">
+              <div>
+                <h3 className="text-sm font-bold text-black flex items-center gap-2">
+                  <TrendingDown className="w-4 h-4 text-green-700" />
+                  SP Covered Resources — {spResourceModal.accountName}
+                </h3>
+                <p className="text-[10px] text-gray-500 mt-0.5 font-mono">{spResourceModal.accountId} · {startDate} → {endDate}</p>
+              </div>
+              <button onClick={() => setSpResourceModal(null)} className="p-1.5 rounded hover:bg-gray-100 transition">
+                <span className="text-black font-bold text-sm">✕</span>
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {spResLoading ? (
+                <div className="flex items-center justify-center h-40">
+                  <RefreshCw className="w-5 h-5 animate-spin text-blue-900" />
+                </div>
+              ) : spResources.length === 0 ? (
+                <div className="p-12 text-center text-sm text-black">No SP covered resources found for this period.</div>
+              ) : (
+                <table className="w-full">
+                  <thead className="sticky top-0">
+                    <tr className="bg-gray-100 border-b-2 border-gray-300">
+                      {["#", "Resource ID", "Service", "Region", "On-Demand Cost", "SP Allocated", "Savings", "Savings %"].map((h) => (
+                        <th key={h} className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-black whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {spResources.map((r: any, i: number) => (
+                      <tr key={i} className="border-b border-gray-200 hover:bg-blue-50 transition">
+                        <td className="px-4 py-2.5 text-xs font-bold text-gray-400">{i + 1}</td>
+                        <td className="px-4 py-2.5 text-xs font-mono font-semibold text-black max-w-xs truncate">{r.resource_id}</td>
+                        <td className="px-4 py-2.5">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-900">{r.service}</span>
+                        </td>
+                        <td className="px-4 py-2.5 text-xs text-black">{r.region || "—"}</td>
+                        <td className="px-4 py-2.5 text-sm font-mono text-gray-500">{fmt(r.on_demand_cost)}</td>
+                        <td className="px-4 py-2.5 text-sm font-bold font-mono text-orange-700">{fmt(r.sp_allocated_cost)}</td>
+                        <td className="px-4 py-2.5 text-sm font-bold font-mono text-green-700">{fmt(r.savings)}</td>
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-2">
+                            <div className="w-14 h-2 bg-gray-200 rounded-full overflow-hidden">
+                              <div className="h-full rounded-full bg-green-600" style={{ width: `${Math.min(r.savings_pct, 100)}%` }} />
+                            </div>
+                            <span className="text-xs font-bold text-green-700">{r.savings_pct}%</span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    <tr className="bg-gray-50 border-t-2 border-gray-300">
+                      <td className="px-4 py-3 text-sm font-bold text-black" colSpan={4}>Total ({spResources.length} resources)</td>
+                      <td className="px-4 py-3 text-sm font-mono font-bold text-gray-500">{fmt(spResources.reduce((s: number, r: any) => s + r.on_demand_cost, 0))}</td>
+                      <td className="px-4 py-3 text-sm font-mono font-bold text-orange-700">{fmt(spResources.reduce((s: number, r: any) => s + r.sp_allocated_cost, 0))}</td>
+                      <td className="px-4 py-3 text-sm font-mono font-bold text-green-700">{fmt(spResources.reduce((s: number, r: any) => s + r.savings, 0))}</td>
+                      <td className="px-4 py-3" />
+                    </tr>
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
