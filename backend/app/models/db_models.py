@@ -62,6 +62,8 @@ class CostRecord(Base):
         Index("ix_cr_aws_id_date", "aws_account_id", "date"),
         Index("ix_cr_resource_id", "resource_id"),           # vertical cost queries
         Index("ix_cr_resource_date", "resource_id", "date"), # vertical cost with date filter
+        Index("ix_cr_resource_date_type", "resource_id", "date", "line_item_type"),  # covers CASE filter
+        Index("ix_cr_account_date_type", "aws_account_id", "date", "line_item_type"),  # account cost queries
     )
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     control_tower_id = Column(UUID(as_uuid=True), ForeignKey("control_towers.id"), nullable=False)
@@ -191,6 +193,7 @@ class CustomTag(Base):
     __tablename__ = "custom_tags"
     __table_args__ = (
         Index("ix_custom_tag_key", "tag_key"),
+        Index("ix_custom_tag_key_value", "tag_key", "tag_value"),  # covers vertical/business lookups
     )
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tag_key = Column(String, nullable=False)       # e.g. "Project"
@@ -208,6 +211,8 @@ class ResourceTagMapping(Base):
         Index("ix_rtm_resource", "resource_id"),
         Index("ix_rtm_tag", "custom_tag_id"),
         Index("ix_rtm_cloud", "cloud_provider"),
+        Index("ix_rtm_tag_resource", "custom_tag_id", "resource_id"),  # covers tag→resource joins
+        Index("ix_rtm_tag_account", "custom_tag_id", "aws_account_id"),  # covers account lookups
     )
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     resource_id = Column(String, nullable=False)          # AWS resource ID / Azure resource ID

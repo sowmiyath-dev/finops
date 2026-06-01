@@ -453,7 +453,7 @@ async def verticals_summary(
         .join(ResourceTagMapping, ResourceTagMapping.custom_tag_id == CustomTag.id)
         .join(CostRecord, CostRecord.resource_id == ResourceTagMapping.resource_id)
         .where(
-            func.lower(CustomTag.tag_key) == "vertical",
+            CustomTag.tag_key == "Vertical",  # exact match — uses ix_custom_tag_key_value index
             CostRecord.date >= start,
             CostRecord.date <= end,
         )
@@ -500,6 +500,64 @@ async def verticals_summary(
             "end": str(end),
         })
     await _cache_set(cache_key, result, ttl=300)  # cache 5 minutes
+    return result
+
+
+@router.get("/{vertical_id}/businesses-cost")
+async def businesses_cost_bulk(
+    vertical_id: str,
+    granularity: str = "monthly",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Return total cost for ALL businesses in a vertical in a single query."""
+    cache_key = f"verticals:biz_costs:{vertical_id}:{granularity}:{start_date}:{end_date}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    start, end = _date_range(granularity)
+    if start_date:
+        start = date.fromisoformat(start_date)
+    if end_date:
+        end = date.fromisoformat(end_date)
+
+    businesses = (await db.execute(
+        select(Business).where(Business.vertical_id == vertical_id).order_by(Business.name)
+    )).scalars().all()
+    if not businesses:
+        return {}
+
+    from sqlalchemy import case as sa_case_b, literal as sa_literal_b
+    true_cost_b = sa_case_b(
+        (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.amortized_cost),
+        (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
+        else_=sa_literal_b(0),
+    )
+
+    # Single query: join Business name → CustomTag → ResourceTagMapping → CostRecord
+    biz_names = [b.name for b in businesses]
+    rows = (await db.execute(
+        select(
+            CustomTag.tag_value.label("biz_name"),
+            func.sum(true_cost_b).label("cost"),
+        )
+        .join(ResourceTagMapping, ResourceTagMapping.custom_tag_id == CustomTag.id)
+        .join(CostRecord, CostRecord.resource_id == ResourceTagMapping.resource_id)
+        .where(
+            CustomTag.tag_key == "Business",
+            CustomTag.tag_value.in_(biz_names),
+            CostRecord.date >= start,
+            CostRecord.date <= end,
+        )
+        .group_by(CustomTag.tag_value)
+    )).all()
+
+    cost_by_name = {r.biz_name: float(r.cost or 0) for r in rows}
+    result = {str(b.id): cost_by_name.get(b.name, 0.0) for b in businesses}
+    await _cache_set(cache_key, result, ttl=300)
     return result
 
 

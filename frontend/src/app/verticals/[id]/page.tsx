@@ -155,24 +155,16 @@ export default function VerticalDetailPage() {
         .then((r) => setTaggedAccounts(r.data || []))
         .catch(() => {});
 
-      // Step 4 — business costs in background
+      // Step 4 — business costs in background (single bulk query)
       if (bizList.length > 0) {
         const now = new Date();
         const lm = {
           start: `${now.getFullYear()}-${String(now.getMonth()).padStart(2, "0")}-01`,
           end: `${now.getFullYear()}-${String(now.getMonth()).padStart(2, "0")}-${new Date(now.getFullYear(), now.getMonth(), 0).getDate()}`,
         };
-        Promise.all(
-          bizList.map((b: any) =>
-            axios.get(`${BASE}/api/verticals/${id}/businesses/${b.id}/cost`, {
-              headers, params: { granularity: "monthly", start_date: lm.start, end_date: lm.end },
-            }).then((r) => ({ id: b.id, cost: r.data.total_cost || 0 })).catch(() => ({ id: b.id, cost: 0 }))
-          )
-        ).then((results) => {
-          const map: Record<string, number> = {};
-          results.forEach((r) => { map[r.id] = r.cost; });
-          setBizCosts(map);
-        });
+        axios.get(`${BASE}/api/verticals/${id}/businesses-cost`, {
+          headers, params: { granularity: "monthly", start_date: lm.start, end_date: lm.end },
+        }).then((r) => setBizCosts(r.data || {})).catch(() => {});
       }
     } catch {
       setLoading(false);
