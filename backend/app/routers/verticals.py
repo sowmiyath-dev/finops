@@ -976,8 +976,8 @@ async def business_cost(
 
     # Per-account cost breakdown using true cost
     per_account = []
-    if account_ids:
-        from sqlalchemy import or_, case as sa_case5, literal as sa_literal5
+    if resource_ids and account_ids:
+        from sqlalchemy import case as sa_case5, literal as sa_literal5
         true_cost_col5 = sa_case5(
             (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.amortized_cost),
             (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
@@ -992,10 +992,8 @@ async def business_cost(
             .where(
                 CostRecord.date >= start,
                 CostRecord.date <= end,
-                or_(
-                    CostRecord.resource_id.in_(resource_ids) if resource_ids else False,
-                    CostRecord.aws_account_id.in_(account_ids),
-                )
+                CostRecord.resource_id.in_(resource_ids),
+                CostRecord.aws_account_id.in_(account_ids),
             )
             .group_by(CostRecord.aws_account_id, CostRecord.account_name)
             .order_by(func.sum(true_cost_col5).desc())
