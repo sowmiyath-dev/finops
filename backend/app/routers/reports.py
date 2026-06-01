@@ -517,18 +517,23 @@ async def get_charge_types(db: AsyncSession = Depends(get_db), user: User = Depe
 @router.get("/meta/resources-by-account")
 async def get_resources_by_account(
     account_id: str,
+    ct_id: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Get all distinct resource IDs for a given AWS account ID."""
-    # Cache per account — resources don't change between syncs
-    cache_key = f"res_by_acc_{account_id}"
+    """Get all distinct resource IDs for a given AWS account ID, scoped to a specific CT."""
+    cache_key = f"res_by_acc_{ct_id}_{account_id}"
     if (cached := _cache_get(cache_key)) is not None:
         return cached
 
     ct_ids = await _get_user_ct_ids(db, user)
 
-    # Use last 90 days only — avoids full table scan on 6M rows
+    # Scope to the specific CT if provided — prevents cross-CT resource bleed
+    if ct_id and ct_id in ct_ids:
+        scoped_ct_ids = [ct_id]
+    else:
+        scoped_ct_ids = ct_ids
+
     since = date.today() - timedelta(days=90)
 
     result = await db.execute(
@@ -538,7 +543,7 @@ async def get_resources_by_account(
             CostRecord.region,
         )
         .where(
-            CostRecord.control_tower_id.in_(ct_ids),
+            CostRecord.control_tower_id.in_(scoped_ct_ids),
             CostRecord.aws_account_id == account_id,
             CostRecord.resource_id.isnot(None),
             CostRecord.resource_id != "",
@@ -553,7 +558,7 @@ async def get_resources_by_account(
         {"resource_id": r.resource_id, "service": r.service, "region": r.region or ""}
         for r in rows
     ]
-    _cache_set(cache_key, data)  # cache for 10 minutes
+    _cache_set(cache_key, data)
     return data
 
 

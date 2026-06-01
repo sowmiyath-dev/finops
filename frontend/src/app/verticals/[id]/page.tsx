@@ -256,12 +256,16 @@ export default function VerticalDetailPage() {
     setSelectedResources(new Set());
     try {
       const results = await Promise.all(
-        Array.from(accountIds).map((aid) =>
-          axios.get(`${BASE}/api/reports/meta/resources-by-account`, {
+        Array.from(accountIds).map((aid) => {
+          // Find which CT this account belongs to — scope query to that CT only
+          const acct = accounts.find((a) => a.aws_account_id === aid);
+          const params: any = { account_id: aid };
+          if (acct?.ct_id) params.ct_id = acct.ct_id;
+          return axios.get(`${BASE}/api/reports/meta/resources-by-account`, {
             headers,
-            params: { account_id: aid },
-          }).then((r) => (r.data as Resource[]).map((res) => ({ ...res, account_id: aid })))
-        )
+            params,
+          }).then((r) => (r.data as Resource[]).map((res) => ({ ...res, account_id: aid })));
+        })
       );
       // Merge and deduplicate by resource_id
       const merged = new Map<string, Resource>();
