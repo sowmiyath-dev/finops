@@ -6,7 +6,7 @@ import { useAuthStore } from "@/store/authStore";
 import axios from "axios";
 import {
   Building2, Cloud, Tag, Bell, Settings, ChevronRight, ChevronDown,
-  Menu, X, Users, Mail, AlertTriangle, Zap, Globe, DollarSign,
+  Menu, X, Users, Mail, AlertTriangle, Zap, Globe,
   LayoutDashboard, Layers, TrendingDown,
 } from "lucide-react";
 
@@ -27,12 +27,6 @@ const STATIC_NAV: NavItem[] = [
     label: "Organization",
     icon: Building2,
     href: "/org",
-  },
-  {
-    id: "reports",
-    label: "Cost Reports",
-    icon: DollarSign,
-    href: "/reports",
   },
   {
     id: "verticals",
