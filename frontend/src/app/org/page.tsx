@@ -29,15 +29,17 @@ export default function OrgPage() {
               gradient: "linear-gradient(135deg, #ff9a3c 0%, #ff6b00 100%)",
               desc: "Control Towers · CUR Reports · Cost Analysis",
               cta: "View Control Towers",
+              ctaColor: "text-orange-600",
             },
             {
               name: "Microsoft Azure",
               short: "Azure",
-              status: "Coming Soon",
+              status: "Active",
               href: "/clouds/azure",
               gradient: "linear-gradient(135deg, #4facfe 0%, #0078d4 100%)",
               desc: "Subscriptions · Resource Groups · Billing",
-              cta: "Coming Soon",
+              cta: "Onboard Azure",
+              ctaColor: "text-blue-600",
             },
             {
               name: "Google Cloud",
@@ -68,7 +70,7 @@ export default function OrgPage() {
                 <p className="text-xs text-gray-500 mb-3">{cloud.desc}</p>
                 <div className={`flex items-center gap-1 text-xs font-bold transition ${
                   cloud.status === "Active"
-                    ? "text-orange-600 group-hover:gap-2"
+                    ? `${(cloud as any).ctaColor || "text-orange-600"} group-hover:gap-2`
                     : "text-gray-400"
                 }`}>
                   {cloud.cta}
