@@ -26,15 +26,25 @@ class ControlTower(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     name = Column(String, nullable=False)
-    management_account_id = Column(String(12), nullable=False)
+    cloud_provider = Column(String, default="aws")  # aws | azure | gcp
+    management_account_id = Column(String, nullable=False)
     management_account_name = Column(String, nullable=False)
     auth_method = Column(String, nullable=False)
+    # AWS fields
     access_key_id = Column(String)
     encrypted_secret_key = Column(Text)
     role_arn = Column(String)
     external_id = Column(String, unique=True)
     cur_s3_bucket = Column(String, nullable=True)
     cur_s3_prefix = Column(String, nullable=True)
+    # Azure fields
+    azure_tenant_id = Column(String, nullable=True)
+    azure_client_id = Column(String, nullable=True)
+    encrypted_azure_client_secret = Column(Text, nullable=True)
+    azure_storage_account = Column(String, nullable=True)
+    azure_container_name = Column(String, nullable=True)
+    azure_export_name = Column(String, nullable=True)
+    # Common
     is_active = Column(Boolean, default=False)
     last_synced_at = Column(DateTime(timezone=True), nullable=True)
     auto_sync_enabled = Column(Boolean, default=True)
@@ -86,6 +96,7 @@ class CostRecord(Base):
     line_item_type = Column(String)        # Usage | SavingsPlanCoveredUsage | RIFee | DiscountedUsage | Credit | Tax | Fee | Refund
     is_marketplace = Column(Boolean, default=False)  # True if AWS Marketplace charge
     tags = Column(Text)
+    cloud_provider = Column(String, default="aws")  # aws | azure | gcp
     synced_at = Column(DateTime(timezone=True), default=utcnow)
 
 class SyncLog(Base):

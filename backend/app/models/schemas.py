@@ -73,6 +73,15 @@ class OnboardRole(BaseModel):
     cur_s3_bucket: str
     cur_s3_prefix: str
 
+class OnboardAzure(BaseModel):
+    name: str
+    tenant_id: str
+    client_id: str
+    client_secret: str
+    storage_account: str
+    container_name: str
+    export_name: str
+
 class SubAccountOut(BaseModel):
     id: UUID
     aws_account_id: str
@@ -84,6 +93,7 @@ class SubAccountOut(BaseModel):
 class ControlTowerOut(BaseModel):
     id: UUID
     name: str
+    cloud_provider: str = "aws"
     management_account_id: str
     management_account_name: str
     auth_method: str
@@ -91,6 +101,10 @@ class ControlTowerOut(BaseModel):
     auto_sync_enabled: bool
     cur_s3_bucket: Optional[str] = None
     cur_s3_prefix: Optional[str] = None
+    azure_tenant_id: Optional[str] = None
+    azure_storage_account: Optional[str] = None
+    azure_container_name: Optional[str] = None
+    azure_export_name: Optional[str] = None
     last_synced_at: Optional[datetime] = None
     external_id: Optional[str] = None
     sub_accounts: list[SubAccountOut] = []

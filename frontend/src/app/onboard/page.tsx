@@ -4,11 +4,11 @@ import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
-import Navbar from "@/components/Navbar";
-import { Copy, Info, ArrowLeft, RefreshCw } from "lucide-react";
+import { Copy, Info, ArrowLeft, RefreshCw, Cloud } from "lucide-react";
 
 export default function OnboardPage() {
   const router = useRouter();
+  const [cloudTab, setCloudTab] = useState<"aws" | "azure">("aws");
   const [method, setMethod] = useState<"keys" | "role">("keys");
   const [loading, setLoading] = useState(false);
   const [externalId, setExternalId] = useState("");
@@ -18,14 +18,20 @@ export default function OnboardPage() {
     role_arn: "", external_id: "",
     cur_s3_bucket: "", cur_s3_prefix: "",
   });
+  const [azureForm, setAzureForm] = useState({
+    name: "", tenant_id: "", client_id: "",
+    client_secret: "", storage_account: "",
+    container_name: "", export_name: "",
+  });
 
   const { data: trustPolicy } = useQuery({
     queryKey: ["trust-policy"],
     queryFn: () => api.get("/towers/trust-policy").then((r) => r.data),
-    enabled: method === "role",
+    enabled: method === "role" && cloudTab === "aws",
   });
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const setAzure = (k: string, v: string) => setAzureForm((f) => ({ ...f, [k]: v }));
 
   const generateExternalId = async () => {
     try {
@@ -36,7 +42,7 @@ export default function OnboardPage() {
     } catch { toast.error("Failed to generate External ID"); }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleAwsSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (method === "role" && !form.external_id) {
       toast.error("Please generate an External ID first");
@@ -57,10 +63,30 @@ export default function OnboardPage() {
           cur_s3_bucket: form.cur_s3_bucket, cur_s3_prefix: form.cur_s3_prefix,
         });
       }
-      toast.success("Control Tower onboarded! Cost sync started.");
+      toast.success("AWS Control Tower onboarded! Cost sync started.");
       router.push("/dashboard");
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Onboarding failed");
+    } finally { setLoading(false); }
+  };
+
+  const handleAzureSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await api.post("/towers/onboard/azure", {
+        name: azureForm.name,
+        tenant_id: azureForm.tenant_id,
+        client_id: azureForm.client_id,
+        client_secret: azureForm.client_secret,
+        storage_account: azureForm.storage_account,
+        container_name: azureForm.container_name,
+        export_name: azureForm.export_name,
+      });
+      toast.success("Azure tenant onboarded! Cost sync started.");
+      router.push("/dashboard");
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Azure onboarding failed");
     } finally { setLoading(false); }
   };
 
@@ -78,159 +104,234 @@ export default function OnboardPage() {
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
 
-        <h1 className="text-2xl font-bold mb-1" style={{ color: "var(--text-primary)" }}>Add Control Tower</h1>
+        <h1 className="text-2xl font-bold mb-1" style={{ color: "var(--text-primary)" }}>Add Cloud Account</h1>
         <p className="text-sm mb-8" style={{ color: "var(--text-secondary)" }}>
-          Connect a management account to start syncing CUR cost data from all sub-accounts.
+          Connect a cloud account to start syncing cost data.
         </p>
 
+        {/* Cloud Provider Tabs */}
+        <div className="flex rounded-lg p-1 mb-6" style={{ background: "#f1f4f9" }}>
+          <button onClick={() => setCloudTab("aws")}
+            className="flex-1 py-2.5 text-sm font-semibold rounded-md transition flex items-center justify-center gap-2"
+            style={{
+              background: cloudTab === "aws" ? "white" : "transparent",
+              color: cloudTab === "aws" ? "#FF9900" : "var(--text-secondary)",
+              boxShadow: cloudTab === "aws" ? "var(--shadow-sm)" : "none",
+            }}>
+            <Cloud className="w-4 h-4" /> AWS
+          </button>
+          <button onClick={() => setCloudTab("azure")}
+            className="flex-1 py-2.5 text-sm font-semibold rounded-md transition flex items-center justify-center gap-2"
+            style={{
+              background: cloudTab === "azure" ? "white" : "transparent",
+              color: cloudTab === "azure" ? "#0078D4" : "var(--text-secondary)",
+              boxShadow: cloudTab === "azure" ? "var(--shadow-sm)" : "none",
+            }}>
+            <Cloud className="w-4 h-4" /> Azure
+          </button>
+        </div>
+
         <div className="card p-8">
-          {/* Method tabs */}
-          <div className="flex rounded-lg p-1 mb-6" style={{ background: "#f1f4f9" }}>
-            {(["keys", "role"] as const).map((m) => (
-              <button key={m} onClick={() => setMethod(m)}
-                className="flex-1 py-2 text-sm font-semibold rounded-md transition"
-                style={{
-                  background: method === m ? "white" : "transparent",
-                  color: method === m ? "var(--text-primary)" : "var(--text-secondary)",
-                  boxShadow: method === m ? "var(--shadow-sm)" : "none",
-                }}>
-                {m === "keys" ? "Access Keys" : "IAM Role (Recommended)"}
-              </button>
-            ))}
-          </div>
+          {cloudTab === "aws" ? (
+            <>
+              {/* AWS Method tabs */}
+              <div className="flex rounded-lg p-1 mb-6" style={{ background: "#f1f4f9" }}>
+                {(["keys", "role"] as const).map((m) => (
+                  <button key={m} onClick={() => setMethod(m)}
+                    className="flex-1 py-2 text-sm font-semibold rounded-md transition"
+                    style={{
+                      background: method === m ? "white" : "transparent",
+                      color: method === m ? "var(--text-primary)" : "var(--text-secondary)",
+                      boxShadow: method === m ? "var(--shadow-sm)" : "none",
+                    }}>
+                    {m === "keys" ? "Access Keys" : "IAM Role (Recommended)"}
+                  </button>
+                ))}
+              </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Common fields */}
-            <div>
-              <label className={labelCls} style={{ color: "var(--text-primary)" }}>Control Tower Name</label>
-              <input required value={form.name} onChange={(e) => set("name", e.target.value)}
-                className={inputCls} placeholder="e.g. Production CT"
-                style={{ color: "var(--text-primary)" }} />
-            </div>
-            <div>
-              <label className={labelCls} style={{ color: "var(--text-primary)" }}>Management Account Name</label>
-              <input required value={form.management_account_name} onChange={(e) => set("management_account_name", e.target.value)}
-                className={inputCls} placeholder="e.g. Master Billing Account"
-                style={{ color: "var(--text-primary)" }} />
-            </div>
-
-            {/* Auth method fields */}
-            {method === "keys" ? (
-              <>
-                <div className="p-3 rounded-lg flex gap-2 text-sm" style={{ background: "var(--info-bg)", border: "1px solid var(--info-border)", color: "var(--info)" }}>
-                  <Info className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>Attach <strong>AWSOrganizationsReadOnlyAccess</strong> + <strong>S3 CUR bucket read</strong> to this IAM user.</span>
-                </div>
+              <form onSubmit={handleAwsSubmit} className="space-y-4">
                 <div>
-                  <label className={labelCls} style={{ color: "var(--text-primary)" }}>Access Key ID</label>
-                  <input required value={form.access_key_id} onChange={(e) => set("access_key_id", e.target.value)}
-                    className={`${inputCls} font-mono`} placeholder="AKIAIOSFODNN7EXAMPLE"
+                  <label className={labelCls} style={{ color: "var(--text-primary)" }}>Control Tower Name</label>
+                  <input required value={form.name} onChange={(e) => set("name", e.target.value)}
+                    className={inputCls} placeholder="e.g. Production CT"
                     style={{ color: "var(--text-primary)" }} />
                 </div>
                 <div>
-                  <label className={labelCls} style={{ color: "var(--text-primary)" }}>Secret Access Key</label>
-                  <input required type="password" value={form.secret_access_key} onChange={(e) => set("secret_access_key", e.target.value)}
-                    className={`${inputCls} font-mono`} placeholder="••••••••••••••••••••••••••••••••••••••••"
+                  <label className={labelCls} style={{ color: "var(--text-primary)" }}>Management Account Name</label>
+                  <input required value={form.management_account_name} onChange={(e) => set("management_account_name", e.target.value)}
+                    className={inputCls} placeholder="e.g. Master Billing Account"
                     style={{ color: "var(--text-primary)" }} />
                 </div>
-              </>
-            ) : (
-              <>
-                {/* Step 1 */}
-                <div className="p-4 rounded-lg space-y-3" style={{ background: "#e8f0fe", border: "1px solid #c5d5f0" }}>
-                  <p className="text-xs font-bold uppercase tracking-wide" style={{ color: "var(--primary)" }}>Step 1 — Generate External ID</p>
-                  <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                    Generate an External ID first, then use it when deploying the CFT in your management account.
-                  </p>
-                  {externalId ? (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2 rounded-md px-3 py-2"
-                        style={{ background: "white", border: "1px solid var(--border)" }}>
-                        <code className="text-xs flex-1 font-mono break-all" style={{ color: "var(--success)" }}>{externalId}</code>
-                        <button type="button" onClick={() => { navigator.clipboard.writeText(externalId); toast.success("Copied!"); }}
-                          className="p-1 transition flex-shrink-0" style={{ color: "var(--text-muted)" }}
-                          onMouseEnter={e => (e.currentTarget.style.color = "var(--primary)")}
-                          onMouseLeave={e => (e.currentTarget.style.color = "var(--text-muted)")}>
-                          <Copy className="w-3.5 h-3.5" />
+
+                {method === "keys" ? (
+                  <>
+                    <div className="p-3 rounded-lg flex gap-2 text-sm" style={{ background: "var(--info-bg)", border: "1px solid var(--info-border)", color: "var(--info)" }}>
+                      <Info className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>Attach <strong>AWSOrganizationsReadOnlyAccess</strong> + <strong>S3 CUR bucket read</strong> to this IAM user.</span>
+                    </div>
+                    <div>
+                      <label className={labelCls} style={{ color: "var(--text-primary)" }}>Access Key ID</label>
+                      <input required value={form.access_key_id} onChange={(e) => set("access_key_id", e.target.value)}
+                        className={`${inputCls} font-mono`} placeholder="AKIAIOSFODNN7EXAMPLE"
+                        style={{ color: "var(--text-primary)" }} />
+                    </div>
+                    <div>
+                      <label className={labelCls} style={{ color: "var(--text-primary)" }}>Secret Access Key</label>
+                      <input required type="password" value={form.secret_access_key} onChange={(e) => set("secret_access_key", e.target.value)}
+                        className={`${inputCls} font-mono`} placeholder="••••••••••••••••••••••••••••••••••••••••"
+                        style={{ color: "var(--text-primary)" }} />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="p-4 rounded-lg space-y-3" style={{ background: "#e8f0fe", border: "1px solid #c5d5f0" }}>
+                      <p className="text-xs font-bold uppercase tracking-wide" style={{ color: "var(--primary)" }}>Step 1 — Generate External ID</p>
+                      <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                        Generate an External ID first, then use it when deploying the CFT in your management account.
+                      </p>
+                      {externalId ? (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 rounded-md px-3 py-2"
+                            style={{ background: "white", border: "1px solid var(--border)" }}>
+                            <code className="text-xs flex-1 font-mono break-all" style={{ color: "var(--success)" }}>{externalId}</code>
+                            <button type="button" onClick={() => { navigator.clipboard.writeText(externalId); toast.success("Copied!"); }}
+                              className="p-1 transition flex-shrink-0" style={{ color: "var(--text-muted)" }}>
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <p className="text-xs font-medium" style={{ color: "var(--warning)" }}>
+                            ⚠️ Use this in the CFT parameter <strong>ExternalId</strong>
+                          </p>
+                        </div>
+                      ) : (
+                        <button type="button" onClick={generateExternalId}
+                          className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white rounded-md transition"
+                          style={{ background: "var(--primary)" }}>
+                          <RefreshCw className="w-3.5 h-3.5" /> Generate External ID
                         </button>
-                      </div>
-                      <p className="text-xs font-medium" style={{ color: "var(--warning)" }}>
-                        ⚠️ Use this in the CFT parameter <strong>ExternalId</strong>
+                      )}
+                    </div>
+
+                    <div className="p-4 rounded-lg space-y-2" style={{ background: "#fafbfc", border: "1px solid var(--border)" }}>
+                      <p className="text-xs font-bold uppercase tracking-wide" style={{ color: "var(--text-primary)" }}>Step 2 — Deploy CFT</p>
+                      <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                        Deploy <strong>finops-management-account-role.json</strong> with the External ID above.
                       </p>
                     </div>
-                  ) : (
-                    <button type="button" onClick={generateExternalId}
-                      className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white rounded-md transition"
-                      style={{ background: "var(--primary)" }}>
-                      <RefreshCw className="w-3.5 h-3.5" /> Generate External ID
-                    </button>
-                  )}
-                </div>
 
-                {/* Step 2 */}
-                <div className="p-4 rounded-lg space-y-2" style={{ background: "#fafbfc", border: "1px solid var(--border)" }}>
-                  <p className="text-xs font-bold uppercase tracking-wide" style={{ color: "var(--text-primary)" }}>Step 2 — Deploy CFT in Management Account</p>
-                  <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                    Deploy <strong style={{ color: "var(--text-primary)" }}>finops-management-account-role.json</strong> with:
-                  </p>
-                  <ul className="text-xs space-y-1 ml-3" style={{ color: "var(--text-secondary)" }}>
-                    <li>• <strong style={{ color: "var(--text-primary)" }}>FinOpsHostAccountId:</strong> {trustPolicy ? JSON.stringify(trustPolicy).match(/iam::([0-9]+)/)?.[1] : "your portal account ID"}</li>
-                    <li>• <strong style={{ color: "var(--text-primary)" }}>CURBucketName:</strong> your CUR S3 bucket name</li>
-                    <li>• <strong style={{ color: "var(--text-primary)" }}>ExternalId:</strong> the External ID generated above</li>
-                  </ul>
-                  <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
-                    After deployment, copy the <strong style={{ color: "var(--text-primary)" }}>RoleARN</strong> from CFT Outputs tab.
-                  </p>
-                </div>
+                    <div className="p-4 rounded-lg space-y-3" style={{ background: "#fafbfc", border: "1px solid var(--border)" }}>
+                      <p className="text-xs font-bold uppercase tracking-wide" style={{ color: "var(--text-primary)" }}>Step 3 — Enter Role Details</p>
+                      <div>
+                        <label className={labelCls} style={{ color: "var(--text-primary)" }}>Role ARN</label>
+                        <input required value={form.role_arn} onChange={(e) => set("role_arn", e.target.value)}
+                          className={`${inputCls} font-mono`} placeholder="arn:aws:iam::123456789012:role/FinOpsCURPortal-CrossAcctRole"
+                          style={{ color: "var(--text-primary)" }} />
+                      </div>
+                      <div>
+                        <label className={labelCls} style={{ color: "var(--text-primary)" }}>External ID</label>
+                        <input required value={form.external_id} onChange={(e) => set("external_id", e.target.value)}
+                          className={`${inputCls} font-mono`} placeholder="paste the generated external ID"
+                          style={{ color: "var(--text-primary)" }} />
+                      </div>
+                    </div>
+                  </>
+                )}
 
-                {/* Step 3 */}
-                <div className="p-4 rounded-lg space-y-3" style={{ background: "#fafbfc", border: "1px solid var(--border)" }}>
-                  <p className="text-xs font-bold uppercase tracking-wide" style={{ color: "var(--text-primary)" }}>Step 3 — Enter Role Details</p>
+                {/* CUR S3 fields */}
+                <div className="p-4 rounded-lg space-y-3" style={{ background: "var(--success-bg)", border: "1px solid var(--success-border)" }}>
+                  <p className="text-xs font-bold uppercase tracking-wide" style={{ color: "var(--success)" }}>CUR S3 Configuration</p>
                   <div>
-                    <label className={labelCls} style={{ color: "var(--text-primary)" }}>Role ARN</label>
-                    <input required value={form.role_arn} onChange={(e) => set("role_arn", e.target.value)}
-                      className={`${inputCls} font-mono`} placeholder="arn:aws:iam::123456789012:role/FinOpsCURPortal-CrossAcctRole"
+                    <label className={labelCls} style={{ color: "var(--text-primary)" }}>CUR S3 Bucket Name</label>
+                    <input required value={form.cur_s3_bucket} onChange={(e) => set("cur_s3_bucket", e.target.value)}
+                      className={inputCls} placeholder="e.g. rilcurmall"
                       style={{ color: "var(--text-primary)" }} />
                   </div>
                   <div>
-                    <label className={labelCls} style={{ color: "var(--text-primary)" }}>External ID</label>
-                    <input required value={form.external_id} onChange={(e) => set("external_id", e.target.value)}
-                      className={`${inputCls} font-mono`} placeholder="paste the generated external ID"
+                    <label className={labelCls} style={{ color: "var(--text-primary)" }}>CUR S3 Path Prefix</label>
+                    <input required value={form.cur_s3_prefix} onChange={(e) => set("cur_s3_prefix", e.target.value)}
+                      className={inputCls} placeholder="e.g. rilcurmall/rilcurmall26NN"
                       style={{ color: "var(--text-primary)" }} />
                   </div>
                 </div>
-              </>
-            )}
 
-            {/* CUR S3 fields */}
-            <div className="p-4 rounded-lg space-y-3" style={{ background: "var(--success-bg)", border: "1px solid var(--success-border)" }}>
-              <p className="text-xs font-bold uppercase tracking-wide" style={{ color: "var(--success)" }}>CUR S3 Configuration</p>
-              <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                Enter the S3 bucket and path prefix where CUR reports are stored in this management account.
-              </p>
-              <div>
-                <label className={labelCls} style={{ color: "var(--text-primary)" }}>CUR S3 Bucket Name</label>
-                <input required value={form.cur_s3_bucket} onChange={(e) => set("cur_s3_bucket", e.target.value)}
-                  className={inputCls} placeholder="e.g. rilcurmall"
-                  style={{ color: "var(--text-primary)" }} />
+                <button type="submit" disabled={loading}
+                  className="w-full py-2.5 text-sm font-semibold text-white rounded-md transition disabled:opacity-50 mt-2"
+                  style={{ background: loading ? "#6b7280" : "#FF9900" }}>
+                  {loading ? "Connecting & syncing..." : "Connect AWS Control Tower"}
+                </button>
+              </form>
+            </>
+          ) : (
+            /* Azure Form */
+            <>
+              <div className="p-3 rounded-lg flex gap-2 text-sm mb-4" style={{ background: "#e8f4fd", border: "1px solid #b8daff", color: "#0078D4" }}>
+                <Info className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>Create a <strong>Service Principal</strong> with <strong>Storage Blob Data Reader</strong> + <strong>Cost Management Reader</strong> roles. Set up a daily Cost Export in Azure Cost Management.</span>
               </div>
-              <div>
-                <label className={labelCls} style={{ color: "var(--text-primary)" }}>CUR S3 Path Prefix</label>
-                <input required value={form.cur_s3_prefix} onChange={(e) => set("cur_s3_prefix", e.target.value)}
-                  className={inputCls} placeholder="e.g. rilcurmall/rilcurmall26NN"
-                  style={{ color: "var(--text-primary)" }} />
-                <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
-                  Found in S3 → bucket → folder path before the billing period folder
-                </p>
-              </div>
-            </div>
 
-            <button type="submit" disabled={loading}
-              className="w-full py-2.5 text-sm font-semibold text-white rounded-md transition disabled:opacity-50 mt-2"
-              style={{ background: loading ? "#6b7280" : "var(--primary)" }}>
-              {loading ? "Connecting & syncing..." : "Connect Control Tower"}
-            </button>
-          </form>
+              <form onSubmit={handleAzureSubmit} className="space-y-4">
+                <div>
+                  <label className={labelCls} style={{ color: "var(--text-primary)" }}>Display Name</label>
+                  <input required value={azureForm.name} onChange={(e) => setAzure("name", e.target.value)}
+                    className={inputCls} placeholder="e.g. Novac Azure"
+                    style={{ color: "var(--text-primary)" }} />
+                </div>
+
+                <div className="p-4 rounded-lg space-y-3" style={{ background: "#f8f9fa", border: "1px solid var(--border)" }}>
+                  <p className="text-xs font-bold uppercase tracking-wide" style={{ color: "#0078D4" }}>Service Principal Credentials</p>
+                  <div>
+                    <label className={labelCls} style={{ color: "var(--text-primary)" }}>Tenant ID</label>
+                    <input required value={azureForm.tenant_id} onChange={(e) => setAzure("tenant_id", e.target.value)}
+                      className={`${inputCls} font-mono`} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                      style={{ color: "var(--text-primary)" }} />
+                  </div>
+                  <div>
+                    <label className={labelCls} style={{ color: "var(--text-primary)" }}>Client ID (Application ID)</label>
+                    <input required value={azureForm.client_id} onChange={(e) => setAzure("client_id", e.target.value)}
+                      className={`${inputCls} font-mono`} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                      style={{ color: "var(--text-primary)" }} />
+                  </div>
+                  <div>
+                    <label className={labelCls} style={{ color: "var(--text-primary)" }}>Client Secret</label>
+                    <input required type="password" value={azureForm.client_secret} onChange={(e) => setAzure("client_secret", e.target.value)}
+                      className={`${inputCls} font-mono`} placeholder="••••••••••••••••••••••••••••••••"
+                      style={{ color: "var(--text-primary)" }} />
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-lg space-y-3" style={{ background: "#e8f4fd", border: "1px solid #b8daff" }}>
+                  <p className="text-xs font-bold uppercase tracking-wide" style={{ color: "#0078D4" }}>Cost Export Storage</p>
+                  <div>
+                    <label className={labelCls} style={{ color: "var(--text-primary)" }}>Storage Account Name</label>
+                    <input required value={azureForm.storage_account} onChange={(e) => setAzure("storage_account", e.target.value)}
+                      className={inputCls} placeholder="e.g. finoptixcostexports"
+                      style={{ color: "var(--text-primary)" }} />
+                  </div>
+                  <div>
+                    <label className={labelCls} style={{ color: "var(--text-primary)" }}>Container Name</label>
+                    <input required value={azureForm.container_name} onChange={(e) => setAzure("container_name", e.target.value)}
+                      className={inputCls} placeholder="e.g. cost-exports"
+                      style={{ color: "var(--text-primary)" }} />
+                  </div>
+                  <div>
+                    <label className={labelCls} style={{ color: "var(--text-primary)" }}>Export Name (Directory)</label>
+                    <input required value={azureForm.export_name} onChange={(e) => setAzure("export_name", e.target.value)}
+                      className={inputCls} placeholder="e.g. finoptix"
+                      style={{ color: "var(--text-primary)" }} />
+                    <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                      The directory name set in Azure Cost Management → Exports
+                    </p>
+                  </div>
+                </div>
+
+                <button type="submit" disabled={loading}
+                  className="w-full py-2.5 text-sm font-semibold text-white rounded-md transition disabled:opacity-50 mt-2"
+                  style={{ background: loading ? "#6b7280" : "#0078D4" }}>
+                  {loading ? "Connecting & syncing..." : "Connect Azure Tenant"}
+                </button>
+              </form>
+            </>
+          )}
         </div>
       </div>
     </div>

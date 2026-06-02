@@ -16,3 +16,6 @@ pyotp==2.9.0
 qrcode[pil]==7.4.2
 pandas==2.2.2
 redis[asyncio]==5.0.4
+azure-identity==1.17.1
+azure-storage-blob==12.20.0
+azure-mgmt-subscription==3.1.1
