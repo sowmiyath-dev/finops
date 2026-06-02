@@ -236,6 +236,13 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual"):
             _sync_progress[ct_id] = {"percent": 100, "status": "done", "message": "Completed"}
             logger.info(f"Sync done for CT {ct_id}: {total_inserted} records")
 
+            # Refresh vertical cost cache in background after sync
+            try:
+                from app.services.vertical_cache_service import refresh_vertical_cost_cache
+                await refresh_vertical_cost_cache()
+            except Exception as cache_err:
+                logger.warning(f"vertical_cache refresh failed (non-fatal): {cache_err}")
+
         except Exception as e:
             logger.error(f"Sync failed for CT {ct_id}: {e}")
             async with AsyncSessionLocal() as db:

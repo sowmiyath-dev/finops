@@ -204,6 +204,23 @@ class CustomTag(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
 
+class VerticalCostCache(Base):
+    """Pre-aggregated cost per vertical per period — refreshed after each sync.
+    Replaces expensive real-time JOIN queries on cost_records.
+    """
+    __tablename__ = "vertical_cost_cache"
+    __table_args__ = (
+        Index("ix_vcc_vertical_gran_period", "vertical_name", "granularity", "period"),
+    )
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    vertical_name = Column(String, nullable=False)   # e.g. "Non-SFL"
+    granularity = Column(String, nullable=False)     # daily | weekly | monthly
+    period = Column(String, nullable=False)          # e.g. "2024-01" or "2024-01-15"
+    total_cost = Column(Numeric(18, 4), default=0)
+    resource_count = Column(Integer, default=0)
+    refreshed_at = Column(DateTime(timezone=True), default=utcnow)
+
+
 class ResourceTagMapping(Base):
     """Maps application custom tags to resource IDs across any cloud."""
     __tablename__ = "resource_tag_mappings"

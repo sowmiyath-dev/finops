@@ -424,12 +424,13 @@ async def verticals_summary(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    from app.models.db_models import VerticalCostCache
+
+    # Try Redis cache first (5 min)
     cache_key = f"verticals:summary:{granularity}"
     cached = await _cache_get(cache_key)
     if cached is not None:
         return cached
-
-    from sqlalchemy import or_, text, case as sa_case3, literal as sa_literal3
 
     start, end = _date_range(granularity)
 
@@ -438,35 +439,58 @@ async def verticals_summary(
     if not verticals:
         return []
 
-    # 2. True cost per vertical: SP covered = amortized, Usage/DiscountedUsage/RIFee = unblended, else = 0
-    true_cost_col3 = sa_case3(
-        (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.amortized_cost),
-        (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
-        else_=sa_literal3(0),
-    )
-    tagged_cost_rows = (await db.execute(
+    # 2. Read from pre-aggregated cache table (fast — tiny table)
+    cache_rows = (await db.execute(
         select(
-            CustomTag.tag_value.label("vertical_name"),
-            func.sum(true_cost_col3).label("cost"),
-            func.count(func.distinct(ResourceTagMapping.resource_id)).label("resource_count"),
+            VerticalCostCache.vertical_name,
+            func.sum(VerticalCostCache.total_cost).label("total_cost"),
+            func.max(VerticalCostCache.resource_count).label("resource_count"),
         )
-        .join(ResourceTagMapping, ResourceTagMapping.custom_tag_id == CustomTag.id)
-        .join(CostRecord, CostRecord.resource_id == ResourceTagMapping.resource_id)
-        .where(
-            CustomTag.tag_key == "Vertical",  # exact match — uses ix_custom_tag_key_value index
-            CostRecord.date >= start,
-            CostRecord.date <= end,
-        )
-        .group_by(CustomTag.tag_value)
+        .where(VerticalCostCache.granularity == granularity)
+        .group_by(VerticalCostCache.vertical_name)
     )).all()
 
-    # Build lookup: vertical_name (lowercase) → {cost, resource_count}
     cost_by_name: dict = {}
-    for r in tagged_cost_rows:
-        cost_by_name[r.vertical_name.lower()] = {
-            "total_cost": float(r.cost or 0),
-            "resource_count": int(r.resource_count or 0),
-        }
+
+    if cache_rows:
+        # Cache hit — fast path
+        for r in cache_rows:
+            cost_by_name[r.vertical_name.lower()] = {
+                "total_cost": float(r.total_cost or 0),
+                "resource_count": int(r.resource_count or 0),
+            }
+    else:
+        # Cache miss — fall back to live query and trigger background refresh
+        import asyncio
+        from app.services.vertical_cache_service import refresh_vertical_cost_cache
+        asyncio.create_task(refresh_vertical_cost_cache())
+
+        from sqlalchemy import case as sa_case3, literal as sa_literal3
+        true_cost_col3 = sa_case3(
+            (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.amortized_cost),
+            (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
+            else_=sa_literal3(0),
+        )
+        tagged_cost_rows = (await db.execute(
+            select(
+                CustomTag.tag_value.label("vertical_name"),
+                func.sum(true_cost_col3).label("cost"),
+                func.count(func.distinct(ResourceTagMapping.resource_id)).label("resource_count"),
+            )
+            .join(ResourceTagMapping, ResourceTagMapping.custom_tag_id == CustomTag.id)
+            .join(CostRecord, CostRecord.resource_id == ResourceTagMapping.resource_id)
+            .where(
+                CustomTag.tag_key == "Vertical",
+                CostRecord.date >= start,
+                CostRecord.date <= end,
+            )
+            .group_by(CustomTag.tag_value)
+        )).all()
+        for r in tagged_cost_rows:
+            cost_by_name[r.vertical_name.lower()] = {
+                "total_cost": float(r.cost or 0),
+                "resource_count": int(r.resource_count or 0),
+            }
 
     # 3. Owner + app counts per vertical (cheap metadata query)
     owner_rows = (await db.execute(
@@ -499,7 +523,7 @@ async def verticals_summary(
             "start": str(start),
             "end": str(end),
         })
-    await _cache_set(cache_key, result, ttl=300)  # cache 5 minutes
+    await _cache_set(cache_key, result, ttl=300)
     return result
 
 
@@ -679,6 +703,12 @@ async def bulk_tag_account(
         tags_created += f", Business={business_name}"
     if payload.billing_tag:
         tags_created += f", Billing={payload.billing_tag}"
+
+    # Invalidate vertical cost cache so next summary request sees fresh data
+    import asyncio
+    from app.services.vertical_cache_service import refresh_vertical_cost_cache
+    asyncio.create_task(refresh_vertical_cost_cache())
+
     return {"tagged": added, "tags": tags_created, "account": payload.aws_account_id}
 
 
