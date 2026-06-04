@@ -6,7 +6,7 @@ import pyotp, qrcode, io, base64
 
 from app.models.database import get_db
 from app.models.db_models import User, AuditLog, LoginAttempt
-from app.models.schemas import UserCreate, UserLogin, Token, UserOut, LoginResponse, MFAValidate, MFAConfirm, AdminCreateUser
+from app.models.schemas import UserCreate, UserLogin, Token, UserOut, LoginResponse, MFAValidate, MFAConfirm, AdminCreateUser, ResetPassword
 from app.services.auth_service import (
     hash_password, verify_password, create_access_token,
     create_temp_token, decode_temp_token, get_current_user,
@@ -82,9 +82,32 @@ async def login(payload: UserLogin, request: Request, db: AsyncSession = Depends
     await _log_attempt(payload.email, ip, True, db)
     await _audit(user, "login", "portal", ip, db)
     temp_token = create_temp_token(str(user.id))
+    if user.must_reset_password:
+        return {"status": "password_reset_required", "temp_token": temp_token}
     if not user.mfa_enabled:
         return {"status": "mfa_setup", "temp_token": temp_token}
     return {"status": "mfa_required", "temp_token": temp_token}
+
+
+@router.post("/reset-password")
+async def reset_password(payload: ResetPassword, db: AsyncSession = Depends(get_db)):
+    user_id = decode_temp_token(payload.temp_token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+    if len(payload.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.hashed_password = hash_password(payload.new_password)
+    user.must_reset_password = False
+    await db.commit()
+    # After reset, proceed to MFA setup/validate
+    new_temp_token = create_temp_token(str(user.id))
+    if not user.mfa_enabled:
+        return {"status": "mfa_setup", "temp_token": new_temp_token}
+    return {"status": "mfa_required", "temp_token": new_temp_token}
 
 
 @router.get("/mfa/qr")

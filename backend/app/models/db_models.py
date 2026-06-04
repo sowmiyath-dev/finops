@@ -19,6 +19,7 @@ class User(Base):
     mfa_enabled = Column(Boolean, default=False)
     role = Column(String, default="viewer")
     is_approved = Column(Boolean, default=False)
+    must_reset_password = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
 class ControlTower(Base):

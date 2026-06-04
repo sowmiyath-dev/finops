@@ -9,13 +9,15 @@ import { DollarSign, TrendingDown } from "lucide-react";
 function AuthForm() {
   const params = useSearchParams();
   const [mode, setMode] = useState<"login" | "signup">(params.get("mode") === "signup" ? "signup" : "login");
-  const [step, setStep] = useState<"credentials" | "mfa_setup" | "mfa_validate" | "pending">("credentials");
+  const [step, setStep] = useState<"credentials" | "mfa_setup" | "mfa_validate" | "pending" | "reset_password">("credentials");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [code, setCode] = useState("");
   const [tempToken, setTempToken] = useState("");
   const [qrBase64, setQrBase64] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const { setAuth, token } = useAuthStore();
   const router = useRouter();
@@ -34,7 +36,9 @@ function AuthForm() {
       }
       const { data } = await api.post("/auth/login", { email, password });
       setTempToken(data.temp_token);
-      if (data.status === "mfa_setup") {
+      if (data.status === "password_reset_required") {
+        setStep("reset_password");
+      } else if (data.status === "mfa_setup") {
         const qr = await api.get(`/auth/mfa/qr?temp_token=${data.temp_token}`);
         setQrBase64(qr.data.qr_base64);
         setStep("mfa_setup");
@@ -46,6 +50,26 @@ function AuthForm() {
       if (detail === "pending_approval") { setStep("pending"); }
       else toast.error(detail || "Invalid credentials");
     } finally { setLoading(false); }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPassword !== confirmPassword) { toast.error("Passwords do not match"); return; }
+    if (newPassword.length < 8) { toast.error("Password must be at least 8 characters"); return; }
+    setLoading(true);
+    try {
+      const { data } = await api.post("/auth/reset-password", { temp_token: tempToken, new_password: newPassword });
+      setTempToken(data.temp_token);
+      toast.success("Password updated!");
+      if (data.status === "mfa_setup") {
+        const qr = await api.get(`/auth/mfa/qr?temp_token=${data.temp_token}`);
+        setQrBase64(qr.data.qr_base64);
+        setStep("mfa_setup");
+      } else {
+        setStep("mfa_validate");
+      }
+    } catch (err: any) { toast.error(err.response?.data?.detail || "Failed to reset password"); }
+    finally { setLoading(false); }
   };
 
   const handleMFASetup = async (e: React.FormEvent) => {
@@ -171,6 +195,37 @@ function AuthForm() {
                   </button>
                 </form>
               </>
+            )}
+
+            {step === "reset_password" && (
+              <form onSubmit={handleResetPassword} className="space-y-5">
+                <div>
+                  <h2 className="text-xl font-bold mb-1" style={{ color: "var(--text-primary)" }}>Set a new password</h2>
+                  <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                    Your account was created with a temporary password. Please set a new password to continue.
+                  </p>
+                </div>
+                <div className="p-3 rounded-lg text-sm" style={{ background: "#fff8e1", border: "1px solid #ffe082", color: "#b45309" }}>
+                  ⚠️ This is a temporary password. You must reset it before continuing.
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text-primary)" }}>New Password</label>
+                  <input type="password" required value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className={inputCls} placeholder="Min. 8 characters" autoFocus />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text-primary)" }}>Confirm Password</label>
+                  <input type="password" required value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className={inputCls} placeholder="Re-enter new password" />
+                </div>
+                <button type="submit" disabled={loading || newPassword.length < 8}
+                  className="w-full py-2.5 text-sm font-semibold text-white rounded-md transition disabled:opacity-50"
+                  style={{ background: "var(--primary)" }}>
+                  {loading ? "Saving..." : "Set Password & Continue"}
+                </button>
+              </form>
             )}
 
             {step === "mfa_setup" && (

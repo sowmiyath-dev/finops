@@ -33,6 +33,7 @@ class UserOut(BaseModel):
     mfa_enabled: bool
     role: str
     is_approved: bool
+    must_reset_password: bool = False
     class Config:
         from_attributes = True
 
@@ -48,6 +49,10 @@ class MFAValidate(BaseModel):
 
 class MFAConfirm(BaseModel):
     code: str
+
+class ResetPassword(BaseModel):
+    temp_token: str
+    new_password: str
 
 class AdminCreateUser(BaseModel):
     email: EmailStr

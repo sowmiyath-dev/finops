@@ -34,6 +34,7 @@ async def create_user(payload: AdminCreateUser, db: AsyncSession = Depends(get_d
         full_name=payload.full_name,
         role=payload.role,
         is_approved=True,
+        must_reset_password=True,
     )
     db.add(new_user)
     await db.commit()

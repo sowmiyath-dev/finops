@@ -140,7 +140,10 @@ export default function SettingsUsersPage() {
                 </td>
                 <td className="px-5 py-3">
                   {u.is_approved
-                    ? <span className="text-xs font-bold px-2 py-1 rounded bg-green-100 text-green-900 border border-green-300">Approved</span>
+                    ? <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold px-2 py-1 rounded bg-green-100 text-green-900 border border-green-300">Approved</span>
+                        {u.must_reset_password && <span className="text-xs font-bold px-2 py-1 rounded bg-yellow-100 text-yellow-800 border border-yellow-300">Temp Password</span>}
+                      </div>
                     : <span className="text-xs font-bold px-2 py-1 rounded bg-yellow-100 text-yellow-900 border border-yellow-300">Pending</span>}
                 </td>
                 <td className="px-5 py-3">
