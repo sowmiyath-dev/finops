@@ -1,7 +1,8 @@
 import uuid, asyncio, logging
 from datetime import datetime, timezone, date, timedelta
 from concurrent.futures import ThreadPoolExecutor
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func
 
@@ -48,7 +49,7 @@ async def _upsert_sub_accounts(db: AsyncSession, ct_id: str, accounts: list[dict
     await db.commit()
 
 
-async def _do_sync(ct_id: str, triggered_by: str = "manual"):
+async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Optional[str] = None, force_end: Optional[str] = None):
     async with _sync_semaphore:
         _sync_progress[ct_id] = {"percent": 0, "status": "running", "message": "Initializing"}
         sync_log_id = None
@@ -105,7 +106,10 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual"):
                 )
                 existing_count = count_result.scalar() or 0
 
-            if existing_count == 0:
+            if force_start and force_end:
+                start_date, end_date = force_start, force_end
+                logger.info(f"Forced date range for CT {ct_id}: {start_date} → {end_date}")
+            elif existing_count == 0:
                 start_date, end_date = get_full_year_date_range()
                 logger.info(f"First sync for CT {ct_id} — full year: {start_date} → {end_date}")
             else:
@@ -658,14 +662,21 @@ async def list_towers(db: AsyncSession = Depends(get_db), user: User = Depends(g
 # ── dynamic /{ct_id} routes AFTER all static routes ──────────────────────────
 
 @router.post("/{ct_id}/sync")
-async def sync_tower(ct_id: str, bg: BackgroundTasks, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def sync_tower(
+    ct_id: str,
+    bg: BackgroundTasks,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     if user.role == "viewer":
         raise HTTPException(status_code=403, detail="Viewers cannot sync")
     result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Control Tower not found")
-    bg.add_task(_do_sync, ct_id, "manual")
-    return {"message": "Sync started"}
+    bg.add_task(_do_sync, ct_id, "manual", start_date, end_date)
+    return {"message": "Sync started", "start_date": start_date, "end_date": end_date}
 
 
 @router.get("/{ct_id}/sync-status")
