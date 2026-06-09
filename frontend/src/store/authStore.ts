@@ -10,30 +10,52 @@ interface AuthState {
   fetchMe: () => Promise<void>;
 }
 
+function isTokenExpired(token: string): boolean {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return payload.exp * 1000 < Date.now();
+  } catch { return true; }
+}
+
+function getSavedToken(): string | null {
+  if (typeof window === "undefined") return null;
+  const token = localStorage.getItem("token");
+  if (!token || isTokenExpired(token)) {
+    localStorage.removeItem("token");
+    return null;
+  }
+  return token;
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
-  token: typeof window !== "undefined" ? sessionStorage.getItem("token") : null,
+  token: getSavedToken(),
 
   setAuth: async (token) => {
-    sessionStorage.setItem("token", token);
+    localStorage.setItem("token", token);
     set({ token });
     const me = await api.get("/auth/me");
     set({ user: me.data });
   },
 
   logout: () => {
-    sessionStorage.removeItem("token");
-    sessionStorage.removeItem("finoptix_verticals"); // clear vertical cache on logout
+    localStorage.removeItem("token");
     set({ user: null, token: null });
   },
 
   fetchMe: async () => {
     if (get().user) return;
+    const token = get().token;
+    if (!token || isTokenExpired(token)) {
+      localStorage.removeItem("token");
+      set({ user: null, token: null });
+      return;
+    }
     try {
       const { data } = await api.get("/auth/me");
       set({ user: data });
     } catch {
-      sessionStorage.removeItem("token");
+      localStorage.removeItem("token");
       set({ user: null, token: null });
     }
   },
