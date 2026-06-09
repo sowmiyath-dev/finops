@@ -97,6 +97,7 @@ export default function BusinessDetailPage() {
   const [showAddOwner, setShowAddOwner] = useState(false);
   const [ownerName, setOwnerName] = useState("");
   const [saving, setSaving] = useState(false);
+  const [savingCostType, setSavingCostType] = useState(false);
 
   // Billing tag modal
   const [tagModal, setTagModal] = useState<{ accountId: string; accountName: string } | null>(null);
@@ -154,6 +155,18 @@ export default function BusinessDetailPage() {
       setOwnerName("");
       await load();
     } finally { setSaving(false); }
+  };
+
+  const toggleCostType = async () => {
+    const newType = business?.cost_type === "account" ? "resource" : "account";
+    setSavingCostType(true);
+    try {
+      await axios.patch(`${BASE}/api/verticals/businesses/${bizId}`,
+        { name: business?.name, cost_type: newType },
+        { headers }
+      );
+      await load();
+    } finally { setSavingCostType(false); }
   };
 
   // Open billing tag modal for an account
@@ -227,6 +240,17 @@ export default function BusinessDetailPage() {
               <button onClick={() => { setOwnerName(business?.owner_name || ""); setShowAddOwner(true); }}
                 className="text-xs font-bold text-blue-900 hover:underline flex items-center gap-1">
                 <Users className="w-3 h-3" />{business?.owner_name ? "Edit" : "Add Owner"}
+              </button>
+              <button
+                onClick={toggleCostType}
+                disabled={savingCostType}
+                title={business?.cost_type === "account" ? "Switch to resource-level cost" : "Switch to account-level cost"}
+                className={`text-xs font-bold px-2 py-0.5 rounded border transition ${
+                  business?.cost_type === "account"
+                    ? "bg-green-100 text-green-800 border-green-300 hover:bg-green-200"
+                    : "bg-blue-100 text-blue-800 border-blue-300 hover:bg-blue-200"
+                }`}>
+                {savingCostType ? "..." : business?.cost_type === "account" ? "Account-level ⇄" : "Resource-level ⇄"}
               </button>
             </div>
           </div>

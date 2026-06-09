@@ -154,8 +154,9 @@ class Business(Base):
     name = Column(String, nullable=False)
     description = Column(String, nullable=True)
     color = Column(String, default="#0f2d5e")
-    owner_name = Column(String, nullable=True)  # business owner
+    owner_name = Column(String, nullable=True)
     owner_email = Column(String, nullable=True)
+    cost_type = Column(String, default="resource")  # resource | account
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
 

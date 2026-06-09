@@ -81,6 +81,7 @@ class BusinessCreate(BaseModel):
     color: str = "#0f2d5e"
     owner_name: Optional[str] = None
     owner_email: Optional[str] = None
+    cost_type: Optional[str] = "resource"  # resource | account
 
 
 class AppCreate(BaseModel):
@@ -858,6 +859,7 @@ async def get_business(
         raise HTTPException(404)
     return {"id": str(b.id), "name": b.name, "description": b.description,
             "color": b.color, "owner_name": b.owner_name, "owner_email": b.owner_email,
+            "cost_type": b.cost_type or "resource",
             "vertical_id": str(b.vertical_id)}
 
 
@@ -881,9 +883,11 @@ async def update_business(
         b.owner_email = payload.owner_email
     if payload.color:
         b.color = payload.color
+    if payload.cost_type is not None:
+        b.cost_type = payload.cost_type
     await db.commit()
     await db.refresh(b)
-    return {"id": str(b.id), "name": b.name, "owner_name": b.owner_name, "owner_email": b.owner_email}
+    return {"id": str(b.id), "name": b.name, "owner_name": b.owner_name, "owner_email": b.owner_email, "cost_type": b.cost_type}
 
 
 @router.delete("/businesses/{business_id}", status_code=204)
@@ -957,7 +961,8 @@ async def list_businesses(
     )).scalars().all()
     return [
         {"id": str(b.id), "name": b.name, "description": b.description,
-         "color": b.color, "owner_name": b.owner_name, "owner_email": b.owner_email}
+         "color": b.color, "owner_name": b.owner_name, "owner_email": b.owner_email,
+         "cost_type": b.cost_type or "resource"}
         for b in rows
     ]
 
@@ -982,6 +987,9 @@ async def business_cost(
     if not biz:
         raise HTTPException(404)
 
+    cost_type = biz.cost_type or "resource"
+
+    # Get tagged resource IDs and account IDs
     resource_ids = list(set((await db.execute(
         select(ResourceTagMapping.resource_id)
         .join(CustomTag, ResourceTagMapping.custom_tag_id == CustomTag.id)
@@ -1001,19 +1009,36 @@ async def business_cost(
         )
     )).scalars().all()))
 
-    trend = await _cost_for_resources_and_accounts(db, resource_ids, account_ids, start, end, granularity)
-    total = sum(p["cost"] for p in trend)
+    from sqlalchemy import case as sa_case5, literal as sa_literal5
+    true_cost_col5 = sa_case5(
+        (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.amortized_cost),
+        (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
+        else_=sa_literal5(0),
+    )
 
-    # Per-account cost breakdown using true cost
-    per_account = []
-    if resource_ids and account_ids:
-        from sqlalchemy import case as sa_case5, literal as sa_literal5
-        true_cost_col5 = sa_case5(
-            (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.amortized_cost),
-            (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
-            else_=sa_literal5(0),
-        )
-        acc_stmt = (
+    if cost_type == "account" and account_ids:
+        # Account-level: sum all cost records for tagged accounts (matches CT dashboard)
+        if granularity == "monthly":
+            period_expr = func.to_char(CostRecord.date, "YYYY-MM").label("period")
+        elif granularity == "weekly":
+            period_expr = func.to_char(func.date_trunc("week", CostRecord.date), "YYYY-MM-DD").label("period")
+        else:
+            period_expr = func.cast(CostRecord.date, CostRecord.date.type).label("period")
+
+        trend_rows = (await db.execute(
+            select(period_expr, func.sum(true_cost_col5).label("cost"))
+            .where(
+                CostRecord.date >= start,
+                CostRecord.date <= end,
+                CostRecord.aws_account_id.in_(account_ids),
+            )
+            .group_by("period").order_by("period")
+        )).all()
+        trend = [{"period": str(r.period), "cost": float(r.cost or 0)} for r in trend_rows]
+        total = sum(p["cost"] for p in trend)
+
+        # Per-account breakdown
+        acc_rows = (await db.execute(
             select(
                 CostRecord.aws_account_id,
                 CostRecord.account_name,
@@ -1022,13 +1047,11 @@ async def business_cost(
             .where(
                 CostRecord.date >= start,
                 CostRecord.date <= end,
-                CostRecord.resource_id.in_(resource_ids),
                 CostRecord.aws_account_id.in_(account_ids),
             )
             .group_by(CostRecord.aws_account_id, CostRecord.account_name)
             .order_by(func.sum(true_cost_col5).desc())
-        )
-        acc_rows = (await db.execute(acc_stmt)).all()
+        )).all()
         per_account = [
             {
                 "aws_account_id": r.aws_account_id,
@@ -1037,10 +1060,40 @@ async def business_cost(
             }
             for r in acc_rows
         ]
+    else:
+        # Resource-level: sum cost for tagged resource IDs scoped to tagged accounts
+        trend = await _cost_for_resources_and_accounts(db, resource_ids, account_ids, start, end, granularity)
+        total = sum(p["cost"] for p in trend)
+        per_account = []
+        if resource_ids and account_ids:
+            acc_rows = (await db.execute(
+                select(
+                    CostRecord.aws_account_id,
+                    CostRecord.account_name,
+                    func.sum(true_cost_col5).label("cost"),
+                )
+                .where(
+                    CostRecord.date >= start,
+                    CostRecord.date <= end,
+                    CostRecord.resource_id.in_(resource_ids),
+                    CostRecord.aws_account_id.in_(account_ids),
+                )
+                .group_by(CostRecord.aws_account_id, CostRecord.account_name)
+                .order_by(func.sum(true_cost_col5).desc())
+            )).all()
+            per_account = [
+                {
+                    "aws_account_id": r.aws_account_id,
+                    "account_name": r.account_name or r.aws_account_id,
+                    "cost": float(r.cost or 0),
+                }
+                for r in acc_rows
+            ]
 
     return {
         "business_id": business_id,
         "business_name": biz.name,
+        "cost_type": cost_type,
         "granularity": granularity,
         "start": str(start),
         "end": str(end),
