@@ -6,7 +6,78 @@ import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
 import Link from "next/link";
-import { Plus, RefreshCw, Trash2, ChevronRight, Clock, Building2, Users, AlertCircle, FileText, BarChart2 } from "lucide-react";
+import { Plus, RefreshCw, Trash2, ChevronRight, Clock, Building2, Users, AlertCircle, FileText, Calendar, X } from "lucide-react";
+
+function fmtDate(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+const SYNC_PRESETS = [
+  { label: "Last Month", fn: () => { const n=new Date(); return { start: fmtDate(new Date(n.getFullYear(),n.getMonth()-1,1)), end: fmtDate(new Date(n.getFullYear(),n.getMonth(),0)) }; }},
+  { label: "This Month", fn: () => { const n=new Date(); return { start: fmtDate(new Date(n.getFullYear(),n.getMonth(),1)), end: fmtDate(n) }; }},
+  { label: "Last 7d",    fn: () => { const n=new Date(); const s=new Date(n); s.setDate(s.getDate()-6); return { start: fmtDate(s), end: fmtDate(n) }; }},
+  { label: "Last 30d",   fn: () => { const n=new Date(); const s=new Date(n); s.setDate(s.getDate()-29); return { start: fmtDate(s), end: fmtDate(n) }; }},
+];
+
+function SyncModal({ ct, onClose, onSync }: { ct: any; onClose: () => void; onSync: (id: string, start: string, end: string) => void }) {
+  const lm = SYNC_PRESETS[0].fn();
+  const [start, setStart] = useState(lm.start);
+  const [end, setEnd] = useState(lm.end);
+  const [activePreset, setActivePreset] = useState("Last Month");
+  const [syncing, setSyncing] = useState(false);
+
+  const applyPreset = (p: typeof SYNC_PRESETS[0]) => {
+    const r = p.fn(); setStart(r.start); setEnd(r.end); setActivePreset(p.label);
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    await onSync(ct.id, start, end);
+    setSyncing(false);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg border border-gray-300 shadow-lg w-full max-w-sm p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-bold text-black">Manual Sync — {ct.name}</h3>
+          <button onClick={onClose}><X className="w-4 h-4 text-black" /></button>
+        </div>
+        <p className="text-xs text-gray-500 mb-3">Select the date range to sync cost data for</p>
+        {/* Presets */}
+        <div className="grid grid-cols-2 gap-2 mb-3">
+          {SYNC_PRESETS.map((p) => (
+            <button key={p.label} onClick={() => applyPreset(p)}
+              className={`px-3 py-2 text-xs font-bold rounded-md border transition ${
+                activePreset === p.label ? "bg-blue-900 text-white border-blue-900" : "bg-white text-black border-gray-300 hover:border-blue-900"
+              }`}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+        {/* Custom range */}
+        <div className="flex items-center gap-2 mb-4">
+          <input type="date" value={start} onChange={(e) => { setStart(e.target.value); setActivePreset(""); }}
+            className="flex-1 border border-gray-300 rounded-md px-2 py-1.5 text-xs text-black focus:border-blue-900 outline-none" />
+          <span className="text-xs text-gray-400">to</span>
+          <input type="date" value={end} onChange={(e) => { setEnd(e.target.value); setActivePreset(""); }}
+            className="flex-1 border border-gray-300 rounded-md px-2 py-1.5 text-xs text-black focus:border-blue-900 outline-none" />
+        </div>
+        <div className="text-xs text-gray-500 mb-4">Will sync: <span className="font-bold text-black">{start} → {end}</span></div>
+        <div className="flex gap-3">
+          <button onClick={onClose}
+            className="flex-1 py-2 border border-gray-300 rounded-md text-xs font-bold text-black hover:bg-gray-50 transition">
+            Cancel
+          </button>
+          <button onClick={handleSync} disabled={syncing || !start || !end}
+            className="flex-1 py-2 bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold rounded-md transition disabled:opacity-50">
+            {syncing ? "Starting..." : "Start Sync"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function SyncProgressBar({ ctId }: { ctId: string }) {
   const [progress, setProgress] = useState<{ percent: number; status: string; message: string } | null>(null);
@@ -67,9 +138,18 @@ export default function DashboardPage() {
     staleTime: 60 * 60 * 1000, // fresh for 1 hour
   });
 
+  const [syncModalCt, setSyncModalCt] = useState<any>(null);
+
+  const handleSync = async (id: string, start?: string, end?: string) => {
+    const params = start && end ? `?start_date=${start}&end_date=${end}` : "";
+    await api.post(`/towers/${id}/sync${params}`);
+    toast.success("Sync started");
+    qc.invalidateQueries({ queryKey: ["towers"] });
+  };
+
   const syncMutation = useMutation({
-    mutationFn: (id: string) => api.post(`/towers/${id}/sync`),
-    onSuccess: () => { toast.success("Sync started"); qc.invalidateQueries({ queryKey: ["towers"] }); },
+    mutationFn: (id: string) => handleSync(id),
+    onSuccess: () => {},
   });
 
   const deleteMutation = useMutation({
@@ -204,7 +284,7 @@ export default function DashboardPage() {
               <div className="col-span-1 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                 {(user?.role === "owner" || user?.role === "editor") && (
                   <>
-                    <button onClick={() => syncMutation.mutate(ct.id)}
+                    <button onClick={() => setSyncModalCt(ct)}
                       className="p-1.5 rounded hover:bg-blue-100 text-black hover:text-blue-900 transition" title="Sync">
                       <RefreshCw className="w-3.5 h-3.5" />
                     </button>
@@ -223,6 +303,15 @@ export default function DashboardPage() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Sync Modal */}
+      {syncModalCt && (
+        <SyncModal
+          ct={syncModalCt}
+          onClose={() => setSyncModalCt(null)}
+          onSync={handleSync}
+        />
       )}
     </div>
   );
