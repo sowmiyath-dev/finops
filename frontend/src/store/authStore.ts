@@ -28,12 +28,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   fetchMe: async () => {
-    // Skip if user already loaded — avoids repeated /auth/me on every page navigation
     if (get().user) return;
     try {
       const { data } = await api.get("/auth/me");
       set({ user: data });
     } catch {
+      sessionStorage.removeItem("token");
       set({ user: null, token: null });
     }
   },

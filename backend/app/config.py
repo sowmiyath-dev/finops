@@ -5,7 +5,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     FERNET_KEY: str
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 480  # 8 hours
     ADMIN_EMAIL: str = "admin@company.com"
     PORTAL_ACCOUNT_ID: str = ""
 
