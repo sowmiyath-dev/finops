@@ -6,14 +6,14 @@ from app.models.db_models import Base
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,
-    pool_size=20,          # increased from 5 — handles concurrent API requests
-    max_overflow=20,       # increased from 10
-    pool_pre_ping=True,
-    pool_recycle=300,
-    pool_timeout=30,
+    pool_size=20,
+    max_overflow=20,
+    pool_pre_ping=True,    # tests connection before use — auto-recovers stale connections
+    pool_recycle=1800,     # recycle connections every 30 min
+    pool_timeout=60,       # wait up to 60s for a connection
     connect_args={
         "server_settings": {"timezone": "UTC"},
-        "command_timeout": 120,  # 120s query timeout
+        "command_timeout": 120,
     },
 )
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

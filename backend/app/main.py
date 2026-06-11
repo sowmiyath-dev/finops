@@ -35,8 +35,20 @@ app.include_router(verticals.router, prefix="/api")
 
 @app.on_event("startup")
 async def startup():
-    await init_db()
-    logger.info("Finoptix API started — scheduler runs in worker container")
+    import asyncio
+    max_retries = 10
+    for attempt in range(1, max_retries + 1):
+        try:
+            await init_db()
+            logger.info("Finoptix API started — DB connected")
+            return
+        except Exception as e:
+            logger.warning(f"DB connection attempt {attempt}/{max_retries} failed: {e}")
+            if attempt < max_retries:
+                await asyncio.sleep(10)
+            else:
+                logger.error("Could not connect to DB after all retries")
+                raise
 
 
 @app.get("/health")
