@@ -19,12 +19,12 @@ async def _daily_sync_scheduler():
     logger.info("Worker: Daily sync scheduler started")
     while True:
         now = datetime.now(timezone.utc)
-        target_hour, target_minute = 5, 0
+        target_hour, target_minute = 6, 0
         next_run = now.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
         if now >= next_run:
             next_run = next_run + timedelta(days=1)
         wait_seconds = (next_run - now).total_seconds()
-        logger.info(f"Worker: Next daily sync in {wait_seconds:.0f}s at {next_run.isoformat()} UTC (10:30 AM IST)")
+        logger.info(f"Worker: Next daily sync in {wait_seconds:.0f}s at {next_run.isoformat()} UTC (11:30 AM IST)")
         await asyncio.sleep(wait_seconds)
 
         try:
