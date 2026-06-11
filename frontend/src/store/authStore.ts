@@ -51,12 +51,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ user: null, token: null });
       return;
     }
-    try {
-      const { data } = await api.get("/auth/me");
-      set({ user: data });
-    } catch {
-      localStorage.removeItem("token");
-      set({ user: null, token: null });
+    // Retry up to 3 times with 2s delay — handles backend still starting up
+    for (let i = 0; i < 3; i++) {
+      try {
+        const { data } = await api.get("/auth/me");
+        set({ user: data });
+        return;
+      } catch (err: any) {
+        // Only clear token on 401 (invalid token), not on network errors
+        if (err?.response?.status === 401) {
+          localStorage.removeItem("token");
+          set({ user: null, token: null });
+          return;
+        }
+        // Network error or 500 — wait and retry
+        if (i < 2) await new Promise((r) => setTimeout(r, 2000));
+      }
     }
   },
 }));
