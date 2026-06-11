@@ -1061,11 +1061,12 @@ async def business_cost(
             for r in acc_rows
         ]
     else:
-        # Resource-level: sum cost for tagged resource IDs scoped to tagged accounts
+        # Resource-level: tagged resource_ids + null-resource rows for tagged accounts
         trend = await _cost_for_resources_and_accounts(db, resource_ids, account_ids, start, end, granularity)
         total = sum(p["cost"] for p in trend)
         per_account = []
-        if resource_ids and account_ids:
+        if account_ids:
+            from sqlalchemy import or_
             acc_rows = (await db.execute(
                 select(
                     CostRecord.aws_account_id,
@@ -1075,8 +1076,11 @@ async def business_cost(
                 .where(
                     CostRecord.date >= start,
                     CostRecord.date <= end,
-                    CostRecord.resource_id.in_(resource_ids),
                     CostRecord.aws_account_id.in_(account_ids),
+                    or_(
+                        CostRecord.resource_id.in_(resource_ids) if resource_ids else False,
+                        CostRecord.resource_id.is_(None),
+                    )
                 )
                 .group_by(CostRecord.aws_account_id, CostRecord.account_name)
                 .order_by(func.sum(true_cost_col5).desc())
