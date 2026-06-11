@@ -32,9 +32,7 @@ function getLastMonth() {
   };
 }
 function fmt(n: number) {
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000)     return `$${(n / 1_000).toFixed(1)}K`;
-  return `$${n.toFixed(2)}`;
+  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 const CustomTooltip = ({ active, payload, label }: any) => {
