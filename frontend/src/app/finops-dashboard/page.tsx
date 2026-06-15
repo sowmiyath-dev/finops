@@ -1,10 +1,8 @@
 "use client";
 import { useEffect, useState, useRef } from "react";
-import axios from "axios";
+import api from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import { RefreshCw, ChevronDown, ChevronRight, Calendar, Download } from "lucide-react";
-
-const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api").replace(/\/api$/, "");
 
 function fmtDate(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -31,7 +29,6 @@ interface CostRow { aws: number; azure: number; total: number; }
 
 export default function FinOpsDashboard() {
   const { token } = useAuthStore();
-  const headers = { Authorization: `Bearer ${token}` };
   const dropRef = useRef<HTMLDivElement>(null);
 
   const months = getMonthOptions();
@@ -54,19 +51,18 @@ export default function FinOpsDashboard() {
     setLoading(true);
     setCosts({});
     try {
-      const vertsRes = await axios.get(`${BASE}/api/verticals/`, { headers });
+      const vertsRes = await api.get(`/verticals/`);
       const vertList = vertsRes.data as { id: string; name: string; color: string }[];
 
       // Load businesses + costs in parallel — only 3 API calls total
       const [bizResults, costRes] = await Promise.all([
         Promise.all(
           vertList.map((v) =>
-            axios.get(`${BASE}/api/verticals/${v.id}/businesses`, { headers })
+            api.get(`/verticals/${v.id}/businesses`)
               .then((r) => ({ verticalId: v.id, businesses: r.data as Business[] }))
           )
         ),
-        axios.get(`${BASE}/api/verticals/all-businesses-cost`, {
-          headers,
+        api.get(`/verticals/all-businesses-cost`, {
           params: { granularity: "monthly", start_date: start, end_date: end },
         }).then((r) => r.data as Record<string, number>).catch(() => ({} as Record<string, number>)),
       ]);
