@@ -568,30 +568,49 @@ async def businesses_cost_bulk(
 
     result: dict[str, float] = {str(b.id): 0.0 for b in businesses}
 
-    # ── Account-level businesses: sum by tagged account_ids ───────────────
-    for biz in account_level_biz:
-        account_ids = list(set((await db.execute(
-            select(ResourceTagMapping.aws_account_id)
+    # Account-level: single batch query — 2 queries total regardless of business count
+    if account_level_biz:
+        biz_names_acct = [b.name.lower() for b in account_level_biz]
+        acct_tag_rows = (await db.execute(
+            select(
+                ResourceTagMapping.aws_account_id,
+                CustomTag.tag_value.label("biz_name"),
+            )
             .join(CustomTag, ResourceTagMapping.custom_tag_id == CustomTag.id)
             .where(
                 func.lower(CustomTag.tag_key) == "business",
-                func.lower(CustomTag.tag_value) == biz.name.lower(),
+                func.lower(CustomTag.tag_value).in_(biz_names_acct),
                 ResourceTagMapping.aws_account_id.isnot(None),
             )
-        )).scalars().all()))
-        if not account_ids:
-            continue
-        cost_row = (await db.execute(
-            select(func.sum(true_cost_b).label("cost"))
-            .where(
-                CostRecord.date >= start,
-                CostRecord.date <= end,
-                CostRecord.aws_account_id.in_(account_ids),
-            )
-        )).scalar()
-        result[str(biz.id)] = float(cost_row or 0)
+        )).all()
 
-    # ── Resource-level businesses: join via resource_tag_mappings ─────────
+        biz_to_accounts: dict[str, list[str]] = {}
+        for row in acct_tag_rows:
+            key = row.biz_name.upper()
+            if key not in biz_to_accounts:
+                biz_to_accounts[key] = []
+            biz_to_accounts[key].append(row.aws_account_id)
+
+        all_acct_ids = list(set(aid for aids in biz_to_accounts.values() for aid in aids))
+        if all_acct_ids:
+            acct_cost_rows = (await db.execute(
+                select(
+                    CostRecord.aws_account_id,
+                    func.sum(true_cost_b).label("cost"),
+                )
+                .where(
+                    CostRecord.date >= start,
+                    CostRecord.date <= end,
+                    CostRecord.aws_account_id.in_(all_acct_ids),
+                )
+                .group_by(CostRecord.aws_account_id)
+            )).all()
+            acct_cost_map = {r.aws_account_id: float(r.cost or 0) for r in acct_cost_rows}
+            for biz in account_level_biz:
+                acct_ids = biz_to_accounts.get(biz.name.upper(), [])
+                result[str(biz.id)] = sum(acct_cost_map.get(aid, 0.0) for aid in acct_ids)
+
+    # Resource-level: single bulk query via resource_tag_mappings
     if resource_level_biz:
         biz_names = [b.name for b in resource_level_biz]
         rows = (await db.execute(
