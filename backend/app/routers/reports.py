@@ -16,7 +16,7 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 
 # Simple in-memory cache for metadata — these rarely change
 _cache: dict = {}
-_CACHE_TTL = 600  # 10 minutes
+_CACHE_TTL = 1800  # 30 minutes
 
 def _cache_get(key: str):
     e = _cache.get(key)
@@ -329,45 +329,49 @@ async def summary(f: ReportFilter, db: AsyncSession = Depends(get_db), user: Use
     ct_ids = await _get_user_ct_ids(db, user)
     if not ct_ids:
         return {}
+
+    # Cache key based on filter
+    import hashlib
+    cache_key = f"summary_{hashlib.md5(str(f.dict()).encode()).hexdigest()}"
+    if (cached := _cache_get(cache_key)) is not None:
+        return cached
+
     metric_col = METRIC_MAP.get(f.metric, CostRecord.unblended_cost)
     conditions = _build_filters(f, ct_ids)
 
-    total_stmt = select(func.sum(metric_col)).where(and_(*conditions))
-    total_result = await db.execute(total_stmt)
-    total_cost = float(total_result.scalar() or 0)
-
-    # top 5 services
-    svc_stmt = (
+    # Run all 4 queries in parallel
+    import asyncio
+    total_task = db.execute(select(func.sum(metric_col)).where(and_(*conditions)))
+    svc_task = db.execute(
         select(CostRecord.service, func.sum(metric_col).label("cost"))
         .where(and_(*conditions))
         .group_by(CostRecord.service)
         .order_by(func.sum(metric_col).desc())
         .limit(5)
     )
-    svc_result = await db.execute(svc_stmt)
-    top_services = [{"service": r.service, "cost": float(r.cost or 0)} for r in svc_result.all()]
-
-    # daily trend
-    trend_stmt = (
+    trend_task = db.execute(
         select(CostRecord.date, func.sum(metric_col).label("cost"))
         .where(and_(*conditions))
         .group_by(CostRecord.date)
         .order_by(CostRecord.date)
     )
-    trend_result = await db.execute(trend_stmt)
-    daily_trend = [{"date": str(r.date), "cost": float(r.cost or 0)} for r in trend_result.all()]
-
-    # per account
-    acc_stmt = (
+    acc_task = db.execute(
         select(CostRecord.aws_account_id, CostRecord.account_name, func.sum(metric_col).label("cost"))
         .where(and_(*conditions))
         .group_by(CostRecord.aws_account_id, CostRecord.account_name)
         .order_by(func.sum(metric_col).desc())
     )
-    acc_result = await db.execute(acc_stmt)
+
+    total_result, svc_result, trend_result, acc_result = await asyncio.gather(
+        total_task, svc_task, trend_task, acc_task
+    )
+
+    total_cost = float(total_result.scalar() or 0)
+    top_services = [{"service": r.service, "cost": float(r.cost or 0)} for r in svc_result.all()]
+    daily_trend = [{"date": str(r.date), "cost": float(r.cost or 0)} for r in trend_result.all()]
     per_account = [{"aws_account_id": r.aws_account_id, "account_name": r.account_name, "cost": float(r.cost or 0)} for r in acc_result.all()]
 
-    return {
+    result = {
         "total_cost": total_cost,
         "top_services": top_services,
         "daily_trend": daily_trend,
@@ -375,6 +379,8 @@ async def summary(f: ReportFilter, db: AsyncSession = Depends(get_db), user: Use
         "metric": f.metric,
         "period": {"start": f.start_date, "end": f.end_date},
     }
+    _cache_set(cache_key, result)
+    return result
 
 
 # ── CSV Export ────────────────────────────────────────────────────────────────
