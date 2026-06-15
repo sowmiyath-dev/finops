@@ -582,6 +582,7 @@ async def businesses_cost_bulk(
                 func.lower(CustomTag.tag_value).in_(biz_names_acct),
                 ResourceTagMapping.aws_account_id.isnot(None),
             )
+            .distinct()
         )).all()
 
         biz_to_accounts: dict[str, list[str]] = {}
