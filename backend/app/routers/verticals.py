@@ -537,7 +537,7 @@ async def businesses_cost_bulk(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Return total cost for ALL businesses in a vertical in a single query."""
+    """Return total cost for ALL businesses in a vertical respecting cost_type per business."""
     cache_key = f"verticals:biz_costs:{vertical_id}:{granularity}:{start_date}:{end_date}"
     cached = await _cache_get(cache_key)
     if cached is not None:
@@ -562,26 +562,57 @@ async def businesses_cost_bulk(
         else_=sa_literal_b(0),
     )
 
-    # Single query: join Business name → CustomTag → ResourceTagMapping → CostRecord
-    biz_names = [b.name for b in businesses]
-    rows = (await db.execute(
-        select(
-            CustomTag.tag_value.label("biz_name"),
-            func.sum(true_cost_b).label("cost"),
-        )
-        .join(ResourceTagMapping, ResourceTagMapping.custom_tag_id == CustomTag.id)
-        .join(CostRecord, CostRecord.resource_id == ResourceTagMapping.resource_id)
-        .where(
-            CustomTag.tag_key == "Business",
-            CustomTag.tag_value.in_(biz_names),
-            CostRecord.date >= start,
-            CostRecord.date <= end,
-        )
-        .group_by(CustomTag.tag_value)
-    )).all()
+    # Split businesses by cost_type
+    account_level_biz = [b for b in businesses if (b.cost_type or "resource") == "account"]
+    resource_level_biz = [b for b in businesses if (b.cost_type or "resource") == "resource"]
 
-    cost_by_name = {r.biz_name: float(r.cost or 0) for r in rows}
-    result = {str(b.id): cost_by_name.get(b.name, 0.0) for b in businesses}
+    result: dict[str, float] = {str(b.id): 0.0 for b in businesses}
+
+    # ── Account-level businesses: sum by tagged account_ids ───────────────
+    for biz in account_level_biz:
+        account_ids = list(set((await db.execute(
+            select(ResourceTagMapping.aws_account_id)
+            .join(CustomTag, ResourceTagMapping.custom_tag_id == CustomTag.id)
+            .where(
+                func.lower(CustomTag.tag_key) == "business",
+                func.lower(CustomTag.tag_value) == biz.name.lower(),
+                ResourceTagMapping.aws_account_id.isnot(None),
+            )
+        )).scalars().all()))
+        if not account_ids:
+            continue
+        cost_row = (await db.execute(
+            select(func.sum(true_cost_b).label("cost"))
+            .where(
+                CostRecord.date >= start,
+                CostRecord.date <= end,
+                CostRecord.aws_account_id.in_(account_ids),
+            )
+        )).scalar()
+        result[str(biz.id)] = float(cost_row or 0)
+
+    # ── Resource-level businesses: join via resource_tag_mappings ─────────
+    if resource_level_biz:
+        biz_names = [b.name for b in resource_level_biz]
+        rows = (await db.execute(
+            select(
+                CustomTag.tag_value.label("biz_name"),
+                func.sum(true_cost_b).label("cost"),
+            )
+            .join(ResourceTagMapping, ResourceTagMapping.custom_tag_id == CustomTag.id)
+            .join(CostRecord, CostRecord.resource_id == ResourceTagMapping.resource_id)
+            .where(
+                CustomTag.tag_key == "Business",
+                CustomTag.tag_value.in_(biz_names),
+                CostRecord.date >= start,
+                CostRecord.date <= end,
+            )
+            .group_by(CustomTag.tag_value)
+        )).all()
+        cost_by_name = {r.biz_name: float(r.cost or 0) for r in rows}
+        for biz in resource_level_biz:
+            result[str(biz.id)] = cost_by_name.get(biz.name, 0.0)
+
     await _cache_set(cache_key, result, ttl=300)
     return result
 
