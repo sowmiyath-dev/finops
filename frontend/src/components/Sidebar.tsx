@@ -7,7 +7,7 @@ import axios from "axios";
 import {
   Building2, Cloud, Tag, Bell, Settings, ChevronRight, ChevronDown,
   Menu, X, Users, Mail, AlertTriangle, Zap, Globe,
-  LayoutDashboard, Layers, TrendingDown,
+  LayoutDashboard, Layers, TrendingDown, BarChart2,
 } from "lucide-react";
 
 const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api").replace(/\/api$/, "");
@@ -22,6 +22,12 @@ interface NavItem {
 }
 
 const STATIC_NAV: NavItem[] = [
+  {
+    id: "finops-dashboard",
+    label: "FinOps Dashboard",
+    icon: BarChart2,
+    href: "/finops-dashboard",
+  },
   {
     id: "org",
     label: "Organization",
