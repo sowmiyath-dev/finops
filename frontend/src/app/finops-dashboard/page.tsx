@@ -57,12 +57,19 @@ export default function FinOpsDashboard() {
       const vertsRes = await axios.get(`${BASE}/api/verticals/`, { headers });
       const vertList = vertsRes.data as { id: string; name: string; color: string }[];
 
-      const bizResults = await Promise.all(
-        vertList.map((v) =>
-          axios.get(`${BASE}/api/verticals/${v.id}/businesses`, { headers })
-            .then((r) => ({ verticalId: v.id, businesses: r.data as Business[] }))
-        )
-      );
+      // Load businesses + costs in parallel — only 3 API calls total
+      const [bizResults, costRes] = await Promise.all([
+        Promise.all(
+          vertList.map((v) =>
+            axios.get(`${BASE}/api/verticals/${v.id}/businesses`, { headers })
+              .then((r) => ({ verticalId: v.id, businesses: r.data as Business[] }))
+          )
+        ),
+        axios.get(`${BASE}/api/verticals/all-businesses-cost`, {
+          headers,
+          params: { granularity: "monthly", start_date: start, end_date: end },
+        }).then((r) => r.data as Record<string, number>).catch(() => ({} as Record<string, number>)),
+      ]);
 
       const fullVerticals: Vertical[] = vertList.map((v) => ({
         ...v,
@@ -70,21 +77,9 @@ export default function FinOpsDashboard() {
       }));
       setVerticals(fullVerticals);
 
-      const costResults = await Promise.all(
-        fullVerticals.map((v) =>
-          axios.get(`${BASE}/api/verticals/${v.id}/businesses-cost`, {
-            headers,
-            params: { granularity: "monthly", start_date: start, end_date: end },
-          }).then((r) => ({ data: r.data as Record<string, number> }))
-            .catch(() => ({ data: {} }))
-        )
-      );
-
       const costMap: Record<string, CostRow> = {};
-      for (const result of costResults) {
-        for (const [bizId, cost] of Object.entries(result.data)) {
-          costMap[bizId] = { aws: cost as number, azure: 0, total: cost as number };
-        }
+      for (const [bizId, cost] of Object.entries(costRes)) {
+        costMap[bizId] = { aws: cost as number, azure: 0, total: cost as number };
       }
       setCosts(costMap);
     } catch (e) {
