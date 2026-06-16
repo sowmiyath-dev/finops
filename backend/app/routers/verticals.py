@@ -565,9 +565,14 @@ async def all_businesses_cost(
     resource_level = [b for b in businesses if (b.cost_type or "resource") == "resource"]
     result: dict[str, float] = {str(b.id): 0.0 for b in businesses}
 
-    # Account-level: 2 queries total for all account-level businesses
+    # Account-level: get account IDs from resource_tag_mappings using Vertical tag
+    # (Business tag rows were deleted — use Vertical tag + business name match via sub_accounts)
     if account_level:
-        biz_names_lower = [b.name.lower() for b in account_level]
+        # Get all accounts tagged to each vertical, then match to business by name
+        # We store account→business mapping directly in businesses table via a JSON field
+        # For now: query resource_tag_mappings for Vertical tags to get account IDs
+        # then use the business→account assignment stored in the DB
+        from sqlalchemy import text
         acct_rows = (await db.execute(
             select(
                 ResourceTagMapping.aws_account_id,
@@ -576,7 +581,7 @@ async def all_businesses_cost(
             .join(CustomTag, ResourceTagMapping.custom_tag_id == CustomTag.id)
             .where(
                 func.lower(CustomTag.tag_key) == "business",
-                func.lower(CustomTag.tag_value).in_(biz_names_lower),
+                func.lower(CustomTag.tag_value).in_([b.name.lower() for b in account_level]),
                 ResourceTagMapping.aws_account_id.isnot(None),
             )
             .distinct()

@@ -17,10 +17,23 @@ api.interceptors.response.use(
   (r) => r,
   (err) => {
     if (err.response?.status === 401 && typeof window !== "undefined") {
-      // Only redirect to login if not already on auth page
       if (!window.location.pathname.includes("/auth")) {
-        localStorage.removeItem("token");
-        window.location.href = "/auth";
+        // Check if token is actually expired before redirecting
+        const token = localStorage.getItem("token");
+        if (token) {
+          try {
+            const payload = JSON.parse(atob(token.split(".")[1]));
+            if (payload.exp * 1000 < Date.now()) {
+              localStorage.removeItem("token");
+              window.location.href = "/auth";
+            }
+          } catch {
+            localStorage.removeItem("token");
+            window.location.href = "/auth";
+          }
+        } else {
+          window.location.href = "/auth";
+        }
       }
     }
     return Promise.reject(err);
