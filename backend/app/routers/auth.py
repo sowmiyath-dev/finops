@@ -15,7 +15,7 @@ from app.config import settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-MAX_ATTEMPTS = 5
+MAX_ATTEMPTS = 20
 LOCKOUT_MINUTES = 15
 
 
