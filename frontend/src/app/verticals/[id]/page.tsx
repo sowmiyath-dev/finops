@@ -115,6 +115,8 @@ export default function VerticalDetailPage() {
   const [loadingResources, setLoadingResources] = useState(false);
   const [tagging, setTagging] = useState(false);
   const [serviceFilter, setServiceFilter] = useState("");
+  const [accountLevelBiz, setAccountLevelBiz] = useState(""); // business for account-level tagging
+  const [accountTagging, setAccountTagging] = useState(false);
 
   const load = async (gran = granularity, start?: string, end?: string) => {
     setLoading(true);
@@ -246,6 +248,34 @@ export default function VerticalDetailPage() {
       const v = (vertsRes.data as any[]).find((x: any) => x.id === id);
       setVertical(v || null);
     }
+  };
+
+  const applyAccountLevelTag = async () => {
+    if (selectedAccounts.size === 0 || !accountLevelBiz) return;
+    setAccountTagging(true);
+    try {
+      // For account-level: insert one placeholder row per account (account_id as resource_id)
+      for (const aid of Array.from(selectedAccounts)) {
+        await axios.post(`${BASE}/api/verticals/bulk-tag-account`, {
+          vertical_id: id,
+          business_id: accountLevelBiz,
+          aws_account_id: aid,
+          resource_ids: [aid], // account_id as placeholder resource_id
+          cloud_provider: "aws",
+          account_level: true,
+        }, { headers });
+      }
+      // Also set business cost_type to account
+      await axios.patch(`${BASE}/api/verticals/businesses/${accountLevelBiz}`,
+        { name: businesses.find(b => b.id === accountLevelBiz)?.name, cost_type: "account" },
+        { headers }
+      );
+      alert(`✓ ${selectedAccounts.size} account(s) assigned to business with account-level cost tracking`);
+      setShowBulkTag(false);
+      await load();
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || "Failed");
+    } finally { setAccountTagging(false); }
   };
 
   const loadAccountResources = async (accountIds: Set<string>) => {
@@ -985,13 +1015,32 @@ export default function VerticalDetailPage() {
                   </div>
                 ))}
               </div>
-              <div className="flex justify-end mt-2">
+              <div className="flex justify-end mt-2 gap-2">
+                {/* Account-level quick assign */}
+                <div className="flex items-center gap-2 flex-1">
+                  <select
+                    value={accountLevelBiz}
+                    onChange={(e) => setAccountLevelBiz(e.target.value)}
+                    className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-xs text-black focus:border-green-700 outline-none">
+                    <option value="">— Select Business (Account-level) —</option>
+                    {businesses.map((b) => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={applyAccountLevelTag}
+                    disabled={selectedAccounts.size === 0 || !accountLevelBiz || accountTagging}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-green-700 hover:bg-green-800 text-white text-xs font-bold rounded-md transition disabled:opacity-50 whitespace-nowrap">
+                    <Tag className="w-3.5 h-3.5" />
+                    {accountTagging ? "Adding..." : "Add Entire Account"}
+                  </button>
+                </div>
                 <button
                   onClick={() => loadAccountResources(selectedAccounts)}
                   disabled={selectedAccounts.size === 0 || loadingResources}
                   className="flex items-center gap-2 px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold rounded-md transition disabled:opacity-50">
                   <RefreshCw className={`w-3.5 h-3.5 ${loadingResources ? "animate-spin" : ""}`} />
-                  Load Resources ({selectedAccounts.size} account{selectedAccounts.size !== 1 ? "s" : ""})
+                  Load Resources
                 </button>
               </div>
             </div>

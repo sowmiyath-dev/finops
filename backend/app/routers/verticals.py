@@ -103,6 +103,7 @@ class BulkTagByAccount(BaseModel):
     aws_account_id: str
     resource_ids: list[str]
     cloud_provider: str = "aws"
+    account_level: bool = False  # if True, insert account_id as placeholder resource_id
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
