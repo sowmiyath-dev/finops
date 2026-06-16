@@ -838,27 +838,47 @@ async def bulk_tag_account(
         billing_tag = await _get_or_create_tag("Billing", payload.billing_tag.strip(), "#16a085")
 
     added = 0
-    for rid in payload.resource_ids:
-        # Skip wildcard, empty or obviously invalid resource IDs
-        if not rid or rid.strip() in ("*", "-", "—", "null", "none", ""):
-            continue
-        rid = rid.strip()
+    if payload.account_level:
+        # Account-level: one row per tag using account_id as resource_id placeholder
         for tag in [t for t in [vertical_tag, business_tag, billing_tag] if t]:
             exists = (await db.execute(
                 select(ResourceTagMapping).where(
-                    ResourceTagMapping.resource_id == rid,
+                    ResourceTagMapping.resource_id == payload.aws_account_id,
                     ResourceTagMapping.custom_tag_id == tag.id,
+                    ResourceTagMapping.aws_account_id == payload.aws_account_id,
                 )
             )).scalar_one_or_none()
             if not exists:
                 db.add(ResourceTagMapping(
-                    resource_id=rid,
+                    resource_id=payload.aws_account_id,
                     cloud_provider=payload.cloud_provider,
                     aws_account_id=payload.aws_account_id,
                     custom_tag_id=tag.id,
                     created_by=user.id,
                 ))
-        added += 1
+        added = 1
+    else:
+        for rid in payload.resource_ids:
+            # Skip wildcard, empty or obviously invalid resource IDs
+            if not rid or rid.strip() in ("*", "-", "—", "null", "none", ""):
+                continue
+            rid = rid.strip()
+            for tag in [t for t in [vertical_tag, business_tag, billing_tag] if t]:
+                exists = (await db.execute(
+                    select(ResourceTagMapping).where(
+                        ResourceTagMapping.resource_id == rid,
+                        ResourceTagMapping.custom_tag_id == tag.id,
+                    )
+                )).scalar_one_or_none()
+                if not exists:
+                    db.add(ResourceTagMapping(
+                        resource_id=rid,
+                        cloud_provider=payload.cloud_provider,
+                        aws_account_id=payload.aws_account_id,
+                        custom_tag_id=tag.id,
+                        created_by=user.id,
+                    ))
+            added += 1
 
     await db.commit()
     tags_created = f"Vertical={vertical.name}"
