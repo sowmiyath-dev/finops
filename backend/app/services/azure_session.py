@@ -22,13 +22,14 @@ def get_blob_service_client(ct: ControlTower) -> BlobServiceClient:
 
 
 def test_azure_connectivity(ct: ControlTower) -> tuple[bool, str]:
-    """Test Azure connectivity by listing blobs in the container."""
+    """Test Azure connectivity by just authenticating — no blob listing."""
     try:
-        blob_client = get_blob_service_client(ct)
-        container = blob_client.get_container_client(ct.azure_container_name)
-        # Just list first blob to confirm access
-        blobs = list(container.list_blobs(name_starts_with=ct.azure_export_name, results_per_page=1))
-        return True, ct.azure_tenant_id
+        credential = get_azure_credential(ct)
+        # Just get a token to verify credentials work — fast, no network blob listing
+        token = credential.get_token("https://storage.azure.com/.default")
+        if token and token.token:
+            return True, ct.azure_tenant_id
+        return False, "Could not obtain token"
     except Exception as e:
         return False, str(e)
 
