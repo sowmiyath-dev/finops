@@ -682,6 +682,24 @@ async def sync_status(ct_id: str, user: User = Depends(get_current_user)):
     return _sync_progress.get(ct_id, {"percent": 0, "status": "idle", "message": ""})
 
 
+@router.patch("/{ct_id}/name")
+async def update_tower_name(
+    ct_id: str,
+    name: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if user.role == "viewer":
+        raise HTTPException(status_code=403)
+    result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
+    ct = result.scalar_one_or_none()
+    if not ct:
+        raise HTTPException(status_code=404)
+    ct.name = name
+    await db.commit()
+    return {"id": ct_id, "name": name}
+
+
 @router.patch("/{ct_id}/auto-sync")
 async def toggle_auto_sync(ct_id: str, enabled: bool, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     if user.role == "viewer":
