@@ -367,7 +367,7 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
             ct = result.scalar_one_or_none()
 
         csv_blobs = await loop.run_in_executor(
-            _executor, find_azure_export_blobs, ct, start_date, end_date
+            _executor, find_azure_export_blobs, ct, start_date, end_date, existing_count == 0
         )
 
         if not csv_blobs:

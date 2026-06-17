@@ -170,21 +170,38 @@ def get_azure_billing_periods(start_date: str, end_date: str) -> list[str]:
     return periods
 
 
-def find_azure_export_blobs(ct: ControlTower, start_date: str, end_date: str) -> list[str]:
-    """Find all relevant Azure cost export blobs for a date range."""
+def find_azure_export_blobs(ct: ControlTower, start_date: str, end_date: str, is_first_sync: bool = False) -> list[str]:
+    """Find Azure cost export blobs.
+    - First sync: reads from historical directories (export_name-actual, export_name-amortized)
+    - Daily sync: reads from daily export directories under export_name/
+    """
     blob_client = get_blob_service_client(ct)
     container = blob_client.get_container_client(ct.azure_container_name)
+    base = ct.azure_export_name  # e.g. "finoptix"
+    csv_blobs: list[str] = []
 
-    # Try standard export path structure
-    prefix = f"{ct.azure_export_name}/"
-    all_blobs = list(container.list_blobs(name_starts_with=prefix))
-    csv_blobs = [b.name for b in all_blobs if b.name.endswith(".csv")]
+    if is_first_sync:
+        # Historical paths: finoptix-actual/ and finoptix-amortized/
+        for prefix in [f"{base}-actual/", f"{base}-amortized/"]:
+            blobs = list(container.list_blobs(name_starts_with=prefix))
+            csv_blobs += [b.name for b in blobs if b.name.endswith(".csv")]
+            logger.info(f"Historical prefix '{prefix}': found {len([b for b in blobs if b.name.endswith('.csv')])} CSVs")
+    else:
+        # Daily paths: finoptix/finoptixs-Cost-export-actual/ and finoptix/finoptixs-cost-export-amortized/
+        for prefix in [
+            f"{base}/{base}s-Cost-export-actual/",
+            f"{base}/{base}s-cost-export-amortized/",
+            f"{base}/{base}s-Cost-export-amortized/",
+            f"{base}/",  # fallback — scan entire base directory
+        ]:
+            blobs = list(container.list_blobs(name_starts_with=prefix))
+            found = [b.name for b in blobs if b.name.endswith(".csv")]
+            if found:
+                csv_blobs += found
+                logger.info(f"Daily prefix '{prefix}': found {len(found)} CSVs")
+                break  # stop at first prefix that has files
 
-    if not csv_blobs:
-        # Try historical export path
-        hist_prefix = f"{ct.azure_export_name}-historical/"
-        all_blobs = list(container.list_blobs(name_starts_with=hist_prefix))
-        csv_blobs = [b.name for b in all_blobs if b.name.endswith(".csv")]
-
-    logger.info(f"Found {len(csv_blobs)} Azure CSV blobs for {ct.name}")
+    # Deduplicate
+    csv_blobs = list(set(csv_blobs))
+    logger.info(f"Total Azure CSV blobs for {ct.name} ({'first' if is_first_sync else 'daily'} sync): {len(csv_blobs)}")
     return csv_blobs
