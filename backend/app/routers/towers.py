@@ -605,9 +605,7 @@ async def onboard_azure(payload: OnboardAzure, bg: BackgroundTasks, db: AsyncSes
         azure_container_name=payload.container_name,
         azure_export_name=payload.export_name,
     )
-    ok, msg = test_azure_connectivity(temp)
-    if not ok:
-        raise HTTPException(status_code=400, detail=f"Azure connectivity failed: {msg}")
+    # Skip blocking connectivity test — sync will fail with clear error if creds are wrong
     temp.is_active = True
     db.add(temp)
     await db.commit()
