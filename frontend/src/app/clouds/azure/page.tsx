@@ -34,6 +34,21 @@ export default function AzurePage() {
   const [editName, setEditName] = useState("");
   const [savingName, setSavingName] = useState(false);
   const [syncing, setSyncing] = useState<Record<string, boolean>>({});
+  const [syncLogs, setSyncLogs] = useState<any[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+
+  const loadSyncLogs = async () => {
+    setLogsLoading(true);
+    try {
+      const res = await api.get("/reports/sync-logs?limit=50");
+      const tenantIds = new Set(tenants.map((t) => t.id));
+      const azureLogs = (res.data as any[]).filter((l: any) =>
+        tenantIds.has(l.control_tower_id) ||
+        l.control_tower_name?.toLowerCase().includes("azure")
+      );
+      setSyncLogs(azureLogs);
+    } catch {} finally { setLogsLoading(false); }
+  };
 
   const [form, setForm] = useState({
     name: "", tenant_id: "", client_id: "",
@@ -56,6 +71,10 @@ export default function AzurePage() {
   useEffect(() => {
     loadTenants();
   }, []);
+
+  useEffect(() => {
+    if (tenants.length > 0) loadSyncLogs();
+  }, [tenants]);
 
   // Poll sync status for all tenants
   useEffect(() => {
@@ -357,6 +376,74 @@ export default function AzurePage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Sync Logs */}
+      {tenants.length > 0 && (
+        <div className="mt-6">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-bold text-black">Sync Logs</h2>
+            <button onClick={loadSyncLogs} disabled={logsLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold border border-gray-300 rounded-md hover:bg-gray-50 transition">
+              <RefreshCw className={`w-3.5 h-3.5 ${logsLoading ? "animate-spin" : ""}`} /> Refresh
+            </button>
+          </div>
+          <div className="bg-white rounded-lg border border-gray-300 shadow-sm overflow-hidden">
+            <table className="w-full">
+              <thead>
+                <tr className="bg-gray-100 border-b-2 border-gray-300">
+                  {["Tenant", "Triggered By", "Status", "Records", "Date Range", "Duration", "Started At"].map((h) => (
+                    <th key={h} className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-black">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {logsLoading ? (
+                  <tr><td colSpan={7} className="text-center py-8">
+                    <RefreshCw className="w-5 h-5 animate-spin text-blue-900 mx-auto" />
+                  </td></tr>
+                ) : syncLogs.length === 0 ? (
+                  <tr><td colSpan={7} className="text-center py-8 text-sm text-gray-500">No sync logs yet.</td></tr>
+                ) : (
+                  syncLogs.map((l: any) => (
+                    <tr key={l.id} className="border-b border-gray-200 hover:bg-blue-50 transition">
+                      <td className="px-4 py-3 text-sm font-bold text-black">{l.control_tower_name}</td>
+                      <td className="px-4 py-3">
+                        <span className={`text-xs font-bold px-2 py-1 rounded border ${
+                          l.triggered_by === "manual" ? "bg-blue-100 text-blue-900 border-blue-300" : "bg-indigo-100 text-indigo-900 border-indigo-300"
+                        }`}>{l.triggered_by}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`text-xs font-bold px-2 py-1 rounded border ${
+                          l.status === "completed" ? "bg-green-100 text-green-900 border-green-300"
+                          : l.status === "failed" ? "bg-red-100 text-red-900 border-red-300"
+                          : "bg-yellow-100 text-yellow-900 border-yellow-300"
+                        }`}>{l.status}</span>
+                        {l.error_message && (
+                          <div className="text-xs mt-1 text-red-700 max-w-xs truncate" title={l.error_message}>
+                            {l.error_message}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm font-bold text-black">{l.records_synced?.toLocaleString() ?? "—"}</td>
+                      <td className="px-4 py-3 text-xs font-mono text-black">
+                        {l.date_range_start && l.date_range_end ? `${l.date_range_start} → ${l.date_range_end}` : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-black">
+                        {l.finished_at && l.started_at
+                          ? `${Math.round((new Date(l.finished_at).getTime() - new Date(l.started_at).getTime()) / 1000)}s`
+                          : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-black">
+                        {new Date(l.started_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
