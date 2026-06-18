@@ -97,6 +97,7 @@ def _parse_azure_row(row: dict, start: date, end: date) -> Optional[dict]:
         "date": row_date,
         "aws_account_id": row.get("SubscriptionId") or row.get("subscriptionId") or "",
         "account_name": row.get("SubscriptionName") or row.get("subscriptionName") or "",
+        "resource_group": row.get("ResourceGroup") or row.get("resourceGroup") or "",
         "service": row.get("ServiceName") or row.get("MeterCategory") or row.get("serviceName") or "Unknown",
         "region": row.get("ResourceLocation") or row.get("resourceLocation") or "global",
         "resource_id": row.get("ResourceId") or row.get("resourceId") or None,

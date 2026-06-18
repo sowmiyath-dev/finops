@@ -85,6 +85,7 @@ class CostRecord(Base):
     service = Column(String, nullable=False)
     region = Column(String)
     resource_id = Column(String)
+    resource_group = Column(String)  # Azure resource group
     usage_type = Column(String)
     operation = Column(String)
     blended_cost = Column(Numeric(14, 6), default=0)

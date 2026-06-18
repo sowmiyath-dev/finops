@@ -423,6 +423,7 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
                             service=r["service"],
                             region=r.get("region"),
                             resource_id=r.get("resource_id"),
+                            resource_group=r.get("resource_group"),
                             usage_type=r.get("usage_type"),
                             operation=r.get("operation"),
                             blended_cost=r["blended_cost"],
