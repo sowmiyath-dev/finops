@@ -39,14 +39,12 @@ def _find_blobs_for_period(ct: ControlTower, billing_period: str) -> list[str]:
     return csv_blobs
 
 
-def _parse_azure_row(row: dict, start: date, end: date) -> Optional[dict]:
-    """Parse a single Azure cost export row."""
-    # Date column can be "Date" or "UsageDateTime"
+def _parse_azure_row(row: dict, start: date, end: date, cost_type: str = "actual") -> Optional[dict]:
+    """Parse a single Azure cost export row into Azure-specific fields."""
     date_str = row.get("Date") or row.get("UsageDateTime") or row.get("date") or ""
     if not date_str:
         return None
 
-    # Handle both YYYY-MM-DD and MM/DD/YYYY formats
     try:
         if "/" in date_str:
             parts = date_str.split("/")
@@ -61,7 +59,6 @@ def _parse_azure_row(row: dict, start: date, end: date) -> Optional[dict]:
 
     cost = float(row.get("CostInBillingCurrency") or row.get("Cost") or row.get("PreTaxCost") or 0)
 
-    # Parse tags - Azure stores as JSON string or key:value pairs
     tags_raw = row.get("Tags") or row.get("tags") or ""
     tags = None
     if tags_raw and tags_raw != "{}":
@@ -69,50 +66,43 @@ def _parse_azure_row(row: dict, start: date, end: date) -> Optional[dict]:
             if tags_raw.startswith("{"):
                 tags_dict = json.loads(tags_raw)
             else:
-                # Handle "key1:val1,key2:val2" format
                 tags_dict = dict(kv.split(":", 1) for kv in tags_raw.split(",") if ":" in kv)
             if tags_dict:
                 tags = json.dumps(tags_dict)
         except (json.JSONDecodeError, ValueError):
             pass
 
-    # Determine purchase type
-    pricing_model = row.get("PricingModel") or row.get("pricingModel") or ""
-    if "Reservation" in pricing_model:
-        purchase_type = "Reserved"
-    elif "SavingsPlan" in pricing_model or "Savings" in pricing_model:
-        purchase_type = "SavingsPlan"
-    elif "Spot" in pricing_model:
-        purchase_type = "Spot"
-    else:
-        purchase_type = "OnDemand"
-
-    # Determine if marketplace
+    pricing_model = row.get("PricingModel") or row.get("pricingModel") or "OnDemand"
     publisher_type = row.get("PublisherType") or row.get("publisherType") or ""
     is_marketplace = "marketplace" in publisher_type.lower()
-
     charge_type = row.get("ChargeType") or row.get("chargeType") or "Usage"
 
+    # Extract resource name from resource ID
+    resource_id = row.get("ResourceId") or row.get("resourceId") or None
+    resource_name = resource_id.split("/")[-1] if resource_id else None
+
     return {
-        "date": row_date,
-        "aws_account_id": row.get("SubscriptionId") or row.get("subscriptionId") or "",
-        "account_name": row.get("SubscriptionName") or row.get("subscriptionName") or "",
+        "subscription_id": row.get("SubscriptionId") or row.get("subscriptionId") or "",
+        "subscription_name": row.get("SubscriptionName") or row.get("subscriptionName") or "",
         "resource_group": row.get("ResourceGroup") or row.get("resourceGroup") or "",
-        "service": row.get("ServiceName") or row.get("MeterCategory") or row.get("serviceName") or "Unknown",
+        "resource_id": resource_id,
+        "resource_name": resource_name,
+        "date": row_date,
+        "billing_currency": row.get("BillingCurrencyCode") or row.get("Currency") or "USD",
+        "actual_cost": cost if cost_type == "actual" else 0,
+        "amortized_cost": cost if cost_type == "amortized" else 0,
+        "quantity": float(row.get("Quantity") or row.get("quantity") or 0),
+        "unit": row.get("UnitOfMeasure") or row.get("unitOfMeasure") or "",
+        "service": row.get("MeterCategory") or row.get("ServiceName") or row.get("serviceName") or "Unknown",
+        "meter_subcategory": row.get("MeterSubCategory") or row.get("meterSubCategory") or None,
+        "meter_name": row.get("MeterName") or row.get("meterName") or None,
+        "product_name": row.get("ProductName") or row.get("productName") or None,
         "region": row.get("ResourceLocation") or row.get("resourceLocation") or "global",
-        "resource_id": row.get("ResourceId") or row.get("resourceId") or None,
-        "usage_type": row.get("MeterSubCategory") or row.get("meterSubCategory") or None,
-        "operation": row.get("MeterName") or row.get("meterName") or None,
-        "blended_cost": cost,
-        "unblended_cost": cost,
-        "net_unblended_cost": cost,
-        "amortized_cost": cost,
-        "usage_quantity": float(row.get("Quantity") or row.get("quantity") or 0),
-        "usage_unit": row.get("UnitOfMeasure") or row.get("unitOfMeasure") or "",
-        "purchase_type": purchase_type,
-        "line_item_type": charge_type,
+        "charge_type": charge_type,
+        "pricing_model": pricing_model,
         "is_marketplace": is_marketplace,
         "tags": tags,
+        "cost_type": cost_type,
     }
 
 
@@ -120,6 +110,8 @@ def stream_azure_cost_batches(ct: ControlTower, blob_name: str, start_date: str,
     """Stream-parse an Azure cost CSV blob and yield batches."""
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
+    # Detect cost type from blob path
+    cost_type = "amortized" if "amortized" in blob_name.lower() else "actual"
     batch = []
 
     try:
@@ -134,7 +126,7 @@ def stream_azure_cost_batches(ct: ControlTower, blob_name: str, start_date: str,
         reader = csv.DictReader(io.StringIO(content))
         for row in reader:
             try:
-                parsed = _parse_azure_row(row, start, end)
+                parsed = _parse_azure_row(row, start, end, cost_type)
                 if parsed:
                     batch.append(parsed)
                     if len(batch) >= batch_size:

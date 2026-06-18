@@ -101,6 +101,48 @@ class CostRecord(Base):
     cloud_provider = Column(String, default="aws")  # aws | azure | gcp
     synced_at = Column(DateTime(timezone=True), default=utcnow)
 
+class AzureCostRecord(Base):
+    """Azure cost records — separate from AWS cost_records."""
+    __tablename__ = "azure_cost_records"
+    __table_args__ = (
+        Index("ix_az_ct_date", "control_tower_id", "date"),
+        Index("ix_az_sub_date", "subscription_id", "date"),
+        Index("ix_az_rg_date", "resource_group", "date"),
+        Index("ix_az_service_date", "service", "date"),
+        Index("ix_az_resource_id", "resource_id"),
+    )
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    control_tower_id = Column(UUID(as_uuid=True), ForeignKey("control_towers.id"), nullable=False)
+    # Azure identifiers
+    subscription_id = Column(String, nullable=False)       # Azure Subscription ID (UUID)
+    subscription_name = Column(String)                     # Subscription display name
+    resource_group = Column(String)                        # Resource Group
+    resource_id = Column(String)                           # Full Azure resource ID
+    resource_name = Column(String)                         # Resource name
+    # Cost
+    date = Column(Date, nullable=False)
+    billing_currency = Column(String)                      # e.g. USD, INR
+    actual_cost = Column(Numeric(18, 6), default=0)        # Actual cost (pay-as-you-go)
+    amortized_cost = Column(Numeric(18, 6), default=0)     # Amortized cost (includes reservations)
+    quantity = Column(Numeric(18, 6), default=0)
+    unit = Column(String)
+    # Service classification
+    service = Column(String)                               # MeterCategory e.g. Virtual Machines
+    meter_subcategory = Column(String)                     # MeterSubCategory
+    meter_name = Column(String)                            # MeterName
+    product_name = Column(String)                          # ProductName
+    region = Column(String)                                # ResourceLocation
+    # Purchase type
+    charge_type = Column(String)                           # Usage, Purchase, Refund
+    pricing_model = Column(String)                         # OnDemand, Reservation, SavingsPlan, Spot
+    is_marketplace = Column(Boolean, default=False)
+    # Tags (JSON)
+    tags = Column(Text)
+    # Cost type: actual | amortized
+    cost_type = Column(String, default="actual")           # actual | amortized
+    synced_at = Column(DateTime(timezone=True), default=utcnow)
+
+
 class SyncLog(Base):
     __tablename__ = "sync_logs"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

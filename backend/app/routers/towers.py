@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func
 
 from app.models.database import get_db, AsyncSessionLocal
-from app.models.db_models import User, ControlTower, SubAccount, CostRecord, SyncLog
+from app.models.db_models import User, ControlTower, SubAccount, CostRecord, SyncLog, AzureCostRecord
 from app.models.schemas import OnboardKeys, OnboardRole, OnboardAzure, ControlTowerOut, SubAccountOut
 from app.services.auth_service import get_current_user
 from app.services.crypto_service import encrypt
@@ -323,7 +323,7 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
         async with AsyncSessionLocal() as db:
             count_result = await db.execute(
                 select(func.count()).where(
-                    CostRecord.control_tower_id == ct_id
+                    AzureCostRecord.control_tower_id == ct_id
                 )
             )
             existing_count = count_result.scalar() or 0
@@ -375,17 +375,17 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
             _sync_progress[ct_id] = {"percent": 100, "status": "done", "message": "No export files found"}
             return
 
-        # Delete existing records for the date range
+        # Delete existing Azure records for the date range
         from datetime import date as dt_date
         start_dt = dt_date.fromisoformat(start_date)
         end_dt = dt_date.fromisoformat(end_date)
 
         async with AsyncSessionLocal() as db:
             await db.execute(
-                delete(CostRecord).where(
-                    CostRecord.control_tower_id == ct_id,
-                    CostRecord.date >= start_dt,
-                    CostRecord.date <= end_dt,
+                delete(AzureCostRecord).where(
+                    AzureCostRecord.control_tower_id == ct_id,
+                    AzureCostRecord.date >= start_dt,
+                    AzureCostRecord.date <= end_dt,
                 )
             )
             await db.commit()
@@ -413,35 +413,35 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
                 async with AsyncSessionLocal() as db:
                     db_batch = []
                     for r in raw_batch:
-                        sub = await _get_or_create_sub(r["aws_account_id"], r.get("account_name", ""))
-                        db_batch.append(CostRecord(
+                        db_batch.append(AzureCostRecord(
                             control_tower_id=ct_id,
-                            sub_account_id=str(sub.id),
-                            aws_account_id=r["aws_account_id"],
-                            account_name=sub.account_name,
-                            date=r["date"],
-                            service=r["service"],
-                            region=r.get("region"),
-                            resource_id=r.get("resource_id"),
+                            subscription_id=r["subscription_id"],
+                            subscription_name=r["subscription_name"],
                             resource_group=r.get("resource_group"),
-                            usage_type=r.get("usage_type"),
-                            operation=r.get("operation"),
-                            blended_cost=r["blended_cost"],
-                            unblended_cost=r["unblended_cost"],
-                            net_unblended_cost=r["net_unblended_cost"],
-                            amortized_cost=r["amortized_cost"],
-                            usage_quantity=r["usage_quantity"],
-                            usage_unit=r.get("usage_unit"),
-                            purchase_type=r.get("purchase_type"),
-                            line_item_type=r.get("line_item_type"),
+                            resource_id=r.get("resource_id"),
+                            resource_name=r.get("resource_name"),
+                            date=r["date"],
+                            billing_currency=r.get("billing_currency", "USD"),
+                            actual_cost=r.get("actual_cost", 0),
+                            amortized_cost=r.get("amortized_cost", 0),
+                            quantity=r.get("quantity", 0),
+                            unit=r.get("unit"),
+                            service=r["service"],
+                            meter_subcategory=r.get("meter_subcategory"),
+                            meter_name=r.get("meter_name"),
+                            product_name=r.get("product_name"),
+                            region=r.get("region"),
+                            charge_type=r.get("charge_type", "Usage"),
+                            pricing_model=r.get("pricing_model", "OnDemand"),
                             is_marketplace=r.get("is_marketplace", False),
                             tags=r.get("tags"),
-                            cloud_provider="azure",
+                            cost_type=r.get("cost_type", "actual"),
                         ))
                     if db_batch:
                         db.add_all(db_batch)
                         await db.commit()
                         total_inserted += len(db_batch)
+                        logger.info(f"Azure blob {blob_idx+1}: {total_inserted} total inserted")
 
             del streamer
 
