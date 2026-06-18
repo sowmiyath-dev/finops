@@ -329,8 +329,8 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
             existing_count = count_result.scalar() or 0
 
         if existing_count == 0:
-            start_date, end_date = get_full_year_date_range()
-            logger.info(f"Azure first sync for CT {ct_id} — full year: {start_date} → {end_date}")
+            start_date, end_date = "2025-01-01", get_sync_date_range()[1]
+            logger.info(f"Azure first sync for CT {ct_id} — from 2025: {start_date} → {end_date}")
         else:
             start_date, end_date = get_sync_date_range(days_back=7)
             logger.info(f"Azure incremental sync for CT {ct_id} — last 7 days: {start_date} → {end_date}")
