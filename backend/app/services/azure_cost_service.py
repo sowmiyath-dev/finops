@@ -61,16 +61,23 @@ def _parse_azure_row(row: dict, start: date, end: date, cost_type: str = "actual
 
     tags_raw = row.get("Tags") or row.get("tags") or ""
     tags = None
-    if tags_raw and tags_raw != "{}":
+    if tags_raw and tags_raw.strip() not in ("", "{}"):
         try:
-            if tags_raw.startswith("{"):
+            # Try JSON first
+            if tags_raw.strip().startswith("{"):
                 tags_dict = json.loads(tags_raw)
             else:
-                tags_dict = dict(kv.split(":", 1) for kv in tags_raw.split(",") if ":" in kv)
+                # Azure format: "Key1": "Val1","Key2": "Val2" (no outer braces)
+                tags_dict = {}
+                for kv in tags_raw.split(","):
+                    kv = kv.strip()
+                    if ":" in kv:
+                        k, v = kv.split(":", 1)
+                        tags_dict[k.strip().strip('"')] = v.strip().strip('"')
             if tags_dict:
                 tags = json.dumps(tags_dict)
-        except (json.JSONDecodeError, ValueError):
-            pass
+        except Exception:
+            tags = tags_raw if tags_raw else None
 
     pricing_model = row.get("PricingModel") or row.get("pricingModel") or "OnDemand"
     publisher_type = row.get("PublisherType") or row.get("publisherType") or ""
@@ -121,9 +128,14 @@ def stream_azure_cost_batches(ct: ControlTower, blob_name: str, start_date: str,
 
         logger.info(f"Streaming Azure blob: {blob_name}")
         download = blob.download_blob()
-        content = download.readall().decode("utf-8")
+        content = download.readall().decode("utf-8-sig")  # utf-8-sig handles BOM
 
-        reader = csv.DictReader(io.StringIO(content))
+        # Detect delimiter — Azure exports can be tab or comma separated
+        first_line = content.split("\n")[0]
+        delimiter = "\t" if "\t" in first_line else ","
+        logger.info(f"Detected delimiter: {'TAB' if delimiter == chr(9) else 'COMMA'} for {blob_name}")
+
+        reader = csv.DictReader(io.StringIO(content), delimiter=delimiter)
         for row in reader:
             try:
                 parsed = _parse_azure_row(row, start, end, cost_type)
