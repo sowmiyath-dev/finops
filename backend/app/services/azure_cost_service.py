@@ -127,10 +127,17 @@ def stream_azure_cost_batches(ct: ControlTower, blob_name: str, start_date: str,
         blob = container.get_blob_client(blob_name)
 
         logger.info(f"Streaming Azure blob: {blob_name}")
-        download = blob.download_blob()
-        content = download.readall().decode("utf-8-sig")  # utf-8-sig handles BOM
+        blob_obj = container.get_blob_client(blob_name)
 
-        # Detect delimiter — Azure exports can be tab or comma separated
+        # Stream in 4MB chunks to avoid OOM on large files
+        chunks = []
+        stream = blob_obj.download_blob()
+        for chunk in stream.chunks():
+            chunks.append(chunk)
+        content = b"".join(chunks).decode("utf-8-sig")
+        chunks.clear()
+
+        # Detect delimiter
         first_line = content.split("\n")[0]
         delimiter = "\t" if "\t" in first_line else ","
         logger.info(f"Detected delimiter: {'TAB' if delimiter == chr(9) else 'COMMA'} for {blob_name}")
@@ -150,6 +157,7 @@ def stream_azure_cost_batches(ct: ControlTower, blob_name: str, start_date: str,
         if batch:
             yield batch
 
+        del content
         logger.info(f"Finished streaming Azure blob: {blob_name}")
 
     except Exception as e:

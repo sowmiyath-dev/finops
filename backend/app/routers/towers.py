@@ -409,7 +409,7 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
 
                 # Run streaming in executor — yields small batches
                 def _gen_batches(bn=blob_name, c=ct_ref):
-                    return list(stream_azure_cost_batches(c, bn, start_date, end_date, 500))
+                    return list(stream_azure_cost_batches(c, bn, start_date, end_date, 200))
 
                 batches = await loop.run_in_executor(_executor, _gen_batches)
 
