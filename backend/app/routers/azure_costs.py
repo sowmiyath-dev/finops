@@ -31,33 +31,38 @@ async def cost_by_subscription(
     user: User = Depends(get_current_user),
 ):
     start, end = _parse_dates(start_date, end_date)
-    rows = (await db.execute(
+
+    # Get actual cost
+    actual_rows = (await db.execute(
         select(
             AzureCostRecord.subscription_id,
             AzureCostRecord.subscription_name,
             func.sum(AzureCostRecord.actual_cost).label("actual_cost"),
-            func.sum(AzureCostRecord.amortized_cost).label("amortized_cost"),
         )
-        .where(
-            AzureCostRecord.date >= start,
-            AzureCostRecord.date <= end,
-            AzureCostRecord.cost_type == "actual",
-        )
+        .where(AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "actual")
         .group_by(AzureCostRecord.subscription_id, AzureCostRecord.subscription_name)
         .order_by(func.sum(AzureCostRecord.actual_cost).desc())
     )).all()
 
+    # Get amortized cost
+    amortized_map = {r.subscription_id: float(r.amortized_cost or 0) for r in (await db.execute(
+        select(AzureCostRecord.subscription_id, func.sum(AzureCostRecord.amortized_cost).label("amortized_cost"))
+        .where(AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "amortized")
+        .group_by(AzureCostRecord.subscription_id)
+    )).all()}
+
     result = []
-    for r in rows:
+    for r in actual_rows:
         actual = float(r.actual_cost or 0)
-        amortized = float(r.amortized_cost or 0)
+        amortized = amortized_map.get(r.subscription_id, actual)  # fallback to actual if no amortized
+        savings = max(0, actual - amortized)
         result.append({
             "subscription_id": r.subscription_id,
             "subscription_name": r.subscription_name or r.subscription_id,
             "actual_cost": actual,
             "amortized_cost": amortized,
-            "savings": max(0, actual - amortized),
-            "true_cost": amortized,
+            "savings": savings,
+            "true_cost": amortized if amortized > 0 else actual,
         })
     return result
 
@@ -71,39 +76,45 @@ async def cost_by_resource_group(
     user: User = Depends(get_current_user),
 ):
     start, end = _parse_dates(start_date, end_date)
-    conditions = [
-        AzureCostRecord.date >= start,
-        AzureCostRecord.date <= end,
+    conditions_actual = [
+        AzureCostRecord.date >= start, AzureCostRecord.date <= end,
         AzureCostRecord.cost_type == "actual",
-        AzureCostRecord.resource_group.isnot(None),
-        AzureCostRecord.resource_group != "",
+        AzureCostRecord.resource_group.isnot(None), AzureCostRecord.resource_group != "",
+    ]
+    conditions_amortized = [
+        AzureCostRecord.date >= start, AzureCostRecord.date <= end,
+        AzureCostRecord.cost_type == "amortized",
+        AzureCostRecord.resource_group.isnot(None), AzureCostRecord.resource_group != "",
     ]
     if subscription_id:
-        conditions.append(AzureCostRecord.subscription_id == subscription_id)
+        conditions_actual.append(AzureCostRecord.subscription_id == subscription_id)
+        conditions_amortized.append(AzureCostRecord.subscription_id == subscription_id)
 
-    rows = (await db.execute(
-        select(
-            AzureCostRecord.resource_group,
-            AzureCostRecord.subscription_name,
-            func.sum(AzureCostRecord.actual_cost).label("actual_cost"),
-            func.sum(AzureCostRecord.amortized_cost).label("amortized_cost"),
-        )
-        .where(*conditions)
+    actual_rows = (await db.execute(
+        select(AzureCostRecord.resource_group, AzureCostRecord.subscription_name,
+               func.sum(AzureCostRecord.actual_cost).label("actual_cost"))
+        .where(*conditions_actual)
         .group_by(AzureCostRecord.resource_group, AzureCostRecord.subscription_name)
         .order_by(func.sum(AzureCostRecord.actual_cost).desc())
     )).all()
 
+    amortized_map = {r.resource_group: float(r.amortized_cost or 0) for r in (await db.execute(
+        select(AzureCostRecord.resource_group, func.sum(AzureCostRecord.amortized_cost).label("amortized_cost"))
+        .where(*conditions_amortized).group_by(AzureCostRecord.resource_group)
+    )).all()}
+
     result = []
-    for r in rows:
+    for r in actual_rows:
         actual = float(r.actual_cost or 0)
-        amortized = float(r.amortized_cost or 0)
+        amortized = amortized_map.get(r.resource_group, actual)
+        savings = max(0, actual - amortized)
         result.append({
             "resource_group": r.resource_group,
             "subscription_name": r.subscription_name,
             "actual_cost": actual,
             "amortized_cost": amortized,
-            "savings": max(0, actual - amortized),
-            "true_cost": amortized,
+            "savings": savings,
+            "true_cost": amortized if amortized > 0 else actual,
         })
     return result
 
@@ -118,37 +129,37 @@ async def cost_by_service(
     user: User = Depends(get_current_user),
 ):
     start, end = _parse_dates(start_date, end_date)
-    conditions = [
-        AzureCostRecord.date >= start,
-        AzureCostRecord.date <= end,
-        AzureCostRecord.cost_type == "actual",
-    ]
+    conditions_a = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "actual"]
+    conditions_m = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "amortized"]
     if subscription_id:
-        conditions.append(AzureCostRecord.subscription_id == subscription_id)
+        conditions_a.append(AzureCostRecord.subscription_id == subscription_id)
+        conditions_m.append(AzureCostRecord.subscription_id == subscription_id)
     if resource_group:
-        conditions.append(AzureCostRecord.resource_group == resource_group)
+        conditions_a.append(AzureCostRecord.resource_group == resource_group)
+        conditions_m.append(AzureCostRecord.resource_group == resource_group)
 
-    rows = (await db.execute(
-        select(
-            AzureCostRecord.service,
-            func.sum(AzureCostRecord.actual_cost).label("actual_cost"),
-            func.sum(AzureCostRecord.amortized_cost).label("amortized_cost"),
-        )
-        .where(*conditions)
-        .group_by(AzureCostRecord.service)
+    actual_rows = (await db.execute(
+        select(AzureCostRecord.service, func.sum(AzureCostRecord.actual_cost).label("actual_cost"))
+        .where(*conditions_a).group_by(AzureCostRecord.service)
         .order_by(func.sum(AzureCostRecord.actual_cost).desc())
     )).all()
 
+    amortized_map = {r.service: float(r.amortized_cost or 0) for r in (await db.execute(
+        select(AzureCostRecord.service, func.sum(AzureCostRecord.amortized_cost).label("amortized_cost"))
+        .where(*conditions_m).group_by(AzureCostRecord.service)
+    )).all()}
+
     result = []
-    for r in rows:
+    for r in actual_rows:
         actual = float(r.actual_cost or 0)
-        amortized = float(r.amortized_cost or 0)
+        amortized = amortized_map.get(r.service, actual)
+        savings = max(0, actual - amortized)
         result.append({
             "service": r.service or "Unknown",
             "actual_cost": actual,
             "amortized_cost": amortized,
-            "savings": max(0, actual - amortized),
-            "true_cost": amortized,
+            "savings": savings,
+            "true_cost": amortized if amortized > 0 else actual,
         })
     return result
 
