@@ -395,55 +395,60 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
         for blob_idx, blob_name in enumerate(csv_blobs):
             _sync_progress[ct_id]["message"] = f"Processing file {blob_idx+1}/{len(csv_blobs)}"
             _sync_progress[ct_id]["percent"] = 30 + int(60 * blob_idx / len(csv_blobs))
+            logger.info(f"Azure processing blob {blob_idx+1}/{len(csv_blobs)}: {blob_name}")
 
             try:
-                streamer = await loop.run_in_executor(
-                    _executor,
-                    lambda bn=blob_name: list(stream_azure_cost_batches(
-                        ct, bn, start_date, end_date, 5000
-                    ))
-                )
-            except Exception as file_err:
-                logger.error(f"Failed to fetch Azure blob {blob_name}: {file_err}")
-                continue
-
-            for raw_batch in streamer:
-                if not raw_batch:
-                    continue
+                # Re-fetch CT to avoid stale connection
                 async with AsyncSessionLocal() as db:
-                    db_batch = []
-                    for r in raw_batch:
-                        db_batch.append(AzureCostRecord(
-                            control_tower_id=ct_id,
-                            subscription_id=r["subscription_id"],
-                            subscription_name=r["subscription_name"],
-                            resource_group=r.get("resource_group"),
-                            resource_id=r.get("resource_id"),
-                            resource_name=r.get("resource_name"),
-                            date=r["date"],
-                            billing_currency=r.get("billing_currency", "USD"),
-                            actual_cost=r.get("actual_cost", 0),
-                            amortized_cost=r.get("amortized_cost", 0),
-                            quantity=r.get("quantity", 0),
-                            unit=r.get("unit"),
-                            service=r["service"],
-                            meter_subcategory=r.get("meter_subcategory"),
-                            meter_name=r.get("meter_name"),
-                            product_name=r.get("product_name"),
-                            region=r.get("region"),
-                            charge_type=r.get("charge_type", "Usage"),
-                            pricing_model=r.get("pricing_model", "OnDemand"),
-                            is_marketplace=r.get("is_marketplace", False),
-                            tags=r.get("tags"),
-                            cost_type=r.get("cost_type", "actual"),
-                        ))
-                    if db_batch:
-                        db.add_all(db_batch)
-                        await db.commit()
-                        total_inserted += len(db_batch)
-                        logger.info(f"Azure blob {blob_idx+1}: {total_inserted} total inserted")
+                    result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
+                    ct_ref = result.scalar_one_or_none()
 
-            del streamer
+                # Run streaming in executor — yields small batches
+                def _gen_batches(bn=blob_name, c=ct_ref):
+                    return list(stream_azure_cost_batches(c, bn, start_date, end_date, 500))
+
+                batches = await loop.run_in_executor(_executor, _gen_batches)
+
+                for raw_batch in batches:
+                    if not raw_batch:
+                        continue
+                    async with AsyncSessionLocal() as db:
+                        db.add_all([
+                            AzureCostRecord(
+                                control_tower_id=ct_id,
+                                subscription_id=r["subscription_id"],
+                                subscription_name=r["subscription_name"],
+                                resource_group=r.get("resource_group"),
+                                resource_id=r.get("resource_id"),
+                                resource_name=r.get("resource_name"),
+                                date=r["date"],
+                                billing_currency=r.get("billing_currency", "INR"),
+                                actual_cost=r.get("actual_cost", 0),
+                                amortized_cost=r.get("amortized_cost", 0),
+                                quantity=r.get("quantity", 0),
+                                unit=r.get("unit"),
+                                service=r["service"],
+                                meter_subcategory=r.get("meter_subcategory"),
+                                meter_name=r.get("meter_name"),
+                                product_name=r.get("product_name"),
+                                region=r.get("region"),
+                                charge_type=r.get("charge_type", "Usage"),
+                                pricing_model=r.get("pricing_model", "OnDemand"),
+                                is_marketplace=r.get("is_marketplace", False),
+                                tags=r.get("tags"),
+                                cost_type=r.get("cost_type", "actual"),
+                            )
+                            for r in raw_batch
+                        ])
+                        await db.commit()
+                        total_inserted += len(raw_batch)
+
+                logger.info(f"Azure blob {blob_idx+1} done: {total_inserted} total inserted")
+                del batches
+
+            except Exception as file_err:
+                logger.error(f"Failed to process Azure blob {blob_name}: {file_err}", exc_info=True)
+                continue
 
         # Step 5 — finalize
         async with AsyncSessionLocal() as db:
