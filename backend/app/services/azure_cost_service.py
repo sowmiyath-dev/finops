@@ -176,37 +176,28 @@ def get_azure_billing_periods(start_date: str, end_date: str) -> list[str]:
 
 
 def find_azure_export_blobs(ct: ControlTower, start_date: str, end_date: str, is_first_sync: bool = False) -> list[str]:
-    """Find Azure cost export blobs.
-    - First sync: reads from historical directories (export_name-actual, export_name-amortized)
-    - Daily sync: reads from daily export directories under export_name/
+    """Find Azure cost export blobs from billing-account scoped export folders.
+    - Historical: finoptix-actualcost/ and finoptix-amortizedcost/
+    - Daily (current month): finoptix-daily-actualcost/ and finoptix-daily-amortizedcost/
+    Always reads all 4 folders on full resync, only daily folders on incremental.
     """
     blob_client = get_blob_service_client(ct)
     container = blob_client.get_container_client(ct.azure_container_name)
-    base = ct.azure_export_name  # e.g. "finoptix"
     csv_blobs: list[str] = []
 
-    if is_first_sync:
-        # Historical paths: finoptix-actual/ and finoptix-amortized/
-        for prefix in [f"{base}-actual/", f"{base}-amortized/"]:
-            blobs = list(container.list_blobs(name_starts_with=prefix))
-            csv_blobs += [b.name for b in blobs if b.name.endswith(".csv")]
-            logger.info(f"Historical prefix '{prefix}': found {len([b for b in blobs if b.name.endswith('.csv')])} CSVs")
-    else:
-        # Daily paths: finoptix/finoptixs-Cost-export-actual/ and finoptix/finoptixs-cost-export-amortized/
-        for prefix in [
-            f"{base}/{base}s-Cost-export-actual/",
-            f"{base}/{base}s-cost-export-amortized/",
-            f"{base}/{base}s-Cost-export-amortized/",
-            f"{base}/",  # fallback — scan entire base directory
-        ]:
-            blobs = list(container.list_blobs(name_starts_with=prefix))
-            found = [b.name for b in blobs if b.name.endswith(".csv")]
-            if found:
-                csv_blobs += found
-                logger.info(f"Daily prefix '{prefix}': found {len(found)} CSVs")
-                break  # stop at first prefix that has files
+    # Historical folders (Jan–May billing-account scoped exports)
+    historical_prefixes = ["finoptix-actualcost/", "finoptix-amortizedcost/"]
+    # Daily folders (current month BillingMonthToDate)
+    daily_prefixes = ["finoptix-daily-actualcost/", "finoptix-daily-amortizedcost/"]
 
-    # Deduplicate
+    prefixes = (historical_prefixes + daily_prefixes) if is_first_sync else daily_prefixes
+
+    for prefix in prefixes:
+        blobs = list(container.list_blobs(name_starts_with=prefix))
+        found = [b.name for b in blobs if b.name.endswith(".csv")]
+        csv_blobs += found
+        logger.info(f"Prefix '{prefix}': found {len(found)} CSVs")
+
     csv_blobs = list(set(csv_blobs))
-    logger.info(f"Total Azure CSV blobs for {ct.name} ({'first' if is_first_sync else 'daily'} sync): {len(csv_blobs)}")
+    logger.info(f"Total Azure CSV blobs for {ct.name} ({'full' if is_first_sync else 'daily'} sync): {len(csv_blobs)}")
     return csv_blobs

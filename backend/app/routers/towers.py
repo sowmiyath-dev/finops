@@ -329,11 +329,15 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
             existing_count = count_result.scalar() or 0
 
         if existing_count == 0:
-            start_date, end_date = "2025-01-01", get_sync_date_range()[1]
-            logger.info(f"Azure first sync for CT {ct_id} — from 2025: {start_date} → {end_date}")
+            start_date, end_date = "2026-01-01", get_sync_date_range()[1]
+            logger.info(f"Azure full sync for CT {ct_id}: {start_date} → {end_date}")
         else:
-            start_date, end_date = get_sync_date_range(days_back=7)
-            logger.info(f"Azure incremental sync for CT {ct_id} — last 7 days: {start_date} → {end_date}")
+            # Daily incremental — only re-read daily folders for current month
+            from datetime import date as dt_date
+            today = dt_date.today()
+            start_date = today.replace(day=1).isoformat()
+            end_date = today.isoformat()
+            logger.info(f"Azure daily sync for CT {ct_id}: {start_date} → {end_date}")
 
         # Step 3 — load sub_map
         async with AsyncSessionLocal() as db:
