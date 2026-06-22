@@ -407,14 +407,25 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
                     result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
                     ct_ref = result.scalar_one_or_none()
 
-                # Run streaming in executor — yields small batches
-                def _gen_batches(bn=blob_name, c=ct_ref):
-                    return list(stream_azure_cost_batches(c, bn, start_date, end_date, 200))
+                # Use a queue to bridge sync generator → async consumer
+                import queue as _queue
+                q: _queue.Queue = _queue.Queue(maxsize=4)
+                DONE = object()
 
-                batches = await loop.run_in_executor(_executor, _gen_batches)
+                def _produce(bn=blob_name, c=ct_ref):
+                    try:
+                        for batch in stream_azure_cost_batches(c, bn, start_date, end_date, 500):
+                            q.put(batch)
+                    finally:
+                        q.put(DONE)
 
-                for raw_batch in batches:
-                    if not raw_batch:
+                producer = loop.run_in_executor(_executor, _produce)
+
+                while True:
+                    batch = await loop.run_in_executor(None, q.get)
+                    if batch is DONE:
+                        break
+                    if not batch:
                         continue
                     async with AsyncSessionLocal() as db:
                         db.add_all([
@@ -442,13 +453,14 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
                                 tags=r.get("tags"),
                                 cost_type=r.get("cost_type", "actual"),
                             )
-                            for r in raw_batch
+                            for r in batch
                         ])
                         await db.commit()
-                        total_inserted += len(raw_batch)
+                        total_inserted += len(batch)
+                        logger.info(f"Azure blob {blob_idx+1}/{len(csv_blobs)}: {total_inserted} total inserted")
 
+                await producer
                 logger.info(f"Azure blob {blob_idx+1} done: {total_inserted} total inserted")
-                del batches
 
             except Exception as file_err:
                 logger.error(f"Failed to process Azure blob {blob_name}: {file_err}", exc_info=True)
