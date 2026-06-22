@@ -113,52 +113,85 @@ def _parse_azure_row(row: dict, start: date, end: date, cost_type: str = "actual
     }
 
 
-def stream_azure_cost_batches(ct: ControlTower, blob_name: str, start_date: str, end_date: str, batch_size: int = 5000):
-    """Stream-parse an Azure cost CSV blob and yield batches."""
+def stream_azure_cost_batches(ct: ControlTower, blob_name: str, start_date: str, end_date: str, batch_size: int = 500):
+    """Stream-parse an Azure cost CSV blob line by line to avoid OOM."""
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
-    # Detect cost type from blob path
     cost_type = "amortized" if "amortized" in blob_name.lower() else "actual"
     batch = []
 
     try:
         blob_client = get_blob_service_client(ct)
         container = blob_client.get_container_client(ct.azure_container_name)
-        blob = container.get_blob_client(blob_name)
-
-        logger.info(f"Streaming Azure blob: {blob_name}")
         blob_obj = container.get_blob_client(blob_name)
 
-        # Stream in 4MB chunks to avoid OOM on large files
-        chunks = []
+        logger.info(f"Streaming Azure blob: {blob_name}")
+
+        # Download in chunks and decode line by line — never load full file
         stream = blob_obj.download_blob()
+        leftover = b""
+        header_line = None
+        delimiter = None
+        fieldnames = None
+        row_count = 0
+
         for chunk in stream.chunks():
-            chunks.append(chunk)
-        content = b"".join(chunks).decode("utf-8-sig")
-        chunks.clear()
+            data = leftover + chunk
+            lines = data.split(b"\n")
+            leftover = lines[-1]  # incomplete last line saved for next chunk
 
-        # Detect delimiter
-        first_line = content.split("\n")[0]
-        delimiter = "\t" if "\t" in first_line else ","
-        logger.info(f"Detected delimiter: {'TAB' if delimiter == chr(9) else 'COMMA'} for {blob_name}")
+            for raw_line in lines[:-1]:
+                try:
+                    line = raw_line.decode("utf-8-sig").rstrip("\r")
+                except Exception:
+                    continue
 
-        reader = csv.DictReader(io.StringIO(content), delimiter=delimiter)
-        for row in reader:
+                if not line.strip():
+                    continue
+
+                if header_line is None:
+                    header_line = line
+                    delimiter = "\t" if "\t" in line else ","
+                    reader = csv.reader(io.StringIO(line), delimiter=delimiter)
+                    fieldnames = next(reader)
+                    logger.info(f"Delimiter: {'TAB' if delimiter == chr(9) else 'COMMA'}, Columns: {len(fieldnames)}")
+                    continue
+
+                try:
+                    reader = csv.reader(io.StringIO(line), delimiter=delimiter)
+                    values = next(reader)
+                    if len(values) != len(fieldnames):
+                        continue
+                    row = dict(zip(fieldnames, values))
+                    parsed = _parse_azure_row(row, start, end, cost_type)
+                    if parsed:
+                        batch.append(parsed)
+                        row_count += 1
+                        if len(batch) >= batch_size:
+                            yield batch
+                            batch = []
+                except Exception as e:
+                    logger.debug(f"Skipping row: {e}")
+
+        # Process leftover
+        if leftover:
             try:
-                parsed = _parse_azure_row(row, start, end, cost_type)
-                if parsed:
-                    batch.append(parsed)
-                    if len(batch) >= batch_size:
-                        yield batch
-                        batch = []
-            except Exception as e:
-                logger.debug(f"Skipping Azure row: {e}")
+                line = leftover.decode("utf-8-sig").rstrip("\r")
+                if line.strip() and fieldnames:
+                    reader = csv.reader(io.StringIO(line), delimiter=delimiter)
+                    values = next(reader)
+                    if len(values) == len(fieldnames):
+                        row = dict(zip(fieldnames, values))
+                        parsed = _parse_azure_row(row, start, end, cost_type)
+                        if parsed:
+                            batch.append(parsed)
+            except Exception:
+                pass
 
         if batch:
             yield batch
 
-        del content
-        logger.info(f"Finished streaming Azure blob: {blob_name}")
+        logger.info(f"Finished blob: {blob_name} — {row_count} rows parsed")
 
     except Exception as e:
         logger.error(f"Failed to stream Azure blob {blob_name}: {e}", exc_info=True)
