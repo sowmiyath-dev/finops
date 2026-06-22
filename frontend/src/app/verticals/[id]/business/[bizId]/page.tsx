@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import axios from "axios";
 import { useAuthStore } from "@/store/authStore";
-import { ChevronRight, DollarSign, RefreshCw, X, Users, Tag, CheckSquare, Square } from "lucide-react";
+import { ChevronRight, DollarSign, RefreshCw, X, Users, Tag, CheckSquare, Square, Cloud, Plus, Trash2 } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
@@ -108,6 +108,83 @@ export default function BusinessDetailPage() {
   const [chartType, setChartType] = useState<ChartType>("bar");
   const [hiddenAccounts, setHiddenAccounts] = useState<Set<string>>(new Set());
 
+  // ── Azure mapping state ───────────────────────────────────────────
+  const [azureMappings, setAzureMappings] = useState<any[]>([]);
+  const [showAzureModal, setShowAzureModal] = useState(false);
+  const [azureSubscriptions, setAzureSubscriptions] = useState<any[]>([]);
+  const [azureResourceGroups, setAzureResourceGroups] = useState<any[]>([]);
+  const [azureTagKeys, setAzureTagKeys] = useState<string[]>([]);
+  const [azureTowers, setAzureTowers] = useState<any[]>([]);
+  const [mappingForm, setMappingForm] = useState({
+    control_tower_id: "",
+    mapping_type: "subscription",
+    subscription_id: "",
+    subscription_name: "",
+    resource_group: "",
+    tag_key: "",
+    tag_value: "",
+  });
+  const [savingMapping, setSavingMapping] = useState(false);
+
+  const loadAzureMappings = async () => {
+    try {
+      const res = await axios.get(`${BASE}/api/azure-costs/mappings/${bizId}`, { headers });
+      setAzureMappings(res.data);
+    } catch {}
+  };
+
+  const loadAzureMeta = async () => {
+    try {
+      const [towersRes, subsRes, tagKeysRes] = await Promise.all([
+        axios.get(`${BASE}/api/towers/`, { headers }),
+        axios.get(`${BASE}/api/azure-costs/meta/subscriptions`, { headers }),
+        axios.get(`${BASE}/api/azure-costs/tag-keys`, { headers }),
+      ]);
+      const azTowers = (towersRes.data as any[]).filter((t) => t.cloud_provider === "azure");
+      setAzureTowers(azTowers);
+      setAzureSubscriptions(subsRes.data);
+      setAzureTagKeys(tagKeysRes.data);
+      if (azTowers.length > 0) setMappingForm((f) => ({ ...f, control_tower_id: azTowers[0].id }));
+    } catch {}
+  };
+
+  const loadResourceGroups = async (subscriptionId: string) => {
+    try {
+      const res = await axios.get(`${BASE}/api/azure-costs/meta/resource-groups`, {
+        headers, params: { subscription_id: subscriptionId },
+      });
+      setAzureResourceGroups(res.data);
+    } catch {}
+  };
+
+  const saveAzureMapping = async () => {
+    setSavingMapping(true);
+    try {
+      await axios.post(`${BASE}/api/azure-costs/mappings`, {
+        business_id: bizId,
+        control_tower_id: mappingForm.control_tower_id,
+        mapping_type: mappingForm.mapping_type,
+        subscription_id: mappingForm.subscription_id || null,
+        subscription_name: mappingForm.subscription_name || null,
+        resource_group: mappingForm.mapping_type === "resource_group" ? mappingForm.resource_group : null,
+        tag_key: mappingForm.mapping_type === "tag" ? mappingForm.tag_key : null,
+        tag_value: mappingForm.mapping_type === "tag" ? mappingForm.tag_value : null,
+      }, { headers });
+      setShowAzureModal(false);
+      await loadAzureMappings();
+    } catch (e: any) {
+      alert(e?.response?.data?.detail || "Failed to save mapping");
+    } finally { setSavingMapping(false); }
+  };
+
+  const deleteAzureMapping = async (mappingId: string) => {
+    if (!confirm("Remove this Azure mapping?")) return;
+    try {
+      await axios.delete(`${BASE}/api/azure-costs/mappings/${mappingId}`, { headers });
+      await loadAzureMappings();
+    } catch {}
+  };
+
   const toggleAccountViz = (id: string) => {
     setHiddenAccounts((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   };
@@ -131,7 +208,7 @@ export default function BusinessDetailPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, [bizId]); // eslint-disable-line
+  useEffect(() => { load(); loadAzureMappings(); }, [bizId]); // eslint-disable-line
 
   const applyPreset = (preset: typeof PRESETS[0]) => {
     const r = preset.fn();
@@ -493,6 +570,72 @@ export default function BusinessDetailPage() {
         </div>
       )}
 
+      {/* ── Azure Cost Mapping ───────────────────────────────────────── */}
+      <div className="bg-white rounded-lg border border-gray-300 shadow-sm mt-5">
+        <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between"
+          style={{ background: "linear-gradient(135deg, #e8f4fd 0%, #f0f7ff 100%)" }}>
+          <div className="flex items-center gap-2">
+            <Cloud className="w-4 h-4" style={{ color: "#0078d4" }} />
+            <h2 className="text-sm font-bold text-black">Azure Cost Mapping</h2>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">
+              {azureMappings.length} mapping{azureMappings.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+          <button
+            onClick={() => { loadAzureMeta(); setShowAzureModal(true); }}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white rounded-md transition"
+            style={{ background: "#0078D4" }}>
+            <Plus className="w-3.5 h-3.5" /> Add Azure Source
+          </button>
+        </div>
+
+        {azureMappings.length === 0 ? (
+          <div className="p-8 text-center">
+            <Cloud className="w-8 h-8 mx-auto mb-2" style={{ color: "#0078d4", opacity: 0.3 }} />
+            <p className="text-sm font-bold text-black">No Azure cost source mapped</p>
+            <p className="text-xs text-gray-500 mt-1">Map a subscription, resource group, or tag to pull Azure costs into this business</p>
+          </div>
+        ) : (
+          <table className="w-full">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                {["Type", "Source", "Subscription", ""].map((h) => (
+                  <th key={h} className="text-left text-xs font-bold uppercase tracking-wider text-black px-5 py-3">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {azureMappings.map((m) => (
+                <tr key={m.id} className="border-b border-gray-200 hover:bg-blue-50 transition">
+                  <td className="px-5 py-3">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      m.mapping_type === "subscription" ? "bg-blue-100 text-blue-800"
+                      : m.mapping_type === "resource_group" ? "bg-purple-100 text-purple-800"
+                      : m.mapping_type === "tag" ? "bg-green-100 text-green-800"
+                      : "bg-gray-100 text-gray-800"
+                    }`}>
+                      {m.mapping_type.replace("_", " ").toUpperCase()}
+                    </span>
+                  </td>
+                  <td className="px-5 py-3 text-sm font-semibold text-black">
+                    {m.mapping_type === "subscription" && m.subscription_name}
+                    {m.mapping_type === "resource_group" && m.resource_group}
+                    {m.mapping_type === "tag" && `${m.tag_key} = ${m.tag_value || "*"}`}
+                  </td>
+                  <td className="px-5 py-3 text-xs text-gray-500">{m.subscription_name || "—"}</td>
+                  <td className="px-5 py-3">
+                    <button onClick={() => deleteAzureMapping(m.id)}
+                      className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600 transition">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
       {/* Add/Edit Owner Modal */}
       {showAddOwner && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
@@ -513,6 +656,95 @@ export default function BusinessDetailPage() {
               <button onClick={saveOwner} disabled={saving || !ownerName.trim()}
                 className="px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold rounded-md transition disabled:opacity-50">
                 {saving ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Azure Mapping Modal */}
+      {showAzureModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-bold text-black flex items-center gap-2">
+                <Cloud className="w-4 h-4" style={{ color: "#0078d4" }} /> Add Azure Cost Source
+              </h3>
+              <button onClick={() => setShowAzureModal(false)}><X className="w-4 h-4 text-gray-500" /></button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">Map By</label>
+                <div className="flex gap-2">
+                  {["subscription", "resource_group", "tag"].map((t) => (
+                    <button key={t} onClick={() => setMappingForm((f) => ({ ...f, mapping_type: t }))}
+                      className={`flex-1 py-2 text-xs font-bold rounded-md border transition ${
+                        mappingForm.mapping_type === t ? "border-blue-700 bg-blue-50 text-blue-900" : "border-gray-300 text-black hover:border-blue-400"
+                      }`}>
+                      {t === "subscription" ? "Subscription" : t === "resource_group" ? "Resource Group" : "Tag"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">Subscription</label>
+                <select value={mappingForm.subscription_id}
+                  onChange={(e) => {
+                    const sub = azureSubscriptions.find((s) => s.subscription_id === e.target.value);
+                    setMappingForm((f) => ({ ...f, subscription_id: e.target.value, subscription_name: sub?.subscription_name || "" }));
+                    if (mappingForm.mapping_type === "resource_group") loadResourceGroups(e.target.value);
+                  }}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-blue-600">
+                  <option value="">Select subscription...</option>
+                  {azureSubscriptions.map((s) => (
+                    <option key={s.subscription_id} value={s.subscription_id}>{s.subscription_name}</option>
+                  ))}
+                </select>
+              </div>
+              {mappingForm.mapping_type === "resource_group" && (
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">Resource Group</label>
+                  <select value={mappingForm.resource_group}
+                    onChange={(e) => setMappingForm((f) => ({ ...f, resource_group: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-blue-600">
+                    <option value="">Select resource group...</option>
+                    {azureResourceGroups.map((r) => (
+                      <option key={r.resource_group} value={r.resource_group}>{r.resource_group}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {mappingForm.mapping_type === "tag" && (
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">Tag Key</label>
+                    <select value={mappingForm.tag_key}
+                      onChange={(e) => setMappingForm((f) => ({ ...f, tag_key: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-blue-600">
+                      <option value="">Select key...</option>
+                      {azureTagKeys.map((k) => <option key={k}>{k}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">Tag Value</label>
+                    <input value={mappingForm.tag_value}
+                      onChange={(e) => setMappingForm((f) => ({ ...f, tag_value: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-black focus:outline-none focus:border-blue-600"
+                      placeholder="e.g. prod, uat, sit" />
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setShowAzureModal(false)}
+                className="flex-1 py-2.5 border border-gray-300 rounded-lg text-xs font-bold text-black hover:bg-gray-50 transition">Cancel</button>
+              <button onClick={saveAzureMapping}
+                disabled={savingMapping || !mappingForm.control_tower_id || !mappingForm.subscription_id
+                  || (mappingForm.mapping_type === "resource_group" && !mappingForm.resource_group)
+                  || (mappingForm.mapping_type === "tag" && !mappingForm.tag_key)}
+                className="flex-1 py-2.5 text-white text-xs font-bold rounded-lg transition disabled:opacity-50"
+                style={{ background: "#0078D4" }}>
+                {savingMapping ? "Saving..." : "Save Mapping"}
               </button>
             </div>
           </div>

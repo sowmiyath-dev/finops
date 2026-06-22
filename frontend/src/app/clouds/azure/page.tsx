@@ -1,10 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
-import { Globe, Plus, RefreshCw, Trash2, Clock, CheckCircle, XCircle, Edit2, X, Info } from "lucide-react";
+import { Globe, Plus, RefreshCw, Trash2, Clock, CheckCircle, XCircle, Edit2, X, Info, TrendingUp, DollarSign } from "lucide-react";
 
 interface AzureTenant {
   id: string; name: string; azure_tenant_id: string;
@@ -13,11 +12,24 @@ interface AzureTenant {
   last_synced_at: string | null; auto_sync_enabled: boolean;
 }
 interface SyncStatus { percent: number; status: string; message: string; }
+interface TenantCost { actual_cost: number; savings: number; true_cost: number; }
+
+function fmtINR(n: number) {
+  return `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+function getLastMonthRange() {
+  const n = new Date();
+  const s = new Date(n.getFullYear(), n.getMonth() - 1, 1);
+  const e = new Date(n.getFullYear(), n.getMonth(), 0);
+  const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  return { start: fmt(s), end: fmt(e), label: s.toLocaleString("en-US", { month: "long", year: "numeric" }) };
+}
 
 export default function AzurePage() {
   const router = useRouter();
   const [tenants, setTenants] = useState<AzureTenant[]>([]);
   const [syncStatuses, setSyncStatuses] = useState<Record<string, SyncStatus>>({});
+  const [tenantCosts, setTenantCosts] = useState<Record<string, TenantCost>>({});
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -26,11 +38,24 @@ export default function AzurePage() {
   const [savingName, setSavingName] = useState(false);
   const [syncing, setSyncing] = useState<Record<string, boolean>>({});
   const [form, setForm] = useState({ name: "", tenant_id: "", client_id: "", client_secret: "", storage_account: "", container_name: "", export_name: "" });
+  const lastMonth = getLastMonthRange();
 
   const loadTenants = async () => {
     try {
       const res = await api.get("/towers/");
-      setTenants((res.data as any[]).filter((t) => t.cloud_provider === "azure"));
+      const azure = (res.data as any[]).filter((t) => t.cloud_provider === "azure");
+      setTenants(azure);
+      // Load last month cost for each tenant
+      const costs: Record<string, TenantCost> = {};
+      await Promise.all(azure.map(async (t) => {
+        try {
+          const r = await api.get("/azure-costs/summary", {
+            params: { start_date: lastMonth.start, end_date: lastMonth.end },
+          });
+          costs[t.id] = r.data;
+        } catch { costs[t.id] = { actual_cost: 0, savings: 0, true_cost: 0 }; }
+      }));
+      setTenantCosts(costs);
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
@@ -98,152 +123,184 @@ export default function AzurePage() {
   const getSyncBadge = (t: AzureTenant) => {
     const s = syncStatuses[t.id];
     if (s?.status === "running") return (
-      <div className="flex items-center gap-1.5">
-        <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-600" />
-        <span className="text-xs font-semibold text-blue-700">{s.message} {s.percent}%</span>
-      </div>
+      <span className="flex items-center gap-1.5 text-xs font-bold text-blue-300">
+        <RefreshCw className="w-3 h-3 animate-spin" /> {s.message} {s.percent}%
+      </span>
     );
     if (s?.status === "failed") return (
-      <div className="flex items-center gap-1.5">
-        <XCircle className="w-3.5 h-3.5 text-red-500" />
-        <span className="text-xs font-semibold text-red-600">Sync failed</span>
-      </div>
+      <span className="flex items-center gap-1.5 text-xs font-bold text-red-400">
+        <XCircle className="w-3 h-3" /> Sync failed
+      </span>
     );
     if (t.last_synced_at) return (
-      <div className="flex items-center gap-1.5">
-        <CheckCircle className="w-3.5 h-3.5 text-green-500" />
-        <span className="text-xs font-semibold text-green-700">
-          Synced {new Date(t.last_synced_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}
-        </span>
-      </div>
+      <span className="flex items-center gap-1.5 text-xs font-bold text-green-400">
+        <CheckCircle className="w-3 h-3" />
+        Synced {new Date(t.last_synced_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" })}
+      </span>
     );
     return (
-      <div className="flex items-center gap-1.5">
-        <Clock className="w-3.5 h-3.5 text-gray-400" />
-        <span className="text-xs font-semibold text-gray-500">Not synced yet</span>
-      </div>
+      <span className="flex items-center gap-1.5 text-xs font-bold text-white/40">
+        <Clock className="w-3 h-3" /> Not synced
+      </span>
     );
   };
 
   const inputCls = "w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm text-black focus:outline-none focus:border-blue-600 transition bg-white";
 
   return (
-    <div className="p-6">
-      {/* Header */}
+    <div className="p-6" style={{ background: "#f1f4f9", minHeight: "100vh" }}>
+      {/* Header — AWS Org style */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "#e8f4fd" }}>
-            <Globe className="w-5 h-5" style={{ color: "#0078d4" }} />
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#0078d4,#00bcf2)" }}>
+            <Globe className="w-5 h-5 text-white" />
           </div>
           <div>
             <h1 className="text-2xl font-bold text-black">Microsoft Azure</h1>
-            <p className="text-sm text-gray-500 mt-0.5">{tenants.length} tenant{tenants.length !== 1 ? "s" : ""} connected</p>
+            <p className="text-xs text-gray-500 mt-0.5 font-semibold uppercase tracking-wide">
+              {tenants.length} tenant{tenants.length !== 1 ? "s" : ""} · {lastMonth.label}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <Link href="/sync-logs/azure"
-            className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-black border border-gray-300 rounded-md hover:border-blue-900 hover:text-blue-900 transition">
-            <Clock className="w-4 h-4" /> Sync Logs
-          </Link>
-          <button onClick={() => setShowForm(true)}
+          <button
+            onClick={() => setShowForm(true)}
             className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white rounded-lg transition"
             style={{ background: "#0078D4" }}>
-            <Plus className="w-4 h-4" /> Add Tenant
+            <Plus className="w-4 h-4" /> Connect Tenant
           </button>
         </div>
       </div>
 
-      {/* Tenants list */}
+      {/* Tenant Cards */}
       {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {[1, 2].map((i) => (
-            <div key={i} className="bg-white rounded-lg border border-gray-200 p-5 animate-pulse">
-              <div className="h-4 bg-gray-200 rounded w-32 mb-3" />
-              <div className="h-3 bg-gray-200 rounded w-48" />
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="bg-white rounded-xl border border-gray-200 overflow-hidden animate-pulse">
+              <div className="h-28 bg-gray-200" />
+              <div className="p-5 space-y-3">
+                <div className="h-3 bg-gray-200 rounded w-32" />
+                <div className="h-3 bg-gray-200 rounded w-48" />
+              </div>
             </div>
           ))}
         </div>
       ) : tenants.length === 0 ? (
-        <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
-          <div className="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center" style={{ background: "#e8f4fd" }}>
-            <Globe className="w-7 h-7" style={{ color: "#0078d4" }} />
+        <div className="bg-white rounded-xl border border-gray-200 p-16 text-center shadow-sm">
+          <div className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center" style={{ background: "linear-gradient(135deg,#0078d4,#00bcf2)" }}>
+            <Globe className="w-8 h-8 text-white" />
           </div>
           <h2 className="text-base font-bold text-gray-800 mb-1">No Azure Tenants Connected</h2>
-          <p className="text-sm text-gray-500 mb-4">Click "Add Tenant" to connect your Azure subscription.</p>
+          <p className="text-sm text-gray-500 mb-5">Connect your Azure tenant to start tracking cloud costs.</p>
           <button onClick={() => setShowForm(true)}
-            className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white rounded-lg"
+            className="inline-flex items-center gap-2 px-6 py-3 text-sm font-bold text-white rounded-lg"
             style={{ background: "#0078D4" }}>
-            <Plus className="w-4 h-4" /> Add Tenant
+            <Plus className="w-4 h-4" /> Connect Tenant
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {tenants.map((t) => (
-            <div key={t.id}
-              className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden cursor-pointer hover:shadow-md hover:border-blue-400 transition"
-              onClick={() => router.push(`/clouds/azure/${t.id}`)}>
-              <div className="px-5 py-4 flex items-center justify-between" style={{ background: "linear-gradient(135deg, #0078d4 0%, #1a6fa8 100%)" }}>
-                <div className="flex items-center gap-3">
-                  <Globe className="w-5 h-5 text-white" />
-                  <div>
-                    <span className="text-white font-bold text-base">{t.name}</span>
-                    <div className="text-white/60 text-xs font-mono mt-0.5">{t.azure_tenant_id?.slice(0, 8)}...</div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                  <button onClick={(e) => { e.stopPropagation(); setEditTenant(t); setEditName(t.name); }}
-                    className="p-1.5 rounded hover:bg-white/20 text-white transition" title="Edit name">
-                    <Edit2 className="w-3.5 h-3.5" />
-                  </button>
-                  <button onClick={(e) => triggerSync(e, t.id)} disabled={syncing[t.id] || syncStatuses[t.id]?.status === "running"}
-                    className="p-1.5 rounded hover:bg-white/20 text-white transition" title="Sync now">
-                    <RefreshCw className={`w-3.5 h-3.5 ${syncing[t.id] || syncStatuses[t.id]?.status === "running" ? "animate-spin" : ""}`} />
-                  </button>
-                  <button onClick={(e) => deleteTenant(e, t.id, t.name)}
-                    className="p-1.5 rounded hover:bg-red-500/30 text-white transition" title="Remove">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-              <div className="px-5 py-4">
-                <div className="grid grid-cols-2 gap-3 mb-3">
-                  {[
-                    { label: "Storage Account", value: t.azure_storage_account },
-                    { label: "Export Name", value: t.azure_export_name },
-                    { label: "Container", value: t.azure_container_name },
-                    { label: "Status", value: t.is_active ? "Active" : "Inactive", badge: true, active: t.is_active },
-                  ].map((f) => (
-                    <div key={f.label}>
-                      <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-0.5">{f.label}</div>
-                      {f.badge ? (
-                        <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${f.active ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"}`}>{f.value}</span>
-                      ) : (
-                        <div className="text-xs font-semibold text-black">{f.value}</div>
-                      )}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+          {tenants.map((t) => {
+            const cost = tenantCosts[t.id];
+            const isSyncing = syncing[t.id] || syncStatuses[t.id]?.status === "running";
+            return (
+              <div key={t.id}
+                className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden cursor-pointer hover:shadow-lg hover:border-blue-400 transition-all duration-200 group"
+                onClick={() => router.push(`/clouds/azure/${t.id}`)}>
+                {/* Card header gradient */}
+                <div className="px-5 py-5 relative overflow-hidden" style={{ background: "linear-gradient(135deg, #0f2d5e 0%, #1a6fa8 60%, #0078d4 100%)" }}>
+                  <div className="absolute inset-0 opacity-10" style={{ backgroundImage: "radial-gradient(circle at 80% 20%, #00bcf2 0%, transparent 60%)" }} />
+                  <div className="flex items-start justify-between relative z-10">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-lg bg-white/20 flex items-center justify-center">
+                        <Globe className="w-5 h-5 text-white" />
+                      </div>
+                      <div>
+                        <div className="text-white font-bold text-base leading-tight">{t.name}</div>
+                        <div className="text-white/50 text-[10px] font-mono mt-0.5">{t.azure_tenant_id?.slice(0, 8)}…</div>
+                      </div>
                     </div>
-                  ))}
-                </div>
-                <div className="pt-3 border-t border-gray-100">
-                  {getSyncBadge(t)}
-                  {syncStatuses[t.id]?.status === "running" && (
-                    <div className="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full rounded-full transition-all duration-500"
-                        style={{ width: `${syncStatuses[t.id]?.percent || 0}%`, background: "#0078d4" }} />
+                    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                      <button onClick={(e) => { e.stopPropagation(); setEditTenant(t); setEditName(t.name); }}
+                        className="p-1.5 rounded-md hover:bg-white/20 text-white/70 hover:text-white transition" title="Edit name">
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={(e) => triggerSync(e, t.id)} disabled={isSyncing}
+                        className="p-1.5 rounded-md hover:bg-white/20 text-white/70 hover:text-white transition" title="Sync now">
+                        <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin" : ""}`} />
+                      </button>
+                      <button onClick={(e) => deleteTenant(e, t.id, t.name)}
+                        className="p-1.5 rounded-md hover:bg-red-500/40 text-white/70 hover:text-white transition" title="Remove">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Cost figures */}
+                  <div className="mt-4 relative z-10">
+                    <div className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-1">{lastMonth.label} Cost</div>
+                    <div className="text-3xl font-bold text-white font-mono">
+                      {cost ? fmtINR(cost.true_cost) : <span className="text-white/30 text-lg">Loading…</span>}
+                    </div>
+                    {cost && cost.savings > 0 && (
+                      <div className="flex items-center gap-1.5 mt-1.5">
+                        <TrendingUp className="w-3 h-3 text-green-400" />
+                        <span className="text-green-400 text-xs font-bold">{fmtINR(cost.savings)} saved (RI/SP)</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Progress bar while syncing */}
+                  {isSyncing && (
+                    <div className="mt-3 h-1 bg-white/20 rounded-full overflow-hidden relative z-10">
+                      <div className="h-full rounded-full bg-blue-300 transition-all duration-500"
+                        style={{ width: `${syncStatuses[t.id]?.percent || 5}%` }} />
                     </div>
                   )}
                 </div>
+
+                {/* Card body */}
+                <div className="px-5 py-4">
+                  <div className="grid grid-cols-3 gap-3 mb-4">
+                    <div className="text-center p-2 rounded-lg bg-orange-50 border border-orange-100">
+                      <div className="text-[9px] font-bold uppercase tracking-wide text-orange-600 mb-1">Actual</div>
+                      <div className="text-xs font-bold text-orange-700 font-mono">
+                        {cost ? fmtINR(cost.actual_cost) : "—"}
+                      </div>
+                    </div>
+                    <div className="text-center p-2 rounded-lg bg-green-50 border border-green-100">
+                      <div className="text-[9px] font-bold uppercase tracking-wide text-green-600 mb-1">Savings</div>
+                      <div className="text-xs font-bold text-green-700 font-mono">
+                        {cost && cost.savings > 0 ? fmtINR(cost.savings) : "—"}
+                      </div>
+                    </div>
+                    <div className="text-center p-2 rounded-lg bg-blue-50 border border-blue-100">
+                      <div className="text-[9px] font-bold uppercase tracking-wide text-blue-700 mb-1">True Cost</div>
+                      <div className="text-xs font-bold text-blue-900 font-mono">
+                        {cost ? fmtINR(cost.true_cost) : "—"}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    {getSyncBadge(t)}
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${t.is_active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                      {t.is_active ? "● Active" : "○ Inactive"}
+                    </span>
+                  </div>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
       {/* Add Tenant Modal */}
       {showForm && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl border border-gray-200 shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-bold text-black">Add Azure Tenant</h3>
+              <h3 className="text-base font-bold text-black">Connect Azure Tenant</h3>
               <button onClick={() => setShowForm(false)}><X className="w-4 h-4 text-gray-500" /></button>
             </div>
             <div className="p-3 rounded-lg flex gap-2 text-xs mb-4" style={{ background: "#e8f4fd", border: "1px solid #b8daff", color: "#0078D4" }}>
@@ -303,7 +360,7 @@ export default function AzurePage() {
 
       {/* Edit Name Modal */}
       {editTenant && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl border border-gray-200 shadow-xl w-full max-w-sm p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-bold text-black">Edit Tenant Name</h3>
