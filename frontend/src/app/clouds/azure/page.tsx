@@ -1,27 +1,18 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
 import { Globe, Plus, RefreshCw, Trash2, Clock, CheckCircle, XCircle, Edit2, X, Info } from "lucide-react";
 
 interface AzureTenant {
-  id: string;
-  name: string;
-  azure_tenant_id: string;
-  azure_storage_account: string;
-  azure_container_name: string;
-  azure_export_name: string;
-  is_active: boolean;
-  last_synced_at: string | null;
-  auto_sync_enabled: boolean;
+  id: string; name: string; azure_tenant_id: string;
+  azure_storage_account: string; azure_container_name: string;
+  azure_export_name: string; is_active: boolean;
+  last_synced_at: string | null; auto_sync_enabled: boolean;
 }
-
-interface SyncStatus {
-  percent: number;
-  status: string;
-  message: string;
-}
+interface SyncStatus { percent: number; status: string; message: string; }
 
 export default function AzurePage() {
   const router = useRouter();
@@ -34,40 +25,17 @@ export default function AzurePage() {
   const [editName, setEditName] = useState("");
   const [savingName, setSavingName] = useState(false);
   const [syncing, setSyncing] = useState<Record<string, boolean>>({});
-  const [syncLogs, setSyncLogs] = useState<any[]>([]);
-  const [logsLoading, setLogsLoading] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  void syncLogs; void logsLoading;
-
-  const loadSyncLogs = async () => {};
-
-  const [form, setForm] = useState({
-    name: "", tenant_id: "", client_id: "",
-    client_secret: "", storage_account: "",
-    container_name: "", export_name: "",
-  });
+  const [form, setForm] = useState({ name: "", tenant_id: "", client_id: "", client_secret: "", storage_account: "", container_name: "", export_name: "" });
 
   const loadTenants = async () => {
     try {
       const res = await api.get("/towers/");
-      const azure = (res.data as AzureTenant[]).filter((t: any) => t.cloud_provider === "azure");
-      setTenants(azure);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
+      setTenants((res.data as any[]).filter((t) => t.cloud_provider === "azure"));
+    } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
-  useEffect(() => {
-    loadTenants();
-  }, []);
+  useEffect(() => { loadTenants(); }, []);
 
-  useEffect(() => {
-    if (tenants.length > 0) loadSyncLogs();
-  }, [tenants]);
-
-  // Poll sync status for all tenants
   useEffect(() => {
     if (tenants.length === 0) return;
     const interval = setInterval(async () => {
@@ -75,9 +43,7 @@ export default function AzurePage() {
         try {
           const res = await api.get(`/towers/${t.id}/sync-status`);
           setSyncStatuses((prev) => ({ ...prev, [t.id]: res.data }));
-          if (res.data.status === "done" || res.data.status === "failed") {
-            loadTenants();
-          }
+          if (res.data.status === "done" || res.data.status === "failed") loadTenants();
         } catch {}
       }
     }, 5000);
@@ -88,27 +54,18 @@ export default function AzurePage() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await api.post("/towers/onboard/azure", {
-        name: form.name,
-        tenant_id: form.tenant_id,
-        client_id: form.client_id,
-        client_secret: form.client_secret,
-        storage_account: form.storage_account,
-        container_name: form.container_name,
-        export_name: form.export_name,
-      });
-      toast.success("Azure tenant connected! Sync started in background.");
+      await api.post("/towers/onboard/azure", form);
+      toast.success("Azure tenant connected! Sync started.");
       setShowForm(false);
       setForm({ name: "", tenant_id: "", client_id: "", client_secret: "", storage_account: "", container_name: "", export_name: "" });
       await loadTenants();
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Onboarding failed");
-    } finally {
-      setSubmitting(false);
-    }
+    } finally { setSubmitting(false); }
   };
 
-  const triggerSync = async (id: string) => {
+  const triggerSync = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
     setSyncing((p) => ({ ...p, [id]: true }));
     try {
       await api.post(`/towers/${id}/sync`);
@@ -116,63 +73,47 @@ export default function AzurePage() {
       setSyncStatuses((prev) => ({ ...prev, [id]: { percent: 0, status: "running", message: "Starting..." } }));
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Sync failed");
-    } finally {
-      setSyncing((p) => ({ ...p, [id]: false }));
-    }
+    } finally { setSyncing((p) => ({ ...p, [id]: false })); }
   };
 
-  const deleteTenant = async (id: string, name: string) => {
+  const deleteTenant = async (e: React.MouseEvent, id: string, name: string) => {
+    e.stopPropagation();
     if (!confirm(`Remove Azure tenant "${name}"?`)) return;
-    try {
-      await api.delete(`/towers/${id}`);
-      toast.success("Tenant removed");
-      await loadTenants();
-    } catch {
-      toast.error("Failed to remove");
-    }
+    try { await api.delete(`/towers/${id}`); toast.success("Tenant removed"); await loadTenants(); }
+    catch { toast.error("Failed to remove"); }
   };
 
   const saveEditName = async () => {
     if (!editTenant || !editName.trim()) return;
     setSavingName(true);
     try {
-      // Use a PATCH endpoint — for now update via re-onboard isn't ideal
-      // We'll update the name directly via the towers patch
       await api.patch(`/towers/${editTenant.id}/name`, { name: editName.trim() });
-      toast.success("Name updated");
-      setEditTenant(null);
-      await loadTenants();
+      toast.success("Name updated"); setEditTenant(null); await loadTenants();
     } catch {
-      // Fallback — update locally
       setTenants((prev) => prev.map((t) => t.id === editTenant.id ? { ...t, name: editName.trim() } : t));
-      setEditTenant(null);
-      toast.success("Name updated");
-    } finally {
-      setSavingName(false);
-    }
+      setEditTenant(null); toast.success("Name updated");
+    } finally { setSavingName(false); }
   };
 
-  const getSyncBadge = (tenant: AzureTenant) => {
-    const s = syncStatuses[tenant.id];
-    if (s?.status === "running") {
-      return (
-        <div className="flex items-center gap-1.5">
-          <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-600" />
-          <span className="text-xs font-semibold text-blue-700">{s.message} {s.percent}%</span>
-        </div>
-      );
-    }
+  const getSyncBadge = (t: AzureTenant) => {
+    const s = syncStatuses[t.id];
+    if (s?.status === "running") return (
+      <div className="flex items-center gap-1.5">
+        <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-600" />
+        <span className="text-xs font-semibold text-blue-700">{s.message} {s.percent}%</span>
+      </div>
+    );
     if (s?.status === "failed") return (
       <div className="flex items-center gap-1.5">
         <XCircle className="w-3.5 h-3.5 text-red-500" />
         <span className="text-xs font-semibold text-red-600">Sync failed</span>
       </div>
     );
-    if (tenant.last_synced_at) return (
+    if (t.last_synced_at) return (
       <div className="flex items-center gap-1.5">
         <CheckCircle className="w-3.5 h-3.5 text-green-500" />
         <span className="text-xs font-semibold text-green-700">
-          Synced {new Date(tenant.last_synced_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}
+          Synced {new Date(t.last_synced_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}
         </span>
       </div>
     );
@@ -199,11 +140,17 @@ export default function AzurePage() {
             <p className="text-sm text-gray-500 mt-0.5">{tenants.length} tenant{tenants.length !== 1 ? "s" : ""} connected</p>
           </div>
         </div>
-        <button onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white rounded-lg transition"
-          style={{ background: "#0078D4" }}>
-          <Plus className="w-4 h-4" /> Add Tenant
-        </button>
+        <div className="flex items-center gap-3">
+          <Link href="/sync-logs/azure"
+            className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-black border border-gray-300 rounded-md hover:border-blue-900 hover:text-blue-900 transition">
+            <Clock className="w-4 h-4" /> Sync Logs
+          </Link>
+          <button onClick={() => setShowForm(true)}
+            className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white rounded-lg transition"
+            style={{ background: "#0078D4" }}>
+            <Plus className="w-4 h-4" /> Add Tenant
+          </button>
+        </div>
       </div>
 
       {/* Tenants list */}
@@ -222,7 +169,7 @@ export default function AzurePage() {
             <Globe className="w-7 h-7" style={{ color: "#0078d4" }} />
           </div>
           <h2 className="text-base font-bold text-gray-800 mb-1">No Azure Tenants Connected</h2>
-          <p className="text-sm text-gray-500 mb-4">Click "Add Tenant" to connect your Azure subscription and start syncing cost data.</p>
+          <p className="text-sm text-gray-500 mb-4">Click "Add Tenant" to connect your Azure subscription.</p>
           <button onClick={() => setShowForm(true)}
             className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white rounded-lg"
             style={{ background: "#0078D4" }}>
@@ -232,9 +179,9 @@ export default function AzurePage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {tenants.map((t) => (
-            <div key={t.id} className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden cursor-pointer hover:shadow-md hover:border-blue-400 transition"
+            <div key={t.id}
+              className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden cursor-pointer hover:shadow-md hover:border-blue-400 transition"
               onClick={() => router.push(`/clouds/azure/${t.id}`)}>
-              {/* Card header */}
               <div className="px-5 py-4 flex items-center justify-between" style={{ background: "linear-gradient(135deg, #0078d4 0%, #1a6fa8 100%)" }}>
                 <div className="flex items-center gap-3">
                   <Globe className="w-5 h-5 text-white" />
@@ -243,43 +190,38 @@ export default function AzurePage() {
                     <div className="text-white/60 text-xs font-mono mt-0.5">{t.azure_tenant_id?.slice(0, 8)}...</div>
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <button onClick={() => { setEditTenant(t); setEditName(t.name); }}
+                <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                  <button onClick={(e) => { e.stopPropagation(); setEditTenant(t); setEditName(t.name); }}
                     className="p-1.5 rounded hover:bg-white/20 text-white transition" title="Edit name">
                     <Edit2 className="w-3.5 h-3.5" />
                   </button>
-                  <button onClick={() => triggerSync(t.id)} disabled={syncing[t.id] || syncStatuses[t.id]?.status === "running"}
+                  <button onClick={(e) => triggerSync(e, t.id)} disabled={syncing[t.id] || syncStatuses[t.id]?.status === "running"}
                     className="p-1.5 rounded hover:bg-white/20 text-white transition" title="Sync now">
                     <RefreshCw className={`w-3.5 h-3.5 ${syncing[t.id] || syncStatuses[t.id]?.status === "running" ? "animate-spin" : ""}`} />
                   </button>
-                  <button onClick={() => deleteTenant(t.id, t.name)}
+                  <button onClick={(e) => deleteTenant(e, t.id, t.name)}
                     className="p-1.5 rounded hover:bg-red-500/30 text-white transition" title="Remove">
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
-
-              {/* Card body */}
               <div className="px-5 py-4">
                 <div className="grid grid-cols-2 gap-3 mb-3">
-                  <div>
-                    <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-0.5">Storage Account</div>
-                    <div className="text-xs font-semibold text-black">{t.azure_storage_account}</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-0.5">Export Name</div>
-                    <div className="text-xs font-semibold text-black">{t.azure_export_name}</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-0.5">Container</div>
-                    <div className="text-xs font-semibold text-black">{t.azure_container_name}</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-0.5">Status</div>
-                    <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${t.is_active ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"}`}>
-                      {t.is_active ? "Active" : "Inactive"}
-                    </span>
-                  </div>
+                  {[
+                    { label: "Storage Account", value: t.azure_storage_account },
+                    { label: "Export Name", value: t.azure_export_name },
+                    { label: "Container", value: t.azure_container_name },
+                    { label: "Status", value: t.is_active ? "Active" : "Inactive", badge: true, active: t.is_active },
+                  ].map((f) => (
+                    <div key={f.label}>
+                      <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-0.5">{f.label}</div>
+                      {f.badge ? (
+                        <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${f.active ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"}`}>{f.value}</span>
+                      ) : (
+                        <div className="text-xs font-semibold text-black">{f.value}</div>
+                      )}
+                    </div>
+                  ))}
                 </div>
                 <div className="pt-3 border-t border-gray-100">
                   {getSyncBadge(t)}
@@ -304,58 +246,45 @@ export default function AzurePage() {
               <h3 className="text-base font-bold text-black">Add Azure Tenant</h3>
               <button onClick={() => setShowForm(false)}><X className="w-4 h-4 text-gray-500" /></button>
             </div>
-
             <div className="p-3 rounded-lg flex gap-2 text-xs mb-4" style={{ background: "#e8f4fd", border: "1px solid #b8daff", color: "#0078D4" }}>
               <Info className="w-4 h-4 shrink-0 mt-0.5" />
               <span>Service Principal needs <strong>Storage Blob Data Reader</strong> + <strong>Cost Management Reader</strong> roles.</span>
             </div>
-
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">Display Name *</label>
-                <input required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  className={inputCls} placeholder="e.g. Novac Azure - Actual" />
+                <input required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className={inputCls} placeholder="e.g. Novac Azure" />
               </div>
-
               <div className="p-4 rounded-lg space-y-3" style={{ background: "#f8f9fa", border: "1px solid #e5e7eb" }}>
                 <p className="text-xs font-bold uppercase tracking-wide" style={{ color: "#0078D4" }}>Service Principal Credentials</p>
-                <div>
-                  <label className="text-xs font-bold text-black block mb-1">Tenant ID *</label>
-                  <input required value={form.tenant_id} onChange={(e) => setForm((f) => ({ ...f, tenant_id: e.target.value }))}
-                    className={`${inputCls} font-mono`} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-black block mb-1">Client ID *</label>
-                  <input required value={form.client_id} onChange={(e) => setForm((f) => ({ ...f, client_id: e.target.value }))}
-                    className={`${inputCls} font-mono`} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-black block mb-1">Client Secret *</label>
-                  <input required type="password" value={form.client_secret} onChange={(e) => setForm((f) => ({ ...f, client_secret: e.target.value }))}
-                    className={`${inputCls} font-mono`} placeholder="••••••••••••••••••••••••••••••••" />
-                </div>
+                {[
+                  { label: "Tenant ID", key: "tenant_id", placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" },
+                  { label: "Client ID", key: "client_id", placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" },
+                  { label: "Client Secret", key: "client_secret", placeholder: "••••••••••••••••••••••••", type: "password" },
+                ].map((f) => (
+                  <div key={f.key}>
+                    <label className="text-xs font-bold text-black block mb-1">{f.label} *</label>
+                    <input required type={f.type || "text"} value={(form as any)[f.key]}
+                      onChange={(e) => setForm((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                      className={`${inputCls} font-mono`} placeholder={f.placeholder} />
+                  </div>
+                ))}
               </div>
-
               <div className="p-4 rounded-lg space-y-3" style={{ background: "#e8f4fd", border: "1px solid #b8daff" }}>
                 <p className="text-xs font-bold uppercase tracking-wide" style={{ color: "#0078D4" }}>Cost Export Storage</p>
-                <div>
-                  <label className="text-xs font-bold text-black block mb-1">Storage Account Name *</label>
-                  <input required value={form.storage_account} onChange={(e) => setForm((f) => ({ ...f, storage_account: e.target.value }))}
-                    className={inputCls} placeholder="e.g. finoptixcostexports" />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-black block mb-1">Container Name *</label>
-                  <input required value={form.container_name} onChange={(e) => setForm((f) => ({ ...f, container_name: e.target.value }))}
-                    className={inputCls} placeholder="e.g. cost-exports" />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-black block mb-1">Export Directory *</label>
-                  <input required value={form.export_name} onChange={(e) => setForm((f) => ({ ...f, export_name: e.target.value }))}
-                    className={inputCls} placeholder="e.g. finoptix-actual" />
-                  <p className="text-[10px] text-gray-500 mt-1">Directory name in Azure Cost Management → Exports</p>
-                </div>
+                {[
+                  { label: "Storage Account Name", key: "storage_account", placeholder: "finoptixcostexports" },
+                  { label: "Container Name", key: "container_name", placeholder: "cost-exports" },
+                  { label: "Export Directory", key: "export_name", placeholder: "finoptix" },
+                ].map((f) => (
+                  <div key={f.key}>
+                    <label className="text-xs font-bold text-black block mb-1">{f.label} *</label>
+                    <input required value={(form as any)[f.key]}
+                      onChange={(e) => setForm((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                      className={inputCls} placeholder={f.placeholder} />
+                  </div>
+                ))}
               </div>
-
               <div className="flex gap-3 pt-2">
                 <button type="submit" disabled={submitting}
                   className="flex-1 py-2.5 text-sm font-bold text-white rounded-lg transition disabled:opacity-50"
@@ -372,8 +301,6 @@ export default function AzurePage() {
         </div>
       )}
 
-      {/* Click tenant card to see sync logs and cost detail */}
-
       {/* Edit Name Modal */}
       {editTenant && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
@@ -382,13 +309,9 @@ export default function AzurePage() {
               <h3 className="text-sm font-bold text-black">Edit Tenant Name</h3>
               <button onClick={() => setEditTenant(null)}><X className="w-4 h-4 text-gray-500" /></button>
             </div>
-            <input value={editName} onChange={(e) => setEditName(e.target.value)}
-              className={inputCls} autoFocus placeholder="Display name" />
+            <input value={editName} onChange={(e) => setEditName(e.target.value)} className={inputCls} autoFocus placeholder="Display name" />
             <div className="flex gap-3 mt-4">
-              <button onClick={() => setEditTenant(null)}
-                className="flex-1 py-2 border border-gray-300 rounded-lg text-xs font-bold text-black hover:bg-gray-50 transition">
-                Cancel
-              </button>
+              <button onClick={() => setEditTenant(null)} className="flex-1 py-2 border border-gray-300 rounded-lg text-xs font-bold text-black hover:bg-gray-50 transition">Cancel</button>
               <button onClick={saveEditName} disabled={savingName || !editName.trim()}
                 className="flex-1 py-2 text-white text-xs font-bold rounded-lg transition disabled:opacity-50"
                 style={{ background: "#0078D4" }}>
