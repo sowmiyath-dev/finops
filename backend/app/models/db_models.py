@@ -143,6 +143,23 @@ class AzureCostRecord(Base):
     synced_at = Column(DateTime(timezone=True), default=utcnow)
 
 
+class AzureBusinessMapping(Base):
+    """Maps a Business to an Azure cost source (subscription / resource_group / tag / resources)."""
+    __tablename__ = "azure_business_mappings"
+    __table_args__ = (Index("ix_abm_business", "business_id"),)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    business_id = Column(UUID(as_uuid=True), ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False)
+    control_tower_id = Column(UUID(as_uuid=True), ForeignKey("control_towers.id", ondelete="CASCADE"), nullable=False)
+    mapping_type = Column(String, nullable=False)   # subscription | resource_group | tag | resource
+    subscription_id = Column(String, nullable=True)
+    subscription_name = Column(String, nullable=True)
+    resource_group = Column(String, nullable=True)
+    tag_key = Column(String, nullable=True)
+    tag_value = Column(String, nullable=True)
+    resource_ids = Column(Text, nullable=True)      # JSON list of resource IDs
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
 class SyncLog(Base):
     __tablename__ = "sync_logs"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

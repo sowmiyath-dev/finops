@@ -8,7 +8,7 @@ function fmtDate(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 function fmt(n: number) {
-  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 function getMonthOptions() {
   const options = [];
@@ -25,7 +25,7 @@ function getMonthOptions() {
 
 interface Business { id: string; name: string; cost_type?: string; owner_name?: string; }
 interface Vertical { id: string; name: string; color: string; businesses: Business[]; }
-interface CostRow { aws: number; azure: number; total: number; }
+interface CostRow { aws: number; azure_actual: number; azure_savings: number; azure_true: number; total: number; }
 
 export default function FinOpsDashboard() {
   const { token } = useAuthStore();
@@ -54,8 +54,7 @@ export default function FinOpsDashboard() {
       const vertsRes = await api.get(`/verticals/`);
       const vertList = vertsRes.data as { id: string; name: string; color: string }[];
 
-      // Load businesses + costs in parallel — only 3 API calls total
-      const [bizResults, costRes] = await Promise.all([
+      const [bizResults, awsCostRes, azureCostRes] = await Promise.all([
         Promise.all(
           vertList.map((v) =>
             api.get(`/verticals/${v.id}/businesses`)
@@ -65,6 +64,9 @@ export default function FinOpsDashboard() {
         api.get(`/verticals/all-businesses-cost`, {
           params: { granularity: "monthly", start_date: start, end_date: end },
         }).then((r) => r.data as Record<string, number>).catch(() => ({} as Record<string, number>)),
+        api.get(`/azure-costs/business-costs`, {
+          params: { start_date: start, end_date: end },
+        }).then((r) => r.data as Record<string, { actual_cost: number; savings: number; true_cost: number }>).catch(() => ({} as Record<string, any>)),
       ]);
 
       const fullVerticals: Vertical[] = vertList.map((v) => ({
@@ -74,8 +76,15 @@ export default function FinOpsDashboard() {
       setVerticals(fullVerticals);
 
       const costMap: Record<string, CostRow> = {};
-      for (const [bizId, cost] of Object.entries(costRes)) {
-        costMap[bizId] = { aws: cost as number, azure: 0, total: cost as number };
+      for (const [bizId, awsCost] of Object.entries(awsCostRes)) {
+        costMap[bizId] = { aws: awsCost as number, azure_actual: 0, azure_savings: 0, azure_true: 0, total: awsCost as number };
+      }
+      for (const [bizId, az] of Object.entries(azureCostRes)) {
+        if (!costMap[bizId]) costMap[bizId] = { aws: 0, azure_actual: 0, azure_savings: 0, azure_true: 0, total: 0 };
+        costMap[bizId].azure_actual = az.actual_cost || 0;
+        costMap[bizId].azure_savings = az.savings || 0;
+        costMap[bizId].azure_true = az.true_cost || 0;
+        costMap[bizId].total = costMap[bizId].aws + (az.true_cost || 0);
       }
       setCosts(costMap);
     } catch (e) {
@@ -98,40 +107,35 @@ export default function FinOpsDashboard() {
   const toggleCollapse = (id: string) => setCollapsed((p) => ({ ...p, [id]: !p[id] }));
 
   const verticalTotals = (v: Vertical): CostRow => {
-    let aws = 0, azure = 0;
+    let aws = 0, azure_actual = 0, azure_savings = 0, azure_true = 0;
     for (const b of v.businesses) {
       aws += costs[b.id]?.aws || 0;
-      azure += costs[b.id]?.azure || 0;
+      azure_actual += costs[b.id]?.azure_actual || 0;
+      azure_savings += costs[b.id]?.azure_savings || 0;
+      azure_true += costs[b.id]?.azure_true || 0;
     }
-    return { aws, azure, total: aws + azure };
+    return { aws, azure_actual, azure_savings, azure_true, total: aws + azure_true };
   };
 
   const grandTotal = verticals.reduce((acc, v) => {
     const t = verticalTotals(v);
-    return { aws: acc.aws + t.aws, azure: acc.azure + t.azure, total: acc.total + t.total };
-  }, { aws: 0, azure: 0, total: 0 });
+    return { aws: acc.aws + t.aws, azure_actual: acc.azure_actual + t.azure_actual, azure_savings: acc.azure_savings + t.azure_savings, azure_true: acc.azure_true + t.azure_true, total: acc.total + t.total };
+  }, { aws: 0, azure_actual: 0, azure_savings: 0, azure_true: 0, total: 0 });
 
-  // CSV Download
   const downloadCSV = () => {
     const rows: string[][] = [
-      ["Vertical", "Business", "Owner", "Cost Type", "AWS Cost", "Azure Cost", "Total Cost", "Period"],
+      ["Vertical", "Business", "Owner", "Cost Type", "AWS Cost", "Azure Actual", "Azure Savings", "Azure True Cost", "Total Cost", "Period"],
     ];
     for (const v of verticals) {
-      const vTotals = verticalTotals(v);
-      rows.push([v.name, "", "", "", fmt(vTotals.aws), fmt(vTotals.azure), fmt(vTotals.total), selectedMonth.label]);
+      const vT = verticalTotals(v);
+      rows.push([v.name, "", "", "", fmt(vT.aws), fmt(vT.azure_actual), fmt(vT.azure_savings), fmt(vT.azure_true), fmt(vT.total), selectedMonth.label]);
       for (const b of v.businesses) {
-        const c = costs[b.id] || { aws: 0, azure: 0, total: 0 };
-        rows.push([
-          v.name, b.name,
-          b.owner_name || "—",
-          (b.cost_type || "resource") === "account" ? "Account" : "Resource",
-          fmt(c.aws), fmt(c.azure), fmt(c.total),
-          selectedMonth.label,
-        ]);
+        const c = costs[b.id] || { aws: 0, azure_actual: 0, azure_savings: 0, azure_true: 0, total: 0 };
+        rows.push([v.name, b.name, b.owner_name || "—", (b.cost_type || "resource") === "account" ? "Account" : "Resource",
+          fmt(c.aws), fmt(c.azure_actual), fmt(c.azure_savings), fmt(c.azure_true), fmt(c.total), selectedMonth.label]);
       }
     }
-    rows.push(["Grand Total", "", "", "", fmt(grandTotal.aws), fmt(grandTotal.azure), fmt(grandTotal.total), selectedMonth.label]);
-
+    rows.push(["Grand Total", "", "", "", fmt(grandTotal.aws), fmt(grandTotal.azure_actual), fmt(grandTotal.azure_savings), fmt(grandTotal.azure_true), fmt(grandTotal.total), selectedMonth.label]);
     const csv = rows.map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -141,6 +145,17 @@ export default function FinOpsDashboard() {
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  const headers = [
+    { label: "Vertical", align: "left" },
+    { label: "Business", align: "left" },
+    { label: "Owner", align: "left" },
+    { label: "AWS Cost", align: "right", dot: "bg-orange-500" },
+    { label: "Azure Actual", align: "right", dot: "bg-blue-400" },
+    { label: "Azure Savings", align: "right", dot: "bg-green-500" },
+    { label: "Azure True Cost", align: "right", dot: "bg-blue-600" },
+    { label: "Total Cost", align: "right" },
+  ];
 
   return (
     <div className="p-6">
@@ -163,7 +178,6 @@ export default function FinOpsDashboard() {
             Collapse All
           </button>
 
-          {/* Month selector */}
           <div className="relative" ref={dropRef}>
             <button onClick={() => setShowMonthDrop((p) => !p)}
               className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-md bg-white text-xs font-bold text-black hover:border-blue-900 transition min-w-[160px] justify-between">
@@ -177,9 +191,7 @@ export default function FinOpsDashboard() {
               <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-[160px] max-h-64 overflow-y-auto">
                 {months.map((m, i) => (
                   <button key={m.start} onClick={() => applyMonth(m)}
-                    className={`w-full text-left px-4 py-2.5 text-xs font-semibold hover:bg-blue-50 transition flex items-center justify-between ${
-                      m.start === selectedMonth.start ? "bg-blue-900 text-white" : "text-black"
-                    }`}>
+                    className={`w-full text-left px-4 py-2.5 text-xs font-semibold hover:bg-blue-50 transition flex items-center justify-between ${m.start === selectedMonth.start ? "bg-blue-900 text-white" : "text-black"}`}>
                     <span>{m.label}</span>
                     {i === 1 && m.start !== selectedMonth.start && (
                       <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-bold">Last</span>
@@ -203,28 +215,13 @@ export default function FinOpsDashboard() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-lg border border-gray-300 shadow-sm overflow-hidden">
-        <table className="w-full">
-          <colgroup>
-            <col style={{ width: "150px" }} />
-            <col style={{ width: "160px" }} />
-            <col style={{ width: "130px" }} />
-            <col style={{ width: "160px" }} />
-            <col style={{ width: "160px" }} />
-            <col style={{ width: "160px" }} />
-          </colgroup>
+      <div className="bg-white rounded-lg border border-gray-300 shadow-sm overflow-x-auto">
+        <table className="w-full min-w-[900px]">
           <thead>
             <tr className="bg-gray-100 border-b-2 border-gray-300">
-              {[
-                { label: "Vertical", align: "left" },
-                { label: "Business", align: "left" },
-                { label: "Owner", align: "left" },
-                { label: "AWS Cost", align: "right", dot: "bg-orange-500" },
-                { label: "Azure Cost", align: "right", dot: "bg-blue-500" },
-                { label: "Total Cost", align: "right" },
-              ].map((h) => (
+              {headers.map((h) => (
                 <th key={h.label}
-                  className={`text-${h.align} text-xs font-bold uppercase tracking-wider text-gray-700 px-4 py-3`}>
+                  className={`text-${h.align} text-xs font-bold uppercase tracking-wider text-gray-700 px-4 py-3 whitespace-nowrap`}>
                   {h.dot ? (
                     <div className={`flex items-center ${h.align === "right" ? "justify-end" : ""} gap-1.5`}>
                       <div className={`w-2 h-2 rounded-full ${h.dot}`} />
@@ -239,7 +236,7 @@ export default function FinOpsDashboard() {
             {loading ? (
               [...Array(8)].map((_, i) => (
                 <tr key={i} className="border-b border-gray-100">
-                  {[...Array(6)].map((_, j) => (
+                  {[...Array(8)].map((_, j) => (
                     <td key={j} className="px-4 py-3">
                       <div className={`h-3 bg-gray-200 rounded animate-pulse ${j >= 3 ? "ml-auto" : ""}`}
                         style={{ width: j >= 3 ? "80px" : j === 0 ? "80px" : "120px" }} />
@@ -252,7 +249,6 @@ export default function FinOpsDashboard() {
                 const vTotals = verticalTotals(v);
                 const isCollapsed = collapsed[v.id];
                 return [
-                  // Vertical row
                   <tr key={`v-${v.id}`}
                     className="border-b border-gray-200 cursor-pointer hover:bg-gray-50 transition"
                     style={{ background: `${v.color}0d` }}
@@ -261,29 +257,30 @@ export default function FinOpsDashboard() {
                       <div className="flex items-center gap-2">
                         <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: v.color }} />
                         <span className="text-sm font-bold text-black">{v.name}</span>
-                        {isCollapsed
-                          ? <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
-                          : <ChevronDown className="w-3.5 h-3.5 text-gray-400" />}
+                        {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400" />}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-xs text-gray-400 font-semibold">
-                      {v.businesses.length} business{v.businesses.length !== 1 ? "es" : ""}
-                    </td>
+                    <td className="px-4 py-3 text-xs text-gray-400 font-semibold">{v.businesses.length} business{v.businesses.length !== 1 ? "es" : ""}</td>
                     <td className="px-4 py-3" />
                     <td className="px-4 py-3 text-right text-sm font-bold font-mono text-orange-700">
                       {vTotals.aws > 0 ? fmt(vTotals.aws) : <span className="text-gray-300 font-normal">—</span>}
                     </td>
+                    <td className="px-4 py-3 text-right text-sm font-bold font-mono text-blue-500">
+                      {vTotals.azure_actual > 0 ? fmt(vTotals.azure_actual) : <span className="text-gray-300 font-normal">—</span>}
+                    </td>
+                    <td className="px-4 py-3 text-right text-sm font-bold font-mono text-green-700">
+                      {vTotals.azure_savings > 0 ? fmt(vTotals.azure_savings) : <span className="text-gray-300 font-normal">—</span>}
+                    </td>
                     <td className="px-4 py-3 text-right text-sm font-bold font-mono text-blue-700">
-                      {vTotals.azure > 0 ? fmt(vTotals.azure) : <span className="text-gray-300 font-normal">—</span>}
+                      {vTotals.azure_true > 0 ? fmt(vTotals.azure_true) : <span className="text-gray-300 font-normal">—</span>}
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-bold font-mono text-blue-900">
                       {vTotals.total > 0 ? fmt(vTotals.total) : <span className="text-gray-300 font-normal">—</span>}
                     </td>
                   </tr>,
 
-                  // Business rows
                   ...(!isCollapsed ? v.businesses.map((b) => {
-                    const c = costs[b.id] || { aws: 0, azure: 0, total: 0 };
+                    const c = costs[b.id] || { aws: 0, azure_actual: 0, azure_savings: 0, azure_true: 0, total: 0 };
                     const isAccount = (b.cost_type || "resource") === "account";
                     return (
                       <tr key={`b-${b.id}`} className="border-b border-gray-100 hover:bg-blue-50 transition">
@@ -293,9 +290,7 @@ export default function FinOpsDashboard() {
                             <div className="w-1 h-3.5 rounded-full flex-shrink-0" style={{ background: `${v.color}50` }} />
                             <span className="text-sm font-semibold text-black">{b.name}</span>
                             {isAccount && (
-                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border bg-green-50 text-green-700 border-green-200 uppercase tracking-wide">
-                                Acct
-                              </span>
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border bg-green-50 text-green-700 border-green-200 uppercase tracking-wide">Acct</span>
                             )}
                           </div>
                         </td>
@@ -305,8 +300,14 @@ export default function FinOpsDashboard() {
                         <td className="px-4 py-2.5 text-right text-sm font-mono text-orange-700">
                           {c.aws > 0 ? fmt(c.aws) : <span className="text-gray-300">—</span>}
                         </td>
+                        <td className="px-4 py-2.5 text-right text-sm font-mono text-blue-500">
+                          {c.azure_actual > 0 ? fmt(c.azure_actual) : <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-right text-sm font-mono text-green-700">
+                          {c.azure_savings > 0 ? fmt(c.azure_savings) : <span className="text-gray-300">—</span>}
+                        </td>
                         <td className="px-4 py-2.5 text-right text-sm font-mono text-blue-700">
-                          {c.azure > 0 ? fmt(c.azure) : <span className="text-gray-300">—</span>}
+                          {c.azure_true > 0 ? fmt(c.azure_true) : <span className="text-gray-300">—</span>}
                         </td>
                         <td className="px-4 py-2.5 text-right text-sm font-semibold font-mono text-black">
                           {c.total > 0 ? fmt(c.total) : <span className="text-gray-300">—</span>}
@@ -318,13 +319,14 @@ export default function FinOpsDashboard() {
               })
             )}
 
-            {/* Grand Total */}
             {!loading && verticals.length > 0 && (
               <tr className="border-t-2 border-gray-300 bg-gray-100">
                 <td className="px-4 py-3 text-sm font-bold text-black">Grand Total</td>
                 <td className="px-4 py-3" colSpan={2} />
                 <td className="px-4 py-3 text-right text-sm font-bold font-mono text-orange-700">{fmt(grandTotal.aws)}</td>
-                <td className="px-4 py-3 text-right text-sm font-bold font-mono text-blue-700">{fmt(grandTotal.azure)}</td>
+                <td className="px-4 py-3 text-right text-sm font-bold font-mono text-blue-500">{fmt(grandTotal.azure_actual)}</td>
+                <td className="px-4 py-3 text-right text-sm font-bold font-mono text-green-700">{fmt(grandTotal.azure_savings)}</td>
+                <td className="px-4 py-3 text-right text-sm font-bold font-mono text-blue-700">{fmt(grandTotal.azure_true)}</td>
                 <td className="px-4 py-3 text-right text-sm font-bold font-mono text-blue-900">{fmt(grandTotal.total)}</td>
               </tr>
             )}
@@ -333,7 +335,7 @@ export default function FinOpsDashboard() {
       </div>
 
       <p className="text-xs text-gray-400 mt-3">
-        {selectedMonth.start} → {selectedMonth.end} · <span className="text-green-600 font-semibold">Acct</span> = account-level cost matches CT dashboard · Azure populates after onboarding
+        {selectedMonth.start} → {selectedMonth.end} · <span className="text-green-600 font-semibold">Acct</span> = account-level · Azure True Cost = amortized (RI/SP allocated)
       </p>
     </div>
   );

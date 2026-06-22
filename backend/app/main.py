@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from app.models.database import init_db
 from app.routers import auth, towers, reports, admin, tags, verticals
+from app.routers import azure_costs
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ app.include_router(reports.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 app.include_router(tags.router, prefix="/api")
 app.include_router(verticals.router, prefix="/api")
+app.include_router(azure_costs.router, prefix="/api")
 
 
 @app.on_event("startup")
