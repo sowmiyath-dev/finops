@@ -1688,22 +1688,71 @@ async def owner_cost(
     apps = (await db.execute(
         select(Application).where(Application.owner_id == owner_id).order_by(Application.name)
     )).scalars().all()
+    if not apps:
+        return {"owner_id": owner_id, "granularity": granularity, "start": str(start), "end": str(end), "apps": []}
+
+    app_ids = [a.id for a in apps]
+
+    # Single query for all resources across all apps
+    all_res_rows = (await db.execute(
+        select(ApplicationResource.application_id, ApplicationResource.resource_id)
+        .where(ApplicationResource.application_id.in_(app_ids))
+    )).all()
+
+    res_by_app: dict = {}
+    all_resource_ids: set = set()
+    for row in all_res_rows:
+        aid = str(row.application_id)
+        res_by_app.setdefault(aid, set()).add(row.resource_id)
+        all_resource_ids.add(row.resource_id)
+
+    if granularity == "monthly":
+        period_expr = func.to_char(CostRecord.date, "YYYY-MM").label("period")
+    elif granularity == "weekly":
+        period_expr = func.to_char(func.date_trunc("week", CostRecord.date), "YYYY-MM-DD").label("period")
+    else:
+        period_expr = func.cast(CostRecord.date, CostRecord.date.type).label("period")
+
+    from sqlalchemy import case as sa_case_oc, literal as sa_literal_oc
+    true_cost_oc = sa_case_oc(
+        (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.amortized_cost),
+        (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
+        else_=sa_literal_oc(0),
+    )
+
+    # Single cost query for all resources grouped by resource_id and period
+    cost_rows = (await db.execute(
+        select(CostRecord.resource_id, period_expr, func.sum(true_cost_oc).label("cost"))
+        .where(
+            CostRecord.resource_id.in_(list(all_resource_ids)),
+            CostRecord.date >= start,
+            CostRecord.date <= end,
+        )
+        .group_by(CostRecord.resource_id, "period")
+    )).all() if all_resource_ids else []
+
+    # resource_id -> {period -> cost}
+    res_period_cost: dict = {}
+    for row in cost_rows:
+        res_period_cost.setdefault(row.resource_id, {})
+        p = str(row.period)
+        res_period_cost[row.resource_id][p] = res_period_cost[row.resource_id].get(p, 0) + float(row.cost or 0)
 
     result = []
     for app in apps:
-        res_rows = (await db.execute(
-            select(ApplicationResource.resource_id)
-            .where(ApplicationResource.application_id == app.id)
-        )).scalars().all()
-        resource_ids = list(set(res_rows))
-        trend = await _cost_for_resources(db, resource_ids, start, end, granularity)
-        total = sum(p["cost"] for p in trend)
+        aid = str(app.id)
+        rids = res_by_app.get(aid, set())
+        period_totals: dict = {}
+        for rid in rids:
+            for p, c in res_period_cost.get(rid, {}).items():
+                period_totals[p] = period_totals.get(p, 0) + c
+        trend = [{"period": p, "cost": c} for p, c in sorted(period_totals.items())]
         result.append({
             "app_id": str(app.id),
             "app_name": app.name,
             "app_color": app.color,
-            "resource_count": len(resource_ids),
-            "total_cost": total,
+            "resource_count": len(rids),
+            "total_cost": sum(period_totals.values()),
             "trend": trend,
         })
 

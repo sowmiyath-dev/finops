@@ -655,12 +655,19 @@ async def list_towers(db: AsyncSession = Depends(get_db), user: User = Depends(g
     else:
         result = await db.execute(select(ControlTower).where(ControlTower.user_id == user.id))
     towers = result.scalars().all()
+    if not towers:
+        return []
 
-    response = []
-    for t in towers:
-        sub_result = await db.execute(select(SubAccount).where(SubAccount.control_tower_id == t.id))
-        subs = sub_result.scalars().all()
-        response.append(ControlTowerOut(
+    # Single query for all sub_accounts — eliminates N+1
+    tower_ids = [t.id for t in towers]
+    sub_result = await db.execute(select(SubAccount).where(SubAccount.control_tower_id.in_(tower_ids)))
+    all_subs = sub_result.scalars().all()
+    subs_by_tower: dict = {}
+    for s in all_subs:
+        subs_by_tower.setdefault(str(s.control_tower_id), []).append(s)
+
+    return [
+        ControlTowerOut(
             id=t.id, name=t.name, cloud_provider=t.cloud_provider or "aws",
             management_account_id=t.management_account_id,
             management_account_name=t.management_account_name,
@@ -674,9 +681,13 @@ async def list_towers(db: AsyncSession = Depends(get_db), user: User = Depends(g
             azure_storage_account=t.azure_storage_account,
             azure_container_name=t.azure_container_name,
             azure_export_name=t.azure_export_name,
-            sub_accounts=[SubAccountOut(id=s.id, aws_account_id=s.aws_account_id, account_name=s.account_name, is_active=s.is_active) for s in subs],
-        ))
-    return response
+            sub_accounts=[
+                SubAccountOut(id=s.id, aws_account_id=s.aws_account_id, account_name=s.account_name, is_active=s.is_active)
+                for s in subs_by_tower.get(str(t.id), [])
+            ],
+        )
+        for t in towers
+    ]
 
 
 # ── dynamic /{ct_id} routes AFTER all static routes ──────────────────────────

@@ -110,6 +110,10 @@ class AzureCostRecord(Base):
         Index("ix_az_rg_date", "resource_group", "date"),
         Index("ix_az_service_date", "service", "date"),
         Index("ix_az_resource_id", "resource_id"),
+        Index("ix_az_cost_type_date", "cost_type", "date"),
+        Index("ix_az_sub_cost_type_date", "subscription_id", "cost_type", "date"),
+        Index("ix_az_rg_cost_type_date", "resource_group", "cost_type", "date"),
+        Index("ix_az_pricing_model", "pricing_model"),
     )
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     control_tower_id = Column(UUID(as_uuid=True), ForeignKey("control_towers.id"), nullable=False)
