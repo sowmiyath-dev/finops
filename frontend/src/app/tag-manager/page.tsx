@@ -192,7 +192,7 @@ export default function TagManagerPage() {
         ))}
       </div>
 
-      {cloudTab === "aws" && (
+      {cloudTab === "aws" && (<>
       <div className="flex items-start gap-2 mb-5 px-4 py-3 rounded-lg border border-blue-300 bg-blue-50 text-blue-900 text-sm font-semibold">
         <Tag className="w-4 h-4 flex-shrink-0 mt-0.5" />
         <span>
@@ -381,7 +381,7 @@ export default function TagManagerPage() {
         </div>
       </div>
     </div>
-      )}
+      </> )}
 
       {/* Azure Tag Panel */}
       {cloudTab === "azure" && (
