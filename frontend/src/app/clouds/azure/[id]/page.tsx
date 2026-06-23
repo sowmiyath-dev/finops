@@ -48,14 +48,6 @@ export default function AzureTenantDetail() {
   const [showSpModal, setShowSpModal] = useState(false);
 
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (dropRef.current && !dropRef.current.contains(e.target as Node)) setShowDrop(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  useEffect(() => {
     api.get("/towers/").then((r) => {
       const t = (r.data as any[]).find((t) => t.id === id);
       if (t) setTenantName(t.name);
