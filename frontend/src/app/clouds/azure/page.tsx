@@ -71,7 +71,7 @@ export default function AzurePage() {
           if (res.data.status === "done" || res.data.status === "failed") loadTenants();
         } catch {}
       }
-    }, 5000);
+    }, 15000);
     return () => clearInterval(interval);
   }, [tenants]);
 

@@ -1,6 +1,8 @@
+import asyncio
+import time
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from typing import Optional
 from pydantic import BaseModel
 from datetime import date
@@ -12,6 +14,19 @@ from app.services.auth_service import get_current_user
 from app.models.db_models import User
 
 router = APIRouter(prefix="/azure-costs", tags=["azure-costs"])
+
+# Simple in-memory cache
+_cache: dict = {}
+_CACHE_TTL = 1800  # 30 min
+
+def _cache_get(key: str):
+    e = _cache.get(key)
+    if e and time.time() - e["t"] < _CACHE_TTL:
+        return e["d"]
+    return None
+
+def _cache_set(key: str, data):
+    _cache[key] = {"d": data, "t": time.time()}
 
 
 def _parse_dates(start_date: Optional[str], end_date: Optional[str]):
@@ -47,21 +62,27 @@ async def cost_summary(
     user: User = Depends(get_current_user),
 ):
     start, end = _parse_dates(start_date, end_date)
+    cache_key = f"az_summary_{start}_{end}_{subscription_id}"
+    if (cached := _cache_get(cache_key)) is not None:
+        return cached
+
     ca = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "actual"]
     cm = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "amortized"]
     if subscription_id:
         ca.append(AzureCostRecord.subscription_id == subscription_id)
         cm.append(AzureCostRecord.subscription_id == subscription_id)
 
-    actual = float((await db.execute(select(func.sum(AzureCostRecord.actual_cost)).where(*ca))).scalar() or 0)
-    amortized = float((await db.execute(select(func.sum(AzureCostRecord.amortized_cost)).where(*cm))).scalar() or 0)
+    actual_t, amortized_t = await asyncio.gather(
+        db.execute(select(func.sum(AzureCostRecord.actual_cost)).where(*ca)),
+        db.execute(select(func.sum(AzureCostRecord.amortized_cost)).where(*cm)),
+    )
+    actual = float(actual_t.scalar() or 0)
+    amortized = float(amortized_t.scalar() or 0)
     savings = max(0, actual - amortized)
-    return {
-        "actual_cost": actual,
-        "amortized_cost": amortized,
-        "savings": savings,
-        "true_cost": amortized if amortized > 0 else actual,
-    }
+    result = {"actual_cost": actual, "amortized_cost": amortized, "savings": savings,
+              "true_cost": amortized if amortized > 0 else actual}
+    _cache_set(cache_key, result)
+    return result
 
 
 # ── Subscriptions ─────────────────────────────────────────────────────────────
@@ -244,10 +265,12 @@ async def get_tag_keys(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    if (cached := _cache_get("az_tag_keys")) is not None:
+        return cached
     rows = (await db.execute(
         select(AzureCostRecord.tags)
         .where(AzureCostRecord.tags.isnot(None), AzureCostRecord.cost_type == "actual")
-        .limit(1000)
+        .limit(200)
     )).scalars().all()
     keys: set = set()
     for tags_str in rows:
@@ -255,7 +278,9 @@ async def get_tag_keys(
             keys.update(json.loads(tags_str).keys())
         except Exception:
             pass
-    return sorted(list(keys))
+    result = sorted(list(keys))
+    _cache_set("az_tag_keys", result)
+    return result
 
 
 # ── Daily trend ───────────────────────────────────────────────────────────────
@@ -511,41 +536,91 @@ async def all_business_azure_costs(
     user: User = Depends(get_current_user),
 ):
     start, end = _parse_dates(start_date, end_date)
+    cache_key = f"az_biz_costs_{start}_{end}"
+    if (cached := _cache_get(cache_key)) is not None:
+        return cached
+
     mappings = (await db.execute(select(AzureBusinessMapping))).scalars().all()
     if not mappings:
         return {}
 
-    result: dict = {}
-    for m in mappings:
+    # Group mappings by type to batch queries
+    sub_mappings = [m for m in mappings if m.mapping_type == "subscription"]
+    rg_mappings = [m for m in mappings if m.mapping_type == "resource_group"]
+    tag_mappings = [m for m in mappings if m.mapping_type == "tag"]
+    res_mappings = [m for m in mappings if m.mapping_type == "resource"]
+
+    result: dict = {str(m.business_id): {"actual_cost": 0.0, "savings": 0.0, "true_cost": 0.0} for m in mappings}
+
+    async def _query_costs(conditions_actual, conditions_amortized, group_col):
+        actual_t, amortized_t = await asyncio.gather(
+            db.execute(select(group_col, func.sum(AzureCostRecord.actual_cost).label("c")).where(*conditions_actual).group_by(group_col)),
+            db.execute(select(group_col, func.sum(AzureCostRecord.amortized_cost).label("c")).where(*conditions_amortized).group_by(group_col)),
+        )
+        actual_map = {str(r[0]): float(r[1] or 0) for r in actual_t.all()}
+        amortized_map = {str(r[0]): float(r[1] or 0) for r in amortized_t.all()}
+        return actual_map, amortized_map
+
+    base_a = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "actual"]
+    base_m = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "amortized"]
+
+    # Subscription-level mappings — 2 queries total
+    if sub_mappings:
+        sub_ids = list({m.subscription_id for m in sub_mappings})
+        actual_map, amortized_map = await _query_costs(
+            [*base_a, AzureCostRecord.subscription_id.in_(sub_ids)],
+            [*base_m, AzureCostRecord.subscription_id.in_(sub_ids)],
+            AzureCostRecord.subscription_id,
+        )
+        for m in sub_mappings:
+            biz_id = str(m.business_id)
+            actual = actual_map.get(m.subscription_id, 0)
+            amortized = amortized_map.get(m.subscription_id, actual)
+            result[biz_id]["actual_cost"] += actual
+            result[biz_id]["savings"] += max(0, actual - amortized)
+            result[biz_id]["true_cost"] += amortized if amortized > 0 else actual
+
+    # Resource group-level — 2 queries
+    if rg_mappings:
+        rg_ids = list({m.resource_group for m in rg_mappings})
+        actual_map, amortized_map = await _query_costs(
+            [*base_a, AzureCostRecord.resource_group.in_(rg_ids)],
+            [*base_m, AzureCostRecord.resource_group.in_(rg_ids)],
+            AzureCostRecord.resource_group,
+        )
+        for m in rg_mappings:
+            biz_id = str(m.business_id)
+            actual = actual_map.get(m.resource_group, 0)
+            amortized = amortized_map.get(m.resource_group, actual)
+            result[biz_id]["actual_cost"] += actual
+            result[biz_id]["savings"] += max(0, actual - amortized)
+            result[biz_id]["true_cost"] += amortized if amortized > 0 else actual
+
+    # Tag and resource mappings — sequential (rare, usually few)
+    for m in tag_mappings + res_mappings:
         biz_id = str(m.business_id)
         base = [AzureCostRecord.date >= start, AzureCostRecord.date <= end]
-        if m.mapping_type == "subscription":
-            base.append(AzureCostRecord.subscription_id == m.subscription_id)
-        elif m.mapping_type == "resource_group":
-            base.append(AzureCostRecord.resource_group == m.resource_group)
-            if m.subscription_id:
-                base.append(AzureCostRecord.subscription_id == m.subscription_id)
-        elif m.mapping_type == "tag":
+        if m.mapping_type == "tag":
             base.append(AzureCostRecord.tags.contains(f'"{m.tag_key}"'))
             if m.tag_value:
                 base.append(AzureCostRecord.tags.contains(f'"{m.tag_value}"'))
-        elif m.mapping_type == "resource":
+        else:
             rids = json.loads(m.resource_ids) if m.resource_ids else []
             if not rids:
                 continue
             base.append(AzureCostRecord.resource_id.in_(rids))
 
-        actual = float((await db.execute(
-            select(func.sum(AzureCostRecord.actual_cost)).where(*base, AzureCostRecord.cost_type == "actual")
-        )).scalar() or 0)
-        amortized = float((await db.execute(
-            select(func.sum(AzureCostRecord.amortized_cost)).where(*base, AzureCostRecord.cost_type == "amortized")
-        )).scalar() or 0)
-
-        if biz_id not in result:
-            result[biz_id] = {"actual_cost": 0.0, "savings": 0.0, "true_cost": 0.0}
+        actual_t, amortized_t = await asyncio.gather(
+            db.execute(select(func.sum(AzureCostRecord.actual_cost)).where(*base, AzureCostRecord.cost_type == "actual")),
+            db.execute(select(func.sum(AzureCostRecord.amortized_cost)).where(*base, AzureCostRecord.cost_type == "amortized")),
+        )
+        actual = float(actual_t.scalar() or 0)
+        amortized = float(amortized_t.scalar() or 0)
         result[biz_id]["actual_cost"] += actual
         result[biz_id]["savings"] += max(0, actual - amortized)
         result[biz_id]["true_cost"] += amortized if amortized > 0 else actual
 
+    # Remove zero-cost businesses
+    result = {k: v for k, v in result.items() if v["actual_cost"] > 0 or v["true_cost"] > 0}
+    _cache_set(cache_key, result)
     return result
