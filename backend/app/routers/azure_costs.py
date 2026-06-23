@@ -51,6 +51,70 @@ def _build_row(actual, amortized_map, key):
     return actual_val, amortized_val, savings, amortized_val if amortized_val > 0 else actual_val
 
 
+# ── Combined endpoint for fast initial page load ─────────────────────────────
+
+@router.get("/overview")
+async def cost_overview(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Returns summary + subscriptions in one call for fast page load."""
+    start, end = _parse_dates(start_date, end_date)
+    cache_key = f"az_overview_{start}_{end}"
+    if (cached := _cache_get(cache_key)) is not None:
+        return cached
+
+    ca = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "actual"]
+    cm = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "amortized"]
+
+    # Run all queries in parallel
+    actual_total_t = db.execute(select(func.sum(AzureCostRecord.actual_cost)).where(*ca))
+    amortized_total_t = db.execute(select(func.sum(AzureCostRecord.amortized_cost)).where(*cm))
+    actual_sub_t = db.execute(
+        select(AzureCostRecord.subscription_id, AzureCostRecord.subscription_name,
+               func.sum(AzureCostRecord.actual_cost).label("actual_cost"))
+        .where(*ca).group_by(AzureCostRecord.subscription_id, AzureCostRecord.subscription_name)
+        .order_by(func.sum(AzureCostRecord.actual_cost).desc())
+    )
+    amortized_sub_t = db.execute(
+        select(AzureCostRecord.subscription_id, func.sum(AzureCostRecord.amortized_cost).label("amortized_cost"))
+        .where(*cm).group_by(AzureCostRecord.subscription_id)
+    )
+
+    actual_total_r, amortized_total_r, actual_sub_r, amortized_sub_r = await asyncio.gather(
+        actual_total_t, amortized_total_t, actual_sub_t, amortized_sub_t
+    )
+
+    actual_total = float(actual_total_r.scalar() or 0)
+    amortized_total = float(amortized_total_r.scalar() or 0)
+    amortized_map = {r.subscription_id: float(r.amortized_cost or 0) for r in amortized_sub_r.all()}
+
+    subscriptions = []
+    for r in actual_sub_r.all():
+        actual = float(r.actual_cost or 0)
+        amortized = amortized_map.get(r.subscription_id, actual)
+        savings = max(0, actual - amortized)
+        subscriptions.append({
+            "subscription_id": r.subscription_id,
+            "subscription_name": r.subscription_name or r.subscription_id,
+            "actual_cost": actual, "amortized_cost": amortized,
+            "savings": savings, "true_cost": amortized if amortized > 0 else actual,
+        })
+
+    savings_total = max(0, actual_total - amortized_total)
+    result = {
+        "summary": {
+            "actual_cost": actual_total, "amortized_cost": amortized_total,
+            "savings": savings_total, "true_cost": amortized_total if amortized_total > 0 else actual_total,
+        },
+        "subscriptions": subscriptions,
+    }
+    _cache_set(cache_key, result)
+    return result
+
+
 # ── Summary card totals ───────────────────────────────────────────────────────
 
 @router.get("/summary")

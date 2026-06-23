@@ -61,26 +61,34 @@ export default function AzureTenantDetail() {
   const loadData = async (t: Tab = tab, start = startDate, end = endDate) => {
     setLoading(true); setRows([]);
     try {
-      const [sumRes, tabRes] = await Promise.all([
-        api.get("/azure-costs/summary", { params: { start_date: start, end_date: end } }),
-        api.get(
-          t === "subscriptions" ? "/azure-costs/subscriptions"
-          : t === "resource-groups" ? "/azure-costs/resource-groups"
-          : t === "services" ? "/azure-costs/services"
-          : "/azure-costs/tags",
-          { params: { start_date: start, end_date: end, ...(t === "tags" ? { tag_key: tagKey || "Environment" } : {}) } }
-        ),
-      ]);
-      setSummary(sumRes.data);
-      setRows((tabRes.data as any[]).map((r: any) => ({
-        label: r.subscription_name || r.resource_group || r.service || r.tag_value || "—",
-        sublabel: r.subscription_id || r.subscription_name || r.tag_key,
-        subscription_id: r.subscription_id,
-        actual_cost: r.actual_cost || 0,
-        amortized_cost: r.amortized_cost || 0,
-        savings: r.savings || 0,
-        true_cost: r.true_cost || 0,
-      })));
+      if (t === "subscriptions") {
+        // Use combined overview endpoint for fast initial load
+        const res = await api.get("/azure-costs/overview", { params: { start_date: start, end_date: end } });
+        setSummary(res.data.summary);
+        setRows(res.data.subscriptions.map((r: any) => ({
+          label: r.subscription_name, sublabel: r.subscription_id,
+          subscription_id: r.subscription_id,
+          actual_cost: r.actual_cost, amortized_cost: r.amortized_cost,
+          savings: r.savings, true_cost: r.true_cost,
+        })));
+      } else {
+        const [sumRes, tabRes] = await Promise.all([
+          api.get("/azure-costs/summary", { params: { start_date: start, end_date: end } }),
+          api.get(
+            t === "resource-groups" ? "/azure-costs/resource-groups"
+            : t === "services" ? "/azure-costs/services"
+            : "/azure-costs/tags",
+            { params: { start_date: start, end_date: end, ...(t === "tags" ? { tag_key: tagKey || "Environment" } : {}) } }
+          ),
+        ]);
+        setSummary(sumRes.data);
+        setRows((tabRes.data as any[]).map((r: any) => ({
+          label: r.resource_group || r.service || r.tag_value || "—",
+          sublabel: r.subscription_name || r.tag_key,
+          actual_cost: r.actual_cost || 0, amortized_cost: r.amortized_cost || 0,
+          savings: r.savings || 0, true_cost: r.true_cost || 0,
+        })));
+      }
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
