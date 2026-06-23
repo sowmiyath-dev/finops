@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
-import { Tag, Plus, Trash2, Search, X, CheckSquare } from "lucide-react";
+import { Tag, Plus, Trash2, Search, X, CheckSquare, Cloud, ChevronRight, RefreshCw } from "lucide-react";
 
 const TAG_COLORS = [
   "#0f2d5e","#1a6fa8","#ec7211","#1d8348","#c0392b",
@@ -21,6 +21,100 @@ export default function TagManagerPage() {
   const [resourceIds, setResourceIds] = useState("");
   const [assignService, setAssignService] = useState("");
   const [assignAccount, setAssignAccount] = useState("");
+
+  // Cloud tabs
+  const [cloudTab, setCloudTab] = useState<"aws" | "azure">("aws");
+
+  // Azure browse state
+  const [azSubs, setAzSubs] = useState<any[]>([]);
+  const [azSubsLoading, setAzSubsLoading] = useState(false);
+  const [azSelSub, setAzSelSub] = useState<any>(null);
+  const [azRGs, setAzRGs] = useState<any[]>([]);
+  const [azRGsLoading, setAzRGsLoading] = useState(false);
+  const [azSelRG, setAzSelRG] = useState<string | null>(null);
+  const [azResources, setAzResources] = useState<any[]>([]);
+  const [azResLoading, setAzResLoading] = useState(false);
+  const [azSelected, setAzSelected] = useState<Set<string>>(new Set());
+  const [azMode, setAzMode] = useState<"subscription" | "resource_group" | "resource" | "tag">("subscription");
+  const [azTagKey, setAzTagKey] = useState("");
+  const [azTagKeys, setAzTagKeys] = useState<string[]>([]);
+  const [azTagValues, setAzTagValues] = useState<any[]>([]);
+  const [azTagValLoading, setAzTagValLoading] = useState(false);
+  const [azSelTagVal, setAzSelTagVal] = useState<string | null>(null);
+  const [azAssignTagId, setAzAssignTagId] = useState<string | null>(null);
+
+  // Azure helper functions
+  const loadAzSubs = async () => {
+    setAzSubsLoading(true);
+    try {
+      const [subsRes, keysRes] = await Promise.all([
+        api.get("/azure-costs/browse/subscriptions"),
+        api.get("/azure-costs/tag-keys"),
+      ]);
+      setAzSubs(subsRes.data);
+      setAzTagKeys(keysRes.data);
+    } catch {} finally { setAzSubsLoading(false); }
+  };
+
+  const loadAzRGs = async (subId: string) => {
+    setAzRGsLoading(true); setAzRGs([]); setAzResources([]); setAzSelRG(null);
+    try {
+      const res = await api.get("/azure-costs/browse/resource-groups", { params: { subscription_id: subId } });
+      setAzRGs(res.data);
+    } catch {} finally { setAzRGsLoading(false); }
+  };
+
+  const loadAzResources = async (subId: string, rg?: string) => {
+    setAzResLoading(true); setAzResources([]);
+    try {
+      const res = await api.get("/azure-costs/browse/resources", { params: { subscription_id: subId, resource_group: rg } });
+      setAzResources(res.data);
+      setAzSelected(new Set(res.data.map((r: any) => r.resource_id)));
+    } catch {} finally { setAzResLoading(false); }
+  };
+
+  const loadAzTagValues = async (key: string) => {
+    setAzTagValLoading(true); setAzTagValues([]);
+    try {
+      const res = await api.get("/azure-costs/browse/tag-values", { params: { tag_key: key, subscription_id: azSelSub?.subscription_id } });
+      setAzTagValues(res.data);
+    } catch {} finally { setAzTagValLoading(false); }
+  };
+
+  const assignAzureTags = async () => {
+    if (!azAssignTagId) return toast.error("Select a tag first");
+    let resourceIdsToTag: string[] = [];
+    let cloudProvider = "azure";
+    let subId = azSelSub?.subscription_id || null;
+
+    if (azMode === "subscription" && azSelSub) {
+      // tag subscription placeholder as resource_id
+      resourceIdsToTag = [azSelSub.subscription_id];
+    } else if (azMode === "resource_group" && azSelRG) {
+      resourceIdsToTag = [azSelRG];
+    } else if (azMode === "resource") {
+      resourceIdsToTag = Array.from(azSelected);
+    } else if (azMode === "tag" && azSelTagVal) {
+      const val = azTagValues.find((v) => v.tag_value === azSelTagVal);
+      resourceIdsToTag = val ? val.resources.map((r: any) => r.resource_id) : [];
+    }
+
+    if (!resourceIdsToTag.length) return toast.error("No resources selected");
+
+    try {
+      const res = await api.post("/tags/assign", {
+        resource_ids: resourceIdsToTag,
+        custom_tag_ids: [azAssignTagId],
+        cloud_provider: cloudProvider,
+        aws_account_id: subId,
+      });
+      toast.success(`Tagged ${res.data.assigned} Azure resources`);
+      qc.invalidateQueries({ queryKey: ["custom-tags-summary"] });
+      setAzSelected(new Set());
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail || "Tagging failed");
+    }
+  };
 
   const { data: tags = [], isLoading } = useQuery({
     queryKey: ["custom-tags-summary"],
@@ -86,7 +180,19 @@ export default function TagManagerPage() {
         )}
       </div>
 
-      {/* Info banner */}
+      {/* Cloud tabs */}
+      <div className="flex gap-1 mb-5 border-b border-gray-200">
+        {(["aws", "azure"] as const).map((c) => (
+          <button key={c} onClick={() => { setCloudTab(c); if (c === "azure" && azSubs.length === 0) loadAzSubs(); }}
+            className={`px-5 py-2.5 text-xs font-bold border-b-2 -mb-px transition flex items-center gap-2 ${
+              cloudTab === c ? "border-blue-900 text-blue-900" : "border-transparent text-gray-500 hover:text-black"
+            }`}>
+            {c === "aws" ? "☁ AWS" : "🔷 Azure"}
+          </button>
+        ))}
+      </div>
+
+      {cloudTab === "aws" && (
       <div className="flex items-start gap-2 mb-5 px-4 py-3 rounded-lg border border-blue-300 bg-blue-50 text-blue-900 text-sm font-semibold">
         <Tag className="w-4 h-4 flex-shrink-0 mt-0.5" />
         <span>
@@ -274,6 +380,182 @@ export default function TagManagerPage() {
           </div>
         </div>
       </div>
+    </div>
+      )}
+
+      {/* Azure Tag Panel */}
+      {cloudTab === "azure" && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+          {/* Left: Tag selector + mode */}
+          <div className="lg:col-span-1 space-y-4">
+            <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-4">
+              <h3 className="text-sm font-bold text-black mb-3">1. Select Tag to Assign</h3>
+              <div className="space-y-1 max-h-48 overflow-y-auto">
+                {tags.map((tag: any) => (
+                  <button key={tag.id} onClick={() => setAzAssignTagId(tag.id === azAssignTagId ? null : tag.id)}
+                    className={`w-full text-left px-3 py-2 rounded-md text-xs font-semibold transition flex items-center gap-2 ${
+                      azAssignTagId === tag.id ? "bg-blue-900 text-white" : "bg-gray-50 text-black hover:bg-blue-50"
+                    }`}>
+                    <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: tag.color }} />
+                    {tag.tag_key}: {tag.tag_value}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-4">
+              <h3 className="text-sm font-bold text-black mb-3">2. Select Scope</h3>
+              <div className="grid grid-cols-2 gap-1.5">
+                {(["subscription","resource_group","resource","tag"] as const).map((m) => (
+                  <button key={m} onClick={() => setAzMode(m)}
+                    className={`py-2 text-xs font-bold rounded-md border transition ${
+                      azMode === m ? "bg-blue-900 text-white border-blue-900" : "border-gray-300 text-black hover:border-blue-400"
+                    }`}>
+                    {m === "subscription" ? "Subscription" : m === "resource_group" ? "Resource Group" : m === "resource" ? "Resource" : "By Tag"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <button onClick={assignAzureTags} disabled={!azAssignTagId}
+              className="w-full py-2.5 bg-blue-900 hover:bg-blue-800 text-white text-sm font-bold rounded-md transition disabled:opacity-40">
+              Apply Tag to Azure Resources
+            </button>
+          </div>
+
+          {/* Right: Browse panel */}
+          <div className="lg:col-span-2 bg-white rounded-lg border border-gray-300 shadow-sm overflow-hidden">
+            <div className="px-4 py-3 bg-gray-100 border-b border-gray-200 flex items-center justify-between">
+              <span className="text-sm font-bold text-black">
+                {azMode === "subscription" ? "Subscriptions" : azMode === "resource_group" ? `RGs in ${azSelSub?.subscription_name || ""}` : azMode === "resource" ? `Resources` : "Tag-based Selection"}
+              </span>
+              {azSelSub && azMode !== "subscription" && (
+                <button onClick={() => { setAzSelSub(null); setAzRGs([]); setAzResources([]); setAzSelRG(null); }}
+                  className="text-xs text-blue-900 hover:underline font-bold">← Back to Subscriptions</button>
+              )}
+            </div>
+
+            {/* Subscription list */}
+            {azMode === "subscription" && (
+              <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto">
+                {azSubsLoading ? <div className="flex items-center justify-center py-10"><RefreshCw className="w-5 h-5 animate-spin text-blue-900" /></div>
+                : azSubs.map((s) => (
+                  <div key={s.subscription_id} className="flex items-center justify-between px-4 py-3 hover:bg-blue-50 transition">
+                    <div>
+                      <div className="text-sm font-semibold text-black">{s.subscription_name}</div>
+                      <div className="text-xs font-mono text-gray-400">{s.subscription_id}</div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-gray-500">{s.resource_count} resources</span>
+                      <input type="checkbox" checked={azSelSub?.subscription_id === s.subscription_id && azMode === "subscription"}
+                        onChange={() => setAzSelSub(azSelSub?.subscription_id === s.subscription_id ? null : s)}
+                        className="w-4 h-4 accent-blue-900" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Resource Group list */}
+            {azMode === "resource_group" && (
+              <div>
+                {!azSelSub ? (
+                  <div className="p-4">
+                    <p className="text-xs text-gray-500 mb-3">Select a subscription first:</p>
+                    <select value={azSelSub?.subscription_id || ""}
+                      onChange={(e) => { const s = azSubs.find((x) => x.subscription_id === e.target.value); setAzSelSub(s); if (s) loadAzRGs(s.subscription_id); }}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-black bg-white focus:outline-none focus:border-blue-600">
+                      <option value="">Select subscription...</option>
+                      {azSubs.map((s) => <option key={s.subscription_id} value={s.subscription_id}>{s.subscription_name}</option>)}
+                    </select>
+                  </div>
+                ) : azRGsLoading ? <div className="flex items-center justify-center py-10"><RefreshCw className="w-5 h-5 animate-spin text-blue-900" /></div>
+                : <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto">
+                    {azRGs.map((rg) => (
+                      <div key={rg.resource_group} className="flex items-center justify-between px-4 py-3 hover:bg-blue-50 transition">
+                        <div className="text-sm font-semibold text-black">{rg.resource_group}</div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs text-gray-500">{rg.resource_count} resources</span>
+                          <input type="checkbox" checked={azSelRG === rg.resource_group}
+                            onChange={() => setAzSelRG(azSelRG === rg.resource_group ? null : rg.resource_group)}
+                            className="w-4 h-4 accent-blue-900" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>}
+              </div>
+            )}
+
+            {/* Resource list */}
+            {azMode === "resource" && (
+              <div>
+                <div className="px-4 py-3 border-b border-gray-100 flex gap-3">
+                  <select value={azSelSub?.subscription_id || ""}
+                    onChange={(e) => { const s = azSubs.find((x) => x.subscription_id === e.target.value); setAzSelSub(s || null); if (s) loadAzRGs(s.subscription_id); }}
+                    className="flex-1 border border-gray-300 rounded-md px-2 py-1.5 text-xs text-black bg-white focus:outline-none">
+                    <option value="">All subscriptions</option>
+                    {azSubs.map((s) => <option key={s.subscription_id} value={s.subscription_id}>{s.subscription_name}</option>)}
+                  </select>
+                  <select value={azSelRG || ""}
+                    onChange={(e) => { setAzSelRG(e.target.value || null); if (azSelSub) loadAzResources(azSelSub.subscription_id, e.target.value || undefined); }}
+                    className="flex-1 border border-gray-300 rounded-md px-2 py-1.5 text-xs text-black bg-white focus:outline-none">
+                    <option value="">All RGs</option>
+                    {azRGs.map((rg) => <option key={rg.resource_group} value={rg.resource_group}>{rg.resource_group}</option>)}
+                  </select>
+                  {azSelSub && <button onClick={() => loadAzResources(azSelSub.subscription_id, azSelRG || undefined)}
+                    className="px-3 py-1.5 bg-blue-900 text-white text-xs font-bold rounded-md">Load</button>}
+                </div>
+                {azResLoading ? <div className="flex items-center justify-center py-10"><RefreshCw className="w-5 h-5 animate-spin text-blue-900" /></div>
+                : <div className="max-h-80 overflow-y-auto divide-y divide-gray-100">
+                    <div className="px-4 py-2 flex items-center justify-between bg-gray-50">
+                      <span className="text-xs font-bold text-black">{azSelected.size}/{azResources.length} selected</span>
+                      <div className="flex gap-2">
+                        <button onClick={() => setAzSelected(new Set(azResources.map((r) => r.resource_id)))} className="text-xs text-blue-900 font-bold hover:underline">All</button>
+                        <button onClick={() => setAzSelected(new Set())} className="text-xs text-gray-500 font-bold hover:underline">None</button>
+                      </div>
+                    </div>
+                    {azResources.map((r) => (
+                      <div key={r.resource_id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-blue-50 transition cursor-pointer"
+                        onClick={() => setAzSelected((prev) => { const n = new Set(prev); n.has(r.resource_id) ? n.delete(r.resource_id) : n.add(r.resource_id); return n; })}>
+                        <input type="checkbox" checked={azSelected.has(r.resource_id)} readOnly className="w-4 h-4 accent-blue-900" />
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold text-black truncate">{r.resource_name}</div>
+                          <div className="text-[10px] text-gray-400">{r.service} · {r.resource_group}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>}
+              </div>
+            )}
+
+            {/* Tag-based selection */}
+            {azMode === "tag" && (
+              <div className="p-4 space-y-3">
+                <div className="flex gap-3">
+                  <select value={azTagKey} onChange={(e) => { setAzTagKey(e.target.value); if (e.target.value) loadAzTagValues(e.target.value); }}
+                    className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm text-black bg-white focus:outline-none">
+                    <option value="">Select tag key...</option>
+                    {azTagKeys.map((k) => <option key={k}>{k}</option>)}
+                  </select>
+                </div>
+                {azTagValLoading ? <div className="flex items-center justify-center py-6"><RefreshCw className="w-5 h-5 animate-spin text-blue-900" /></div>
+                : <div className="space-y-1 max-h-72 overflow-y-auto">
+                    {azTagValues.map((tv) => (
+                      <div key={tv.tag_value}
+                        className={`px-3 py-2.5 rounded-md border cursor-pointer transition ${
+                          azSelTagVal === tv.tag_value ? "border-blue-700 bg-blue-50" : "border-gray-200 hover:border-blue-400"
+                        }`}
+                        onClick={() => setAzSelTagVal(azSelTagVal === tv.tag_value ? null : tv.tag_value)}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-semibold text-black">{tv.tag_value}</span>
+                          <span className="text-xs text-gray-500">{tv.resource_count} resources</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

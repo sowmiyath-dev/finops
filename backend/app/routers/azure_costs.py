@@ -572,6 +572,157 @@ async def list_resource_groups(
     return [{"resource_group": r.resource_group, "subscription_name": r.subscription_name} for r in rows]
 
 
+# ── Azure resource browsing for tag manager ──────────────────────────────────
+
+@router.get("/browse/subscriptions")
+async def browse_subscriptions(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """List all subscriptions with their last month actual cost."""
+    from app.models.db_models import AzureMonthlySummary
+    from datetime import date as dt
+    n = dt.today()
+    last_month = f"{n.year}-{(n.month-1):02d}" if n.month > 1 else f"{n.year-1}-12"
+
+    rows = (await db.execute(
+        select(
+            AzureCostRecord.subscription_id,
+            AzureCostRecord.subscription_name,
+            func.count(func.distinct(AzureCostRecord.resource_id)).label("resource_count"),
+        )
+        .where(AzureCostRecord.cost_type == "actual")
+        .group_by(AzureCostRecord.subscription_id, AzureCostRecord.subscription_name)
+        .order_by(AzureCostRecord.subscription_name)
+    )).all()
+
+    # Get last month costs from summary
+    cost_rows = (await db.execute(
+        select(AzureMonthlySummary.subscription_id, func.sum(AzureMonthlySummary.actual_cost).label("cost"))
+        .where(AzureMonthlySummary.month == last_month)
+        .group_by(AzureMonthlySummary.subscription_id)
+    )).all()
+    cost_map = {r.subscription_id: float(r.cost or 0) for r in cost_rows}
+
+    return [{
+        "subscription_id": r.subscription_id,
+        "subscription_name": r.subscription_name or r.subscription_id,
+        "resource_count": r.resource_count,
+        "last_month_cost": cost_map.get(r.subscription_id, 0),
+    } for r in rows]
+
+
+@router.get("/browse/resource-groups")
+async def browse_resource_groups(
+    subscription_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """List resource groups in a subscription."""
+    rows = (await db.execute(
+        select(
+            AzureCostRecord.resource_group,
+            func.count(func.distinct(AzureCostRecord.resource_id)).label("resource_count"),
+        )
+        .where(
+            AzureCostRecord.subscription_id == subscription_id,
+            AzureCostRecord.cost_type == "actual",
+            AzureCostRecord.resource_group.isnot(None),
+            AzureCostRecord.resource_group != "",
+        )
+        .group_by(AzureCostRecord.resource_group)
+        .order_by(AzureCostRecord.resource_group)
+    )).all()
+    return [{"resource_group": r.resource_group, "resource_count": r.resource_count} for r in rows]
+
+
+@router.get("/browse/resources")
+async def browse_resources(
+    subscription_id: str,
+    resource_group: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """List resources in a subscription/resource group."""
+    conditions = [
+        AzureCostRecord.subscription_id == subscription_id,
+        AzureCostRecord.cost_type == "actual",
+        AzureCostRecord.resource_id.isnot(None),
+        AzureCostRecord.resource_id != "",
+    ]
+    if resource_group:
+        conditions.append(AzureCostRecord.resource_group == resource_group)
+
+    rows = (await db.execute(
+        select(
+            AzureCostRecord.resource_id,
+            AzureCostRecord.resource_name,
+            AzureCostRecord.service,
+            AzureCostRecord.resource_group,
+        )
+        .where(*conditions)
+        .group_by(AzureCostRecord.resource_id, AzureCostRecord.resource_name,
+                  AzureCostRecord.service, AzureCostRecord.resource_group)
+        .order_by(AzureCostRecord.service, AzureCostRecord.resource_name)
+        .limit(500)
+    )).all()
+    return [{
+        "resource_id": r.resource_id,
+        "resource_name": r.resource_name or r.resource_id.split("/")[-1],
+        "service": r.service,
+        "resource_group": r.resource_group,
+    } for r in rows]
+
+
+@router.get("/browse/tag-values")
+async def browse_azure_tag_values(
+    tag_key: str,
+    subscription_id: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """List unique values for a given tag key in Azure records."""
+    conditions = [AzureCostRecord.cost_type == "actual", AzureCostRecord.tags.isnot(None)]
+    if subscription_id:
+        conditions.append(AzureCostRecord.subscription_id == subscription_id)
+
+    rows = (await db.execute(
+        select(AzureCostRecord.tags, AzureCostRecord.resource_id,
+               AzureCostRecord.resource_name, AzureCostRecord.resource_group,
+               AzureCostRecord.subscription_name)
+        .where(*conditions)
+        .group_by(AzureCostRecord.tags, AzureCostRecord.resource_id,
+                  AzureCostRecord.resource_name, AzureCostRecord.resource_group,
+                  AzureCostRecord.subscription_name)
+        .limit(2000)
+    )).all()
+
+    # Group resources by tag value
+    value_map: dict = {}
+    for r in rows:
+        try:
+            tags = json.loads(r.tags) if r.tags else {}
+        except Exception:
+            continue
+        val = tags.get(tag_key) or tags.get(tag_key.lower())
+        if not val:
+            continue
+        if val not in value_map:
+            value_map[val] = []
+        value_map[val].append({
+            "resource_id": r.resource_id,
+            "resource_name": r.resource_name or (r.resource_id.split("/")[-1] if r.resource_id else ""),
+            "resource_group": r.resource_group,
+            "subscription_name": r.subscription_name,
+        })
+
+    return [{
+        "tag_value": val,
+        "resource_count": len(resources),
+        "resources": resources[:50],  # cap at 50 per value for display
+    } for val, resources in sorted(value_map.items())]
+
+
 # ── Business mapping CRUD ─────────────────────────────────────────────────────
 
 class MappingCreate(BaseModel):
