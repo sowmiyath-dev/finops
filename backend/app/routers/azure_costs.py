@@ -60,54 +60,81 @@ async def cost_overview(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Returns summary + subscriptions in one call for fast page load."""
+    """Returns summary + subscriptions using pre-aggregated table for fast load."""
+    from app.models.db_models import AzureMonthlySummary
     start, end = _parse_dates(start_date, end_date)
     cache_key = f"az_overview_{start}_{end}"
     if (cached := _cache_get(cache_key)) is not None:
         return cached
 
-    ca = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "actual"]
-    cm = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "amortized"]
+    # Build month list in range
+    months, y, m = [], start.year, start.month
+    while (y, m) <= (end.year, end.month):
+        months.append(f"{y}-{m:02d}")
+        m += 1
+        if m > 12: m, y = 1, y + 1
 
-    # Run all queries in parallel
-    actual_total_t = db.execute(select(func.sum(AzureCostRecord.actual_cost)).where(*ca))
-    amortized_total_t = db.execute(select(func.sum(AzureCostRecord.amortized_cost)).where(*cm))
-    actual_sub_t = db.execute(
-        select(AzureCostRecord.subscription_id, AzureCostRecord.subscription_name,
-               func.sum(AzureCostRecord.actual_cost).label("actual_cost"))
-        .where(*ca).group_by(AzureCostRecord.subscription_id, AzureCostRecord.subscription_name)
-        .order_by(func.sum(AzureCostRecord.actual_cost).desc())
-    )
-    amortized_sub_t = db.execute(
-        select(AzureCostRecord.subscription_id, func.sum(AzureCostRecord.amortized_cost).label("amortized_cost"))
-        .where(*cm).group_by(AzureCostRecord.subscription_id)
-    )
-
-    actual_total_r, amortized_total_r, actual_sub_r, amortized_sub_r = await asyncio.gather(
-        actual_total_t, amortized_total_t, actual_sub_t, amortized_sub_t
-    )
-
-    actual_total = float(actual_total_r.scalar() or 0)
-    amortized_total = float(amortized_total_r.scalar() or 0)
-    amortized_map = {r.subscription_id: float(r.amortized_cost or 0) for r in amortized_sub_r.all()}
+    # Query pre-aggregated summary table — tiny, fast
+    rows = (await db.execute(
+        select(
+            AzureMonthlySummary.subscription_id,
+            AzureMonthlySummary.subscription_name,
+            func.sum(AzureMonthlySummary.actual_cost).label("actual_cost"),
+            func.sum(AzureMonthlySummary.amortized_cost).label("amortized_cost"),
+        )
+        .where(AzureMonthlySummary.month.in_(months))
+        .group_by(AzureMonthlySummary.subscription_id, AzureMonthlySummary.subscription_name)
+        .order_by(func.sum(AzureMonthlySummary.actual_cost).desc())
+    )).all()
 
     subscriptions = []
-    for r in actual_sub_r.all():
-        actual = float(r.actual_cost or 0)
-        amortized = amortized_map.get(r.subscription_id, actual)
-        savings = max(0, actual - amortized)
-        subscriptions.append({
-            "subscription_id": r.subscription_id,
-            "subscription_name": r.subscription_name or r.subscription_id,
-            "actual_cost": actual, "amortized_cost": amortized,
-            "savings": savings, "true_cost": amortized if amortized > 0 else actual,
-        })
+    total_actual = total_amortized = 0.0
 
-    savings_total = max(0, actual_total - amortized_total)
+    if rows:
+        for r in rows:
+            actual = float(r.actual_cost or 0)
+            amortized = float(r.amortized_cost or 0)
+            savings = max(0, actual - amortized)
+            total_actual += actual
+            total_amortized += amortized
+            subscriptions.append({
+                "subscription_id": r.subscription_id,
+                "subscription_name": r.subscription_name or r.subscription_id,
+                "actual_cost": actual, "amortized_cost": amortized,
+                "savings": savings, "true_cost": amortized if amortized > 0 else actual,
+            })
+    else:
+        # Fallback to raw table if summary not yet populated
+        ca = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "actual"]
+        cm = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "amortized"]
+        actual_sub_r, amortized_sub_r = await asyncio.gather(
+            db.execute(select(AzureCostRecord.subscription_id, AzureCostRecord.subscription_name,
+                              func.sum(AzureCostRecord.actual_cost).label("actual_cost"))
+                       .where(*ca).group_by(AzureCostRecord.subscription_id, AzureCostRecord.subscription_name)
+                       .order_by(func.sum(AzureCostRecord.actual_cost).desc())),
+            db.execute(select(AzureCostRecord.subscription_id, func.sum(AzureCostRecord.amortized_cost).label("amortized_cost"))
+                       .where(*cm).group_by(AzureCostRecord.subscription_id)),
+        )
+        amortized_map = {r.subscription_id: float(r.amortized_cost or 0) for r in amortized_sub_r.all()}
+        for r in actual_sub_r.all():
+            actual = float(r.actual_cost or 0)
+            amortized = amortized_map.get(r.subscription_id, actual)
+            savings = max(0, actual - amortized)
+            total_actual += actual
+            total_amortized += amortized
+            subscriptions.append({
+                "subscription_id": r.subscription_id,
+                "subscription_name": r.subscription_name or r.subscription_id,
+                "actual_cost": actual, "amortized_cost": amortized,
+                "savings": savings, "true_cost": amortized if amortized > 0 else actual,
+            })
+
+    savings_total = max(0, total_actual - total_amortized)
     result = {
         "summary": {
-            "actual_cost": actual_total, "amortized_cost": amortized_total,
-            "savings": savings_total, "true_cost": amortized_total if amortized_total > 0 else actual_total,
+            "actual_cost": total_actual, "amortized_cost": total_amortized,
+            "savings": savings_total,
+            "true_cost": total_amortized if total_amortized > 0 else total_actual,
         },
         "subscriptions": subscriptions,
     }
@@ -125,23 +152,43 @@ async def cost_summary(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    from app.models.db_models import AzureMonthlySummary
     start, end = _parse_dates(start_date, end_date)
     cache_key = f"az_summary_{start}_{end}_{subscription_id}"
     if (cached := _cache_get(cache_key)) is not None:
         return cached
 
-    ca = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "actual"]
-    cm = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "amortized"]
-    if subscription_id:
-        ca.append(AzureCostRecord.subscription_id == subscription_id)
-        cm.append(AzureCostRecord.subscription_id == subscription_id)
+    # Build month list
+    months, y, m = [], start.year, start.month
+    while (y, m) <= (end.year, end.month):
+        months.append(f"{y}-{m:02d}")
+        m += 1
+        if m > 12: m, y = 1, y + 1
 
-    actual_t, amortized_t = await asyncio.gather(
-        db.execute(select(func.sum(AzureCostRecord.actual_cost)).where(*ca)),
-        db.execute(select(func.sum(AzureCostRecord.amortized_cost)).where(*cm)),
-    )
-    actual = float(actual_t.scalar() or 0)
-    amortized = float(amortized_t.scalar() or 0)
+    cond = [AzureMonthlySummary.month.in_(months)]
+    if subscription_id:
+        cond.append(AzureMonthlySummary.subscription_id == subscription_id)
+
+    row = (await db.execute(
+        select(func.sum(AzureMonthlySummary.actual_cost).label("actual"),
+               func.sum(AzureMonthlySummary.amortized_cost).label("amortized"))
+        .where(*cond)
+    )).one()
+
+    actual = float(row.actual or 0)
+    amortized = float(row.amortized or 0)
+
+    # Fallback to raw if summary empty
+    if actual == 0 and not subscription_id:
+        ca = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "actual"]
+        cm = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "amortized"]
+        actual_t, amortized_t = await asyncio.gather(
+            db.execute(select(func.sum(AzureCostRecord.actual_cost)).where(*ca)),
+            db.execute(select(func.sum(AzureCostRecord.amortized_cost)).where(*cm)),
+        )
+        actual = float(actual_t.scalar() or 0)
+        amortized = float(amortized_t.scalar() or 0)
+
     savings = max(0, actual - amortized)
     result = {"actual_cost": actual, "amortized_cost": amortized, "savings": savings,
               "true_cost": amortized if amortized > 0 else actual}

@@ -164,6 +164,23 @@ class AzureBusinessMapping(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
 
+class AzureMonthlySummary(Base):
+    """Pre-aggregated monthly Azure cost by subscription — refreshed after each sync."""
+    __tablename__ = "azure_monthly_summary"
+    __table_args__ = (
+        Index("ix_ams_month_sub", "month", "subscription_id"),
+        Index("ix_ams_ct_month", "control_tower_id", "month"),
+    )
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    control_tower_id = Column(UUID(as_uuid=True), ForeignKey("control_towers.id", ondelete="CASCADE"), nullable=False)
+    month = Column(String, nullable=False)           # YYYY-MM
+    subscription_id = Column(String, nullable=False)
+    subscription_name = Column(String)
+    actual_cost = Column(Numeric(18, 4), default=0)
+    amortized_cost = Column(Numeric(18, 4), default=0)
+    refreshed_at = Column(DateTime(timezone=True), default=utcnow)
+
+
 class SyncLog(Base):
     __tablename__ = "sync_logs"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

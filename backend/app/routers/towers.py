@@ -278,6 +278,39 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Option
 
 # ── Azure sync ────────────────────────────────────────────────────────────────
 
+async def _refresh_azure_monthly_summary(ct_id: str):
+    """Pre-aggregate Azure cost by subscription per month into azure_monthly_summary."""
+    from app.models.db_models import AzureMonthlySummary
+    async with AsyncSessionLocal() as db:
+        # Delete existing summary for this CT
+        await db.execute(delete(AzureMonthlySummary).where(AzureMonthlySummary.control_tower_id == ct_id))
+
+        # Aggregate actual cost by month+subscription
+        from sqlalchemy import text
+        await db.execute(text("""
+            INSERT INTO azure_monthly_summary (id, control_tower_id, month, subscription_id, subscription_name, actual_cost, amortized_cost, refreshed_at)
+            SELECT gen_random_uuid(), a.control_tower_id, a.month, a.subscription_id, a.subscription_name,
+                   COALESCE(a.actual_cost, 0), COALESCE(m.amortized_cost, 0), NOW()
+            FROM (
+                SELECT control_tower_id, TO_CHAR(date, 'YYYY-MM') as month,
+                       subscription_id, MAX(subscription_name) as subscription_name,
+                       SUM(actual_cost) as actual_cost
+                FROM azure_cost_records
+                WHERE control_tower_id = :ct_id AND cost_type = 'actual'
+                GROUP BY control_tower_id, TO_CHAR(date, 'YYYY-MM'), subscription_id
+            ) a
+            LEFT JOIN (
+                SELECT TO_CHAR(date, 'YYYY-MM') as month, subscription_id,
+                       SUM(amortized_cost) as amortized_cost
+                FROM azure_cost_records
+                WHERE control_tower_id = :ct_id AND cost_type = 'amortized'
+                GROUP BY TO_CHAR(date, 'YYYY-MM'), subscription_id
+            ) m ON a.month = m.month AND a.subscription_id = m.subscription_id
+        """), {"ct_id": ct_id})
+        await db.commit()
+        logger.info(f"Azure monthly summary refreshed for CT {ct_id}")
+
+
 async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
     """Sync cost data from Azure Cost Management Export."""
     _sync_progress[ct_id] = {"percent": 0, "status": "running", "message": "Starting Azure sync"}
@@ -487,6 +520,12 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
 
         _sync_progress[ct_id] = {"percent": 100, "status": "done", "message": f"Completed — {total_inserted} records"}
         logger.info(f"Azure sync done for CT {ct_id}: {total_inserted} records")
+
+        # Refresh Azure monthly summary cache
+        try:
+            await _refresh_azure_monthly_summary(ct_id)
+        except Exception as cache_err:
+            logger.warning(f"Azure monthly summary refresh failed (non-fatal): {cache_err}")
 
     except Exception as e:
         logger.error(f"Azure sync failed for CT {ct_id}: {e}", exc_info=True)
