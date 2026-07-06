@@ -603,6 +603,7 @@ async def all_businesses_cost(
                     CostRecord.date >= start,
                     CostRecord.date <= end,
                     CostRecord.aws_account_id.in_(all_acct_ids),
+                    CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee", "SavingsPlanCoveredUsage"]),
                 )
                 .group_by(CostRecord.aws_account_id)
             )).all()
@@ -714,6 +715,7 @@ async def businesses_cost_bulk(
                     CostRecord.date >= start,
                     CostRecord.date <= end,
                     CostRecord.aws_account_id.in_(all_acct_ids),
+                    CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee", "SavingsPlanCoveredUsage"]),
                 )
                 .group_by(CostRecord.aws_account_id)
             )).all()
@@ -1213,6 +1215,7 @@ async def business_cost(
                 CostRecord.date >= start,
                 CostRecord.date <= end,
                 CostRecord.aws_account_id.in_(account_ids),
+                CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee", "SavingsPlanCoveredUsage"]),
             )
             .group_by("period").order_by("period")
         )).all()
@@ -1230,6 +1233,7 @@ async def business_cost(
                 CostRecord.date >= start,
                 CostRecord.date <= end,
                 CostRecord.aws_account_id.in_(account_ids),
+                CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee", "SavingsPlanCoveredUsage"]),
             )
             .group_by(CostRecord.aws_account_id, CostRecord.account_name)
             .order_by(func.sum(true_cost_col5).desc())
