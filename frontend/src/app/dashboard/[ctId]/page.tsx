@@ -15,14 +15,7 @@ import {
 
 const COLORS = ["#0f2d5e","#ec7211","#1d8348","#8e44ad","#1a6fa8","#c0392b","#16a085","#e67e22","#2980b9","#27ae60"];
 
-const DEFAULT_CHARGE_TYPES = [
-  "Usage",
-  "SavingsPlanCoveredUsage",
-  "SavingsPlanRecurringFee",
-  "SavingsPlanNegation",
-  "RIFee",
-  "DiscountedUsage",
-];
+const DEFAULT_CHARGE_TYPES = ["Usage"];
 
 const ALL_CHARGE_TYPES = [
   "Usage", "SavingsPlanCoveredUsage", "SavingsPlanRecurringFee",

@@ -144,14 +144,7 @@ function ReportsContent() {
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [selectedRegions, setSelectedRegions] = useState<string[]>([]);
   const [selectedPurchaseTypes, setSelectedPurchaseTypes] = useState<string[]>([]);
-  const DEFAULT_CHARGE_TYPES = [
-    "Usage",
-    "SavingsPlanCoveredUsage",
-    "SavingsPlanRecurringFee",
-    "SavingsPlanNegation",
-    "RIFee",
-    "DiscountedUsage",
-  ];
+  const DEFAULT_CHARGE_TYPES = ["Usage"];
 
   const [selectedChargeTypes, setSelectedChargeTypes] = useState<string[]>(DEFAULT_CHARGE_TYPES);
   const [marketplaceOnly, setMarketplaceOnly] = useState<string>("all");
@@ -226,7 +219,7 @@ function ReportsContent() {
     setSelectedServices([]);
     setSelectedRegions([]);
     setSelectedPurchaseTypes([]);
-    setSelectedChargeTypes(DEFAULT_CHARGE_TYPES);
+    setSelectedChargeTypes(["Usage"]);
     setMarketplaceOnly("all");
     setTagKey("");
     setTagValue("");
@@ -243,7 +236,7 @@ function ReportsContent() {
       services: null,
       regions: null,
       purchase_types: null,
-      charge_types: DEFAULT_CHARGE_TYPES,
+      charge_types: ["Usage"],
       marketplace_only: null,
       tag_key: null,
       tag_value: null,
@@ -562,6 +555,66 @@ function ReportsContent() {
                     <span className="text-xs font-bold text-black">{reportData.length} rows</span>
                   </div>
                   <div className="overflow-x-auto">
+                    {groupBy === "account" && granularity === "daily" ? (() => {
+                      // Pivot: rows = accounts, columns = dates
+                      const dateSet = new Set<string>();
+                      const accountMap = new Map<string, { name: string; id: string; byDate: Record<string, number> }>();
+                      reportData.forEach((row: any) => {
+                        dateSet.add(row.date);
+                        const key = row.aws_account_id;
+                        if (!accountMap.has(key)) accountMap.set(key, { name: row.account_name || key, id: key, byDate: {} });
+                        accountMap.get(key)!.byDate[row.date] = (accountMap.get(key)!.byDate[row.date] || 0) + row.cost;
+                      });
+                      const dates = Array.from(dateSet).sort();
+                      const accounts = Array.from(accountMap.values()).sort((a, b) => {
+                        const sumA = Object.values(a.byDate).reduce((s, v) => s + v, 0);
+                        const sumB = Object.values(b.byDate).reduce((s, v) => s + v, 0);
+                        return sumB - sumA;
+                      });
+                      const fmtCol = (d: string) => { const p = d.split("-"); return `${p[1] === "01" ? ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][0] : ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][parseInt(p[1])-1]}-${p[2]}`; };
+                      const grandTotal = dates.reduce((s, d) => s + accounts.reduce((as, a) => as + (a.byDate[d] || 0), 0), 0);
+                      const colTotals = dates.map(d => accounts.reduce((s, a) => s + (a.byDate[d] || 0), 0));
+                      return (
+                        <table className="w-full">
+                          <thead>
+                            <tr className="bg-gray-100 border-b-2 border-gray-300">
+                              <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-black sticky left-0 bg-gray-100">Linked Account</th>
+                              <th className="text-right px-4 py-3 text-xs font-bold uppercase tracking-wider text-black whitespace-nowrap">Account Total</th>
+                              {dates.map(d => (
+                                <th key={d} className="text-right px-4 py-3 text-xs font-bold uppercase tracking-wider text-black whitespace-nowrap">{fmtCol(d)}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {/* Grand total row */}
+                            <tr className="bg-blue-50 border-b-2 border-blue-200 font-bold">
+                              <td className="px-5 py-3 text-sm font-bold text-black sticky left-0 bg-blue-50">Total costs</td>
+                              <td className="px-4 py-3 text-right text-sm font-bold font-mono text-blue-900">${grandTotal.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                              {colTotals.map((t, i) => (
+                                <td key={i} className="px-4 py-3 text-right text-sm font-bold font-mono text-blue-900">${t.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                              ))}
+                            </tr>
+                            {accounts.map((acc) => {
+                              const rowTotal = Object.values(acc.byDate).reduce((s, v) => s + v, 0);
+                              return (
+                                <tr key={acc.id} className="border-b border-gray-200 hover:bg-blue-50 transition">
+                                  <td className="px-5 py-3 sticky left-0 bg-white hover:bg-blue-50">
+                                    <div className="text-sm font-semibold text-black">{acc.name}</div>
+                                    <div className="text-[10px] font-mono text-gray-500">{acc.id}</div>
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-sm font-bold font-mono text-blue-900">${rowTotal.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                                  {dates.map(d => (
+                                    <td key={d} className="px-4 py-3 text-right text-sm font-mono text-black">
+                                      {acc.byDate[d] != null ? `$${acc.byDate[d].toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}` : "—"}
+                                    </td>
+                                  ))}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      );
+                    })() : (
                     <table className="w-full">
                       <thead>
                         <tr className="bg-gray-100 border-b-2 border-gray-300">
@@ -626,6 +679,7 @@ function ReportsContent() {
                         ))}
                       </tbody>
                     </table>
+                    )}
                     {reportData.length > 200 && (
                       <div className="px-5 py-3 text-xs font-semibold text-black border-t border-gray-300">
                         Showing 200 of {reportData.length} rows. Export CSV to get all data.
