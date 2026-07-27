@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import axios from "axios";
 import { useAuthStore } from "@/store/authStore";
 import { Download, RefreshCw, ChevronLeft, TrendingDown, DollarSign, Zap, BarChart2 } from "lucide-react";
+import Link from "next/link";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Cell, Legend,
@@ -163,11 +164,17 @@ export default function SavingsPage() {
             True cost per account = Usage + SP allocated cost (distributed proportionally by usage)
           </p>
         </div>
-        <button onClick={exportCSV} disabled={!applied || loading || exporting}
-          className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white rounded-md transition disabled:opacity-40 bg-green-800 hover:bg-green-900">
-          <Download className="w-4 h-4" />
-          {exporting ? "Exporting..." : "Export CSV"}
-        </button>
+        <div className="flex items-center gap-3">
+          <Link href="/reports/savings/azure"
+            className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white rounded-md transition bg-[#0078D4] hover:bg-[#006CBF]">
+            🔷 Azure RI / SP
+          </Link>
+          <button onClick={exportCSV} disabled={!applied || loading || exporting}
+            className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white rounded-md transition disabled:opacity-40 bg-green-800 hover:bg-green-900">
+            <Download className="w-4 h-4" />
+            {exporting ? "Exporting..." : "Export CSV"}
+          </button>
+        </div>
       </div>
 
       {/* Controls */}

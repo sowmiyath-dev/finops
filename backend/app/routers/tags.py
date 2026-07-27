@@ -214,9 +214,31 @@ async def cost_by_custom_tag(
     }
 
 
+@router.post("/seed-cloud-tags", status_code=200)
+async def seed_cloud_tags(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    """Ensure cloud=AWS and cloud=Azure tags exist. Idempotent."""
+    seeded = []
+    for tag_key, tag_value, color in [
+        ("cloud", "AWS",   "#ec7211"),
+        ("cloud", "Azure", "#0078D4"),
+    ]:
+        existing = await db.execute(
+            select(CustomTag).where(CustomTag.tag_key == tag_key, CustomTag.tag_value == tag_value)
+        )
+        if not existing.scalar_one_or_none():
+            db.add(CustomTag(
+                tag_key=tag_key, tag_value=tag_value, color=color,
+                description=f"All {tag_value} resources",
+                created_by=user.id,
+            ))
+            seeded.append(f"{tag_key}={tag_value}")
+    await db.commit()
+    return {"seeded": seeded}
+
+
 @router.get("/summary")
 async def tags_summary(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    """Get all tags with their resource counts."""
+    """Get all tags with their resource counts and clouds they are assigned to."""
     from sqlalchemy import func
     result = await db.execute(
         select(
@@ -232,6 +254,17 @@ async def tags_summary(db: AsyncSession = Depends(get_db), user: User = Depends(
         .order_by(CustomTag.tag_key, CustomTag.tag_value)
     )
     rows = result.all()
+
+    # Fetch distinct clouds per tag
+    clouds_result = await db.execute(
+        select(ResourceTagMapping.custom_tag_id, ResourceTagMapping.cloud_provider)
+        .distinct()
+    )
+    tag_clouds: dict[str, set[str]] = {}
+    for row in clouds_result.all():
+        tid = str(row.custom_tag_id)
+        tag_clouds.setdefault(tid, set()).add(row.cloud_provider)
+
     return [
         {
             "id": str(r.id),
@@ -240,6 +273,7 @@ async def tags_summary(db: AsyncSession = Depends(get_db), user: User = Depends(
             "color": r.color,
             "description": r.description,
             "resource_count": r.resource_count,
+            "clouds": sorted(tag_clouds.get(str(r.id), [])),
         }
         for r in rows
     ]

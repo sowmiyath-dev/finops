@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
@@ -120,6 +120,11 @@ export default function TagManagerPage() {
     queryKey: ["custom-tags-summary"],
     queryFn: () => api.get("/tags/summary").then((r) => r.data),
   });
+
+  // Seed cloud=AWS and cloud=Azure tags on first load
+  useEffect(() => {
+    api.post("/tags/seed-cloud-tags").catch(() => {});
+  }, []);
 
   const createMutation = useMutation({
     mutationFn: () => api.post("/tags/", newTag),
@@ -273,7 +278,7 @@ export default function TagManagerPage() {
               <table className="w-full">
                 <thead>
                   <tr className="bg-gray-100 border-b-2 border-gray-300">
-                    {["Tag", "Key : Value", "Resources", "Description", ""].map((h) => (
+                    {["Tag", "Key : Value", "Cloud", "Resources", "Description", ""].map((h) => (
                       <th key={h} className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-black">{h}</th>
                     ))}
                   </tr>
@@ -288,6 +293,17 @@ export default function TagManagerPage() {
                         <span className="text-xs font-bold px-2 py-1 rounded-full text-white" style={{ background: tag.color }}>
                           {tag.tag_key}: {tag.tag_value}
                         </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex gap-1 flex-wrap">
+                          {(tag.clouds || []).length === 0 && <span className="text-xs text-gray-400">—</span>}
+                          {(tag.clouds || []).map((c: string) => (
+                            <span key={c} className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white"
+                              style={{ background: c === "aws" ? "#ec7211" : c === "azure" ? "#0078D4" : "#6b7280" }}>
+                              {c === "aws" ? "☁ AWS" : c === "azure" ? "🔷 Azure" : c}
+                            </span>
+                          ))}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-sm font-bold text-black">{tag.resource_count}</td>
                       <td className="px-4 py-3 text-xs font-semibold text-black">{tag.description || "—"}</td>
