@@ -256,17 +256,16 @@ export default function VerticalDetailPage() {
     setAzureServiceFilter("");
     setAzureLoading(true);
     try {
-      const [overviewRes, tagKeysRes] = await Promise.all([
-        api.get("/azure-costs/overview"),
+      const [subsRes, tagKeysRes] = await Promise.all([
+        api.get("/azure-costs/meta/subscriptions"),
         api.get("/azure-costs/tag-keys"),
       ]);
-      const subs = (overviewRes.data?.subscriptions || []).map((s: any) => ({
+      setAzureSubs((subsRes.data || []).map((s: any) => ({
         subscription_id: s.subscription_id,
         subscription_name: s.subscription_name,
         resource_count: 0,
-        last_month_cost: s.actual_cost || 0,
-      }));
-      setAzureSubs(subs);
+        last_month_cost: 0,
+      })));
       setAzureTagKeys(tagKeysRes.data || []);
     } catch (err: any) {
       alert(err?.response?.data?.detail || "Failed to load Azure subscriptions");
