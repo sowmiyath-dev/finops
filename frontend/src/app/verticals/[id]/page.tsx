@@ -368,8 +368,10 @@ export default function VerticalDetailPage() {
       axios.get(`${BASE}/api/towers/`, { headers }),
     ]);
     const towersData: Tower[] = towersRes.data;
-    setTowers(towersData);
-    const flat: Account[] = towersData.flatMap((t) =>
+    setTowers(towersData.filter((t: any) => !t.cloud_provider || t.cloud_provider === "aws"));
+    const flat: Account[] = towersData
+      .filter((t: any) => !t.cloud_provider || t.cloud_provider === "aws")
+      .flatMap((t) =>
       (t.sub_accounts || []).map((s) => ({
         aws_account_id: s.aws_account_id,
         account_name: s.account_name,
