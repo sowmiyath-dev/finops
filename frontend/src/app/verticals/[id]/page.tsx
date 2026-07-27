@@ -257,14 +257,14 @@ export default function VerticalDetailPage() {
     setAzureLoading(true);
     try {
       const [subsRes, tagKeysRes] = await Promise.all([
-        api.get("/azure-costs/meta/subscriptions"),
+        api.get("/azure-costs/subscriptions"),
         api.get("/azure-costs/tag-keys"),
       ]);
       setAzureSubs((subsRes.data || []).map((s: any) => ({
         subscription_id: s.subscription_id,
         subscription_name: s.subscription_name,
         resource_count: 0,
-        last_month_cost: 0,
+        last_month_cost: s.actual_cost || 0,
       })));
       setAzureTagKeys(tagKeysRes.data || []);
     } catch (err: any) {
