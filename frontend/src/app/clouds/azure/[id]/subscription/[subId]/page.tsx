@@ -82,7 +82,7 @@ export default function SubscriptionDrillDown() {
         <table className="w-full">
           <thead>
             <tr className="bg-gray-100 border-b-2 border-gray-300">
-              {["#", "Resource Group", "Actual Cost", "SP Savings", "True Cost", "% of Total"].map((h) => (
+              {["#", "Resource Group", "Actual Cost", "SP Allocated", "Savings", "True Cost", "% of Total"].map((h) => (
                 <th key={h} className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-gray-700">{h}</th>
               ))}
             </tr>
@@ -91,13 +91,13 @@ export default function SubscriptionDrillDown() {
             {loading ? (
               [...Array(5)].map((_, i) => (
                 <tr key={i} className="border-b border-gray-100">
-                  {[...Array(6)].map((_, j) => (
+                  {[...Array(7)].map((_, j) => (
                     <td key={j} className="px-4 py-3"><div className="h-3 bg-gray-200 rounded animate-pulse" style={{ width: j === 1 ? "160px" : "90px" }} /></td>
                   ))}
                 </tr>
               ))
             ) : rows.length === 0 ? (
-              <tr><td colSpan={6} className="text-center py-10 text-sm text-gray-400">No resource groups found</td></tr>
+              <tr><td colSpan={7} className="text-center py-10 text-sm text-gray-400">No resource groups found</td></tr>
             ) : (
               rows.map((r, i) => {
                 const pct = total > 0 ? (r.actual_cost / total) * 100 : 0;
@@ -106,6 +106,9 @@ export default function SubscriptionDrillDown() {
                     <td className="px-4 py-3 text-xs font-bold text-gray-400">{i + 1}</td>
                     <td className="px-4 py-3 text-sm font-semibold text-black">{r.resource_group}</td>
                     <td className="px-4 py-3 text-sm font-mono text-orange-700">{fmtINR(r.actual_cost)}</td>
+                    <td className="px-4 py-3 text-sm font-mono text-purple-700">
+                      {(r.sp_allocated || r.amortized_cost || 0) > 0 ? fmtINR(r.sp_allocated || r.amortized_cost || 0) : <span className="text-gray-300">—</span>}
+                    </td>
                     <td className="px-4 py-3 text-sm font-mono text-green-700">
                       {r.savings > 0 ? fmtINR(r.savings) : <span className="text-gray-300">—</span>}
                     </td>
@@ -126,6 +129,7 @@ export default function SubscriptionDrillDown() {
               <tr className="border-t-2 border-gray-300 bg-gray-50">
                 <td className="px-4 py-3 text-sm font-bold text-black" colSpan={2}>Total</td>
                 <td className="px-4 py-3 text-sm font-bold font-mono text-orange-700">{fmtINR(total)}</td>
+                <td className="px-4 py-3 text-sm font-bold font-mono text-purple-700">{fmtINR(rows.reduce((s, r) => s + (r.sp_allocated || r.amortized_cost || 0), 0))}</td>
                 <td className="px-4 py-3 text-sm font-bold font-mono text-green-700">{fmtINR(rows.reduce((s, r) => s + r.savings, 0))}</td>
                 <td className="px-4 py-3 text-sm font-bold font-mono text-blue-900">{fmtINR(rows.reduce((s, r) => s + r.true_cost, 0))}</td>
                 <td className="px-4 py-3 text-xs font-bold text-black">100%</td>

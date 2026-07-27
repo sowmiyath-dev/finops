@@ -12,7 +12,7 @@ interface AzureTenant {
   last_synced_at: string | null; auto_sync_enabled: boolean;
 }
 interface SyncStatus { percent: number; status: string; message: string; }
-interface TenantCost { actual_cost: number; savings: number; true_cost: number; }
+interface TenantCost { actual_cost: number; sp_allocated: number; savings: number; true_cost: number; }
 
 function fmtINR(n: number) {
   return `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -53,7 +53,7 @@ export default function AzurePage() {
             params: { start_date: lastMonth.start, end_date: lastMonth.end },
           });
           costs[t.id] = r.data;
-        } catch { costs[t.id] = { actual_cost: 0, savings: 0, true_cost: 0 }; }
+        } catch { costs[t.id] = { actual_cost: 0, sp_allocated: 0, savings: 0, true_cost: 0 }; }
       }));
       setTenantCosts(costs);
     } catch (e) { console.error(e); } finally { setLoading(false); }
@@ -63,8 +63,12 @@ export default function AzurePage() {
 
   useEffect(() => {
     if (tenants.length === 0) return;
+    // Only poll if at least one tenant is actively syncing
+    const hasActiveSyncs = tenants.some((t) => syncStatuses[t.id]?.status === "running" || syncing[t.id]);
+    if (!hasActiveSyncs) return;
     const interval = setInterval(async () => {
       for (const t of tenants) {
+        if (syncStatuses[t.id]?.status !== "running" && !syncing[t.id]) continue;
         try {
           const res = await api.get(`/towers/${t.id}/sync-status`);
           setSyncStatuses((prev) => ({ ...prev, [t.id]: res.data }));
@@ -73,7 +77,7 @@ export default function AzurePage() {
       }
     }, 15000);
     return () => clearInterval(interval);
-  }, [tenants]);
+  }, [tenants, syncStatuses, syncing]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -238,14 +242,14 @@ export default function AzurePage() {
 
                   {/* Cost figures */}
                   <div className="mt-4 relative z-10">
-                    <div className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-1">{lastMonth.label} Cost</div>
+                    <div className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-1">{lastMonth.label} True Cost</div>
                     <div className="text-3xl font-bold text-white font-mono">
                       {cost ? fmtINR(cost.true_cost) : <span className="text-white/30 text-lg">Loading…</span>}
                     </div>
                     {cost && cost.savings > 0 && (
                       <div className="flex items-center gap-1.5 mt-1.5">
                         <TrendingUp className="w-3 h-3 text-green-400" />
-                        <span className="text-green-400 text-xs font-bold">{fmtINR(cost.savings)} saved (RI/SP)</span>
+                        <span className="text-green-400 text-xs font-bold">{fmtINR(cost.savings)} saved</span>
                       </div>
                     )}
                   </div>
@@ -261,22 +265,28 @@ export default function AzurePage() {
 
                 {/* Card body */}
                 <div className="px-5 py-4">
-                  <div className="grid grid-cols-3 gap-3 mb-4">
+                  <div className="grid grid-cols-4 gap-1.5 mb-4">
                     <div className="text-center p-2 rounded-lg bg-orange-50 border border-orange-100">
                       <div className="text-[9px] font-bold uppercase tracking-wide text-orange-600 mb-1">Actual</div>
-                      <div className="text-xs font-bold text-orange-700 font-mono">
+                      <div className="text-[11px] font-bold text-orange-700 font-mono">
                         {cost ? fmtINR(cost.actual_cost) : "—"}
+                      </div>
+                    </div>
+                    <div className="text-center p-2 rounded-lg bg-purple-50 border border-purple-100">
+                      <div className="text-[9px] font-bold uppercase tracking-wide text-purple-700 mb-1">SP Alloc</div>
+                      <div className="text-[11px] font-bold text-purple-700 font-mono">
+                        {cost && cost.sp_allocated > 0 ? fmtINR(cost.sp_allocated) : "—"}
                       </div>
                     </div>
                     <div className="text-center p-2 rounded-lg bg-green-50 border border-green-100">
                       <div className="text-[9px] font-bold uppercase tracking-wide text-green-600 mb-1">Savings</div>
-                      <div className="text-xs font-bold text-green-700 font-mono">
+                      <div className="text-[11px] font-bold text-green-700 font-mono">
                         {cost && cost.savings > 0 ? fmtINR(cost.savings) : "—"}
                       </div>
                     </div>
                     <div className="text-center p-2 rounded-lg bg-blue-50 border border-blue-100">
                       <div className="text-[9px] font-bold uppercase tracking-wide text-blue-700 mb-1">True Cost</div>
-                      <div className="text-xs font-bold text-blue-900 font-mono">
+                      <div className="text-[11px] font-bold text-blue-900 font-mono">
                         {cost ? fmtINR(cost.true_cost) : "—"}
                       </div>
                     </div>

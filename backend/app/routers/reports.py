@@ -66,11 +66,16 @@ def _build_filters(f: ReportFilter, user_ct_ids: list[str]):
 
 
 async def _get_user_ct_ids(db: AsyncSession, user: User) -> list[str]:
+    cache_key = f"ct_ids_{user.id}"
+    if (cached := _cache_get(cache_key)) is not None:
+        return cached
     if user.role == "viewer":
         result = await db.execute(select(ControlTower.id))
     else:
         result = await db.execute(select(ControlTower.id).where(ControlTower.user_id == user.id))
-    return [str(r[0]) for r in result.all()]
+    data = [str(r[0]) for r in result.all()]
+    _cache_set(cache_key, data)
+    return data
 
 
 # ── Account-wise report ───────────────────────────────────────────────────────
@@ -602,6 +607,9 @@ async def savings_ct_distribution(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    cache_key = f"sp_dist_{ct_id}_{start_date}_{end_date}"
+    if (cached := _cache_get(cache_key)) is not None:
+        return cached
     from sqlalchemy import case, literal
     ct_ids = await _get_user_ct_ids(db, user)
     start = date.fromisoformat(start_date)
@@ -724,7 +732,7 @@ async def savings_ct_distribution(
     total_sp_alloc = sum(a["sp_allocated"] for a in sub_accounts)
     total_savings  = sum(a["savings"] for a in sub_accounts)
 
-    return {
+    result = {
         "ct_id":              ct_id,
         "start":              start_date,
         "end":                end_date,
@@ -736,6 +744,8 @@ async def savings_ct_distribution(
         "total_savings":      round(total_savings, 2),
         "sub_accounts":       sub_accounts,
     }
+    _cache_set(cache_key, result)
+    return result
 async def savings_summary(
     start_date: str,
     end_date: str,

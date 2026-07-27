@@ -106,6 +106,25 @@ class BulkTagByAccount(BaseModel):
     account_level: bool = False  # if True, insert account_id as placeholder resource_id
 
 
+class BulkTagAzure(BaseModel):
+    vertical_id: str
+    business_id: Optional[str] = None
+    billing_tag: Optional[str] = None
+    # granularity: subscription | resource_group | tag | resource
+    scope: str  # subscription | resource_group | tag | resource
+    # subscription scope
+    subscription_id: Optional[str] = None
+    subscription_name: Optional[str] = None
+    # resource_group scope
+    resource_group: Optional[str] = None
+    # tag scope
+    tag_key: Optional[str] = None
+    tag_value: Optional[str] = None
+    # resource scope — list of full Azure resource IDs
+    resource_ids: Optional[list[str]] = None
+    resource_names: Optional[list[str]] = None  # parallel to resource_ids
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _date_range(granularity: str) -> tuple[date, date]:
@@ -895,6 +914,173 @@ async def bulk_tag_account(
     asyncio.create_task(refresh_vertical_cost_cache())
 
     return {"tagged": added, "tags": tags_created, "account": payload.aws_account_id}
+
+
+@router.post("/bulk-tag-azure", status_code=201)
+async def bulk_tag_azure(
+    payload: BulkTagAzure,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Tag Azure resources to a vertical at subscription / resource_group / tag / resource scope."""
+    if user.role == "viewer":
+        raise HTTPException(403)
+
+    vertical = (await db.execute(
+        select(Vertical).where(Vertical.id == payload.vertical_id)
+    )).scalar_one_or_none()
+    if not vertical:
+        raise HTTPException(404, "Vertical not found")
+
+    business_name = None
+    if payload.business_id:
+        biz = (await db.execute(
+            select(Business).where(Business.id == payload.business_id)
+        )).scalar_one_or_none()
+        if biz:
+            business_name = biz.name
+
+    async def _get_or_create_tag(key: str, value: str, color: str) -> CustomTag:
+        tag = (await db.execute(
+            select(CustomTag).where(
+                func.lower(CustomTag.tag_key) == key.lower(),
+                func.lower(CustomTag.tag_value) == value.lower(),
+            )
+        )).scalar_one_or_none()
+        if not tag:
+            tag = CustomTag(
+                tag_key=key, tag_value=value, color=color,
+                description=f"Auto-created for {key}={value}",
+                created_by=user.id,
+            )
+            db.add(tag)
+            await db.flush()
+        return tag
+
+    vertical_tag = await _get_or_create_tag("Vertical", vertical.name, vertical.color)
+    business_tag = await _get_or_create_tag("Business", business_name, vertical.color) if business_name else None
+    billing_tag_obj = None
+    if payload.billing_tag and payload.billing_tag.strip():
+        billing_tag_obj = await _get_or_create_tag("Billing", payload.billing_tag.strip(), "#16a085")
+
+    tags_to_apply = [t for t in [vertical_tag, business_tag, billing_tag_obj] if t]
+
+    async def _upsert_mapping(resource_id: str, resource_name: Optional[str], service: Optional[str],
+                               subscription_id: Optional[str], resource_group: Optional[str]):
+        for tag in tags_to_apply:
+            exists = (await db.execute(
+                select(ResourceTagMapping).where(
+                    ResourceTagMapping.resource_id == resource_id,
+                    ResourceTagMapping.custom_tag_id == tag.id,
+                )
+            )).scalar_one_or_none()
+            if not exists:
+                db.add(ResourceTagMapping(
+                    resource_id=resource_id,
+                    resource_name=resource_name,
+                    cloud_provider="azure",
+                    aws_account_id=subscription_id,  # reuse field for subscription_id
+                    service=service,
+                    custom_tag_id=tag.id,
+                    created_by=user.id,
+                ))
+
+    from app.models.db_models import AzureCostRecord
+
+    added = 0
+
+    if payload.scope == "subscription":
+        if not payload.subscription_id:
+            raise HTTPException(400, "subscription_id required for subscription scope")
+        # Use subscription_id as the resource_id placeholder
+        await _upsert_mapping(
+            resource_id=payload.subscription_id,
+            resource_name=payload.subscription_name or payload.subscription_id,
+            service="Azure Subscription",
+            subscription_id=payload.subscription_id,
+            resource_group=None,
+        )
+        added = 1
+
+    elif payload.scope == "resource_group":
+        if not payload.resource_group:
+            raise HTTPException(400, "resource_group required for resource_group scope")
+        # Use resource_group as placeholder; also store subscription context
+        rg_id = f"{payload.subscription_id}/{payload.resource_group}" if payload.subscription_id else payload.resource_group
+        await _upsert_mapping(
+            resource_id=rg_id,
+            resource_name=payload.resource_group,
+            service="Azure Resource Group",
+            subscription_id=payload.subscription_id,
+            resource_group=payload.resource_group,
+        )
+        added = 1
+
+    elif payload.scope == "tag":
+        if not payload.tag_key or not payload.tag_value:
+            raise HTTPException(400, "tag_key and tag_value required for tag scope")
+        # Fetch all distinct resource_ids matching this Azure tag
+        from sqlalchemy import text as sa_text
+        tag_val_expr = func.json_extract_path_text(
+            func.cast(AzureCostRecord.tags, sa_text("json")), payload.tag_key
+        )
+        rows = (await db.execute(
+            select(
+                AzureCostRecord.resource_id,
+                AzureCostRecord.resource_name,
+                AzureCostRecord.service,
+                AzureCostRecord.subscription_id,
+                AzureCostRecord.resource_group,
+            )
+            .where(
+                AzureCostRecord.cost_type == "actual",
+                AzureCostRecord.tags.isnot(None),
+                AzureCostRecord.resource_id.isnot(None),
+                AzureCostRecord.resource_id != "",
+                func.lower(tag_val_expr) == payload.tag_value.lower(),
+            )
+            .group_by(
+                AzureCostRecord.resource_id, AzureCostRecord.resource_name,
+                AzureCostRecord.service, AzureCostRecord.subscription_id,
+                AzureCostRecord.resource_group,
+            )
+        )).all()
+        for r in rows:
+            await _upsert_mapping(r.resource_id, r.resource_name, r.service, r.subscription_id, r.resource_group)
+            added += 1
+
+    elif payload.scope == "resource":
+        if not payload.resource_ids:
+            raise HTTPException(400, "resource_ids required for resource scope")
+        names = payload.resource_names or []
+        for i, rid in enumerate(payload.resource_ids):
+            if not rid or rid.strip() in ("", "*", "-", "null"):
+                continue
+            rname = names[i] if i < len(names) else rid.split("/")[-1]
+            await _upsert_mapping(
+                resource_id=rid.strip(),
+                resource_name=rname,
+                service=None,
+                subscription_id=payload.subscription_id,
+                resource_group=payload.resource_group,
+            )
+            added += 1
+    else:
+        raise HTTPException(400, f"Unknown scope: {payload.scope}")
+
+    await db.commit()
+
+    import asyncio as _asyncio
+    from app.services.vertical_cache_service import refresh_vertical_cost_cache
+    _asyncio.create_task(refresh_vertical_cost_cache())
+
+    tags_applied = f"Vertical={vertical.name}"
+    if business_name:
+        tags_applied += f", Business={business_name}"
+    if payload.billing_tag:
+        tags_applied += f", Billing={payload.billing_tag}"
+
+    return {"tagged": added, "scope": payload.scope, "tags": tags_applied}
 
 
 @router.get("/apps/{app_id}/cost")

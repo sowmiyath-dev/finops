@@ -74,7 +74,8 @@ class CostRecord(Base):
         Index("ix_cr_resource_id", "resource_id"),           # vertical cost queries
         Index("ix_cr_resource_date", "resource_id", "date"), # vertical cost with date filter
         Index("ix_cr_resource_date_type", "resource_id", "date", "line_item_type"),  # covers CASE filter
-        Index("ix_cr_account_date_type", "aws_account_id", "date", "line_item_type"),  # account cost queries
+        Index("ix_cr_ct_date_type", "control_tower_id", "date", "line_item_type"),  # SP distribution query
+        Index("ix_cr_ct_acc_date", "control_tower_id", "aws_account_id", "date"),   # per-account queries
     )
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     control_tower_id = Column(UUID(as_uuid=True), ForeignKey("control_towers.id"), nullable=False)
@@ -114,6 +115,8 @@ class AzureCostRecord(Base):
         Index("ix_az_sub_cost_type_date", "subscription_id", "cost_type", "date"),
         Index("ix_az_rg_cost_type_date", "resource_group", "cost_type", "date"),
         Index("ix_az_pricing_model", "pricing_model"),
+        Index("ix_az_cost_type_sub_date", "cost_type", "subscription_id", "date"),  # overview fast path
+        Index("ix_az_ct_cost_type_date", "control_tower_id", "cost_type", "date"),  # summary fast path
     )
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     control_tower_id = Column(UUID(as_uuid=True), ForeignKey("control_towers.id"), nullable=False)

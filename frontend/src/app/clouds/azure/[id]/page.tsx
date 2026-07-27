@@ -23,7 +23,7 @@ const PRESETS = [
 ];
 
 type Tab = "subscriptions" | "resource-groups" | "services" | "tags";
-interface CostRow { label: string; sublabel?: string; subscription_id?: string; actual_cost: number; amortized_cost: number; savings: number; true_cost: number; }
+interface CostRow { label: string; sublabel?: string; subscription_id?: string; actual_cost: number; amortized_cost: number; sp_allocated: number; savings: number; true_cost: number; }
 interface SyncLog { id: string; status: string; triggered_by: string; records_synced: number; date_range_start: string; date_range_end: string; started_at: string; finished_at: string; error_message?: string; }
 
 export default function AzureTenantDetail() {
@@ -69,6 +69,7 @@ export default function AzureTenantDetail() {
           label: r.subscription_name, sublabel: r.subscription_id,
           subscription_id: r.subscription_id,
           actual_cost: r.actual_cost, amortized_cost: r.amortized_cost,
+          sp_allocated: r.sp_allocated || r.amortized_cost || 0,
           savings: r.savings, true_cost: r.true_cost,
         })));
       } else {
@@ -86,6 +87,7 @@ export default function AzureTenantDetail() {
           label: r.resource_group || r.service || r.tag_value || "—",
           sublabel: r.subscription_name || r.tag_key,
           actual_cost: r.actual_cost || 0, amortized_cost: r.amortized_cost || 0,
+          sp_allocated: r.sp_allocated || r.amortized_cost || 0,
           savings: r.savings || 0, true_cost: r.true_cost || 0,
         })));
       }
@@ -121,6 +123,7 @@ export default function AzureTenantDetail() {
   };
 
   const totalActual = summary?.actual_cost || 0;
+  const totalSpAllocated = summary?.sp_allocated || summary?.amortized_cost || 0;
   const totalSavings = summary?.savings || 0;
   const totalTrue = summary?.true_cost || 0;
 
@@ -177,30 +180,30 @@ export default function AzureTenantDetail() {
 
       {/* KPI cards */}
       <div className="grid grid-cols-4 gap-4 mb-6">
-        <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-black mb-2">Actual Cost</div>
+        <div className="bg-white rounded-lg border-l-4 border-orange-500 border border-gray-200 shadow-sm p-5">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-orange-600 mb-2">Actual Cost</div>
           <div className="text-2xl font-bold font-mono text-orange-700">{fmtINR(totalActual)}</div>
           <div className="text-xs text-gray-400 mt-1">Pay-as-you-go</div>
         </div>
-        <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-black mb-2">SP/RI Allocated</div>
-          <div className="text-2xl font-bold font-mono text-green-700">{fmtINR(totalSavings)}</div>
+        <div className="bg-white rounded-lg border-l-4 border-purple-500 border border-gray-200 shadow-sm p-5">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-purple-700 mb-2">SP Allocated</div>
+          <div className="text-2xl font-bold font-mono text-purple-700">{fmtINR(totalSpAllocated)}</div>
           <button onClick={openSpModal}
             className="text-xs font-bold text-blue-900 hover:underline flex items-center gap-1 mt-1">
             <TrendingDown className="w-3 h-3" /> View Details
           </button>
         </div>
-        <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-black mb-2">True Cost (Amortized)</div>
-          <div className="text-2xl font-bold font-mono text-blue-900">{fmtINR(totalTrue)}</div>
-          <div className="text-xs text-gray-400 mt-1">After RI/SP allocation</div>
-        </div>
-        <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-black mb-2">Savings %</div>
-          <div className="text-2xl font-bold font-mono text-green-700">
-            {totalActual > 0 ? `${((totalSavings / totalActual) * 100).toFixed(1)}%` : "—"}
-          </div>
+        <div className="bg-white rounded-lg border-l-4 border-green-500 border border-gray-200 shadow-sm p-5">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-green-700 mb-2">Savings</div>
+          <div className="text-2xl font-bold font-mono text-green-700">{fmtINR(totalSavings)}</div>
           <div className="text-xs text-gray-400 mt-1">vs on-demand</div>
+        </div>
+        <div className="bg-white rounded-lg border-l-4 border-blue-700 border border-gray-200 shadow-sm p-5">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-blue-900 mb-2">True Cost</div>
+          <div className="text-2xl font-bold font-mono text-blue-900">{fmtINR(totalTrue)}</div>
+          <div className="text-xs text-gray-400 mt-1">
+            {totalActual > 0 ? `${((totalSavings / totalActual) * 100).toFixed(1)}% saved` : "After RI/SP"}
+          </div>
         </div>
       </div>
 
@@ -212,11 +215,15 @@ export default function AzureTenantDetail() {
               tab === t.key ? "border-blue-900 text-blue-900" : "border-transparent text-gray-500 hover:text-black"
             }`}>{t.label}</button>
         ))}
-        {tab === "tags" && (
-          <select value={tagKey} onChange={(e) => { setTagKey(e.target.value); loadData("tags", startDate, endDate); }}
-            className="ml-4 border border-gray-300 rounded-md px-2 py-1.5 text-xs font-semibold text-black bg-white focus:outline-none focus:border-blue-600">
-            {tagKeys.map((k) => <option key={k}>{k}</option>)}
-          </select>
+        {tab === "tags" && tagKeys.length > 0 && (
+          <div className="ml-4 flex items-center gap-2 flex-wrap">
+            {tagKeys.map((k) => (
+              <button key={k} onClick={() => { setTagKey(k); loadData("tags", startDate, endDate); }}
+                className={`px-3 py-1 text-xs font-bold rounded-full border transition ${
+                  tagKey === k ? "bg-blue-900 text-white border-blue-900" : "border-gray-300 text-black hover:border-blue-600"
+                }`}>{k}</button>
+            ))}
+          </div>
         )}
       </div>
 
@@ -230,8 +237,10 @@ export default function AzureTenantDetail() {
               </th>
               {tab === "subscriptions" && <th className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-gray-700">Subscription ID</th>}
               {tab !== "subscriptions" && <th className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-gray-700">Subscription</th>}
+              {tab === "tags" && <th className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-gray-700">Tag Key</th>}
               <th className="text-right px-4 py-3 text-xs font-bold uppercase tracking-wider text-gray-700"><div className="flex items-center justify-end gap-1.5"><div className="w-2 h-2 rounded-full bg-orange-500" />Actual Cost</div></th>
-              <th className="text-right px-4 py-3 text-xs font-bold uppercase tracking-wider text-gray-700"><div className="flex items-center justify-end gap-1.5"><div className="w-2 h-2 rounded-full bg-green-500" />SP Savings</div></th>
+              <th className="text-right px-4 py-3 text-xs font-bold uppercase tracking-wider text-gray-700"><div className="flex items-center justify-end gap-1.5"><div className="w-2 h-2 rounded-full bg-purple-500" />SP Allocated</div></th>
+              <th className="text-right px-4 py-3 text-xs font-bold uppercase tracking-wider text-gray-700"><div className="flex items-center justify-end gap-1.5"><div className="w-2 h-2 rounded-full bg-green-500" />Savings</div></th>
               <th className="text-right px-4 py-3 text-xs font-bold uppercase tracking-wider text-gray-700"><div className="flex items-center justify-end gap-1.5"><div className="w-2 h-2 rounded-full bg-blue-600" />True Cost</div></th>
             </tr>
           </thead>
@@ -239,13 +248,13 @@ export default function AzureTenantDetail() {
             {loading ? (
               [...Array(6)].map((_, i) => (
                 <tr key={i} className="border-b border-gray-100">
-                  {[...Array(5)].map((_, j) => (
+                  {[...Array(6)].map((_, j) => (
                     <td key={j} className="px-4 py-3"><div className={`h-3 bg-gray-200 rounded animate-pulse ${j>=2?"ml-auto":""}`} style={{width:j>=2?"90px":j===0?"160px":"120px"}} /></td>
                   ))}
                 </tr>
               ))
             ) : rows.length === 0 ? (
-              <tr><td colSpan={5} className="text-center py-10 text-sm text-gray-400">No data for this period</td></tr>
+              <tr><td colSpan={tab === "tags" ? 7 : 6} className="text-center py-10 text-sm text-gray-400">No data for this period</td></tr>
             ) : (
               rows.map((r, i) => (
                 <tr key={i} className="border-b border-gray-100 hover:bg-blue-50 transition">
@@ -261,8 +270,10 @@ export default function AzureTenantDetail() {
                     )}
                   </td>
                   {tab === "subscriptions" && <td className="px-4 py-3 text-xs font-mono text-gray-500">{r.subscription_id || "—"}</td>}
-                  {tab !== "subscriptions" && <td className="px-4 py-3 text-xs text-gray-500">{r.sublabel || "—"}</td>}
+                  {tab !== "subscriptions" && tab !== "tags" && <td className="px-4 py-3 text-xs text-gray-500">{r.sublabel || "—"}</td>}
+                  {tab === "tags" && <td className="px-4 py-3 text-xs font-bold text-blue-900">{r.sublabel || tagKey}</td>}
                   <td className="px-4 py-3 text-right text-sm font-mono text-orange-700">{fmtINR(r.actual_cost)}</td>
+                  <td className="px-4 py-3 text-right text-sm font-mono text-purple-700">{r.sp_allocated > 0 ? fmtINR(r.sp_allocated) : <span className="text-gray-300">—</span>}</td>
                   <td className="px-4 py-3 text-right text-sm font-mono text-green-700">{r.savings > 0 ? fmtINR(r.savings) : <span className="text-gray-300">—</span>}</td>
                   <td className="px-4 py-3 text-right text-sm font-bold font-mono text-blue-900">{fmtINR(r.true_cost)}</td>
                 </tr>
@@ -270,8 +281,9 @@ export default function AzureTenantDetail() {
             )}
             {!loading && rows.length > 0 && (
               <tr className="border-t-2 border-gray-300 bg-gray-50">
-                <td className="px-4 py-3 text-sm font-bold text-black" colSpan={2}>Total</td>
+                <td className="px-4 py-3 text-sm font-bold text-black" colSpan={tab === "tags" ? 3 : 2}>Total</td>
                 <td className="px-4 py-3 text-right text-sm font-bold font-mono text-orange-700">{fmtINR(totalActual)}</td>
+                <td className="px-4 py-3 text-right text-sm font-bold font-mono text-purple-700">{fmtINR(totalSpAllocated)}</td>
                 <td className="px-4 py-3 text-right text-sm font-bold font-mono text-green-700">{fmtINR(totalSavings)}</td>
                 <td className="px-4 py-3 text-right text-sm font-bold font-mono text-blue-900">{fmtINR(totalTrue)}</td>
               </tr>

@@ -81,25 +81,33 @@ function SyncModal({ ct, onClose, onSync }: { ct: any; onClose: () => void; onSy
 
 function SyncProgressBar({ ctId }: { ctId: string }) {
   const [progress, setProgress] = useState<{ percent: number; status: string; message: string } | null>(null);
-  const [polling, setPolling] = useState(true);
+  const [polling, setPolling] = useState(false); // start false — only poll after first check shows active sync
 
   useEffect(() => {
-    if (!polling) return;
-    const iv = setInterval(async () => {
+    // Single initial check — only start interval if sync is actually running
+    let iv: ReturnType<typeof setInterval> | null = null;
+    const check = async () => {
       try {
         const res = await api.get(`/towers/${ctId}/sync-status`);
-        setProgress(res.data);
-        // Stop polling when idle or done
-        if (res.data.status === "done" || res.data.status === "idle" || !res.data.status) {
-          setPolling(false);
-          clearInterval(iv);
+        const d = res.data;
+        if (d.status === "running") {
+          setProgress(d);
+          setPolling(true);
+          iv = setInterval(async () => {
+            try {
+              const r2 = await api.get(`/towers/${ctId}/sync-status`);
+              setProgress(r2.data);
+              if (r2.data.status !== "running") { clearInterval(iv!); setPolling(false); }
+            } catch { clearInterval(iv!); setPolling(false); }
+          }, 10000);
         }
-      } catch { setPolling(false); }
-    }, 10000); // poll every 10s instead of 2s
-    return () => clearInterval(iv);
-  }, [ctId, polling]);
+      } catch {}
+    };
+    check();
+    return () => { if (iv) clearInterval(iv); };
+  }, [ctId]);
 
-  if (!progress || progress.status === "idle" || progress.status === "done" || !progress.status) return null;
+  if (!progress || progress.status !== "running") return null;
   return (
     <div className="mt-2">
       <div className="flex justify-between text-xs mb-1">

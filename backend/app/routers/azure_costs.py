@@ -18,10 +18,11 @@ router = APIRouter(prefix="/azure-costs", tags=["azure-costs"])
 # Simple in-memory cache
 _cache: dict = {}
 _CACHE_TTL = 1800  # 30 min
+_CT_IDS_TTL = 300  # 5 min for user CT ids
 
-def _cache_get(key: str):
+def _cache_get(key: str, ttl: int = _CACHE_TTL):
     e = _cache.get(key)
-    if e and time.time() - e["t"] < _CACHE_TTL:
+    if e and time.time() - e["t"] < ttl:
         return e["d"]
     return None
 
@@ -101,6 +102,7 @@ async def cost_overview(
                 "subscription_id": r.subscription_id,
                 "subscription_name": r.subscription_name or r.subscription_id,
                 "actual_cost": actual, "amortized_cost": amortized,
+                "sp_allocated": amortized,
                 "savings": savings, "true_cost": amortized if amortized > 0 else actual,
             })
     else:
@@ -126,6 +128,7 @@ async def cost_overview(
                 "subscription_id": r.subscription_id,
                 "subscription_name": r.subscription_name or r.subscription_id,
                 "actual_cost": actual, "amortized_cost": amortized,
+                "sp_allocated": amortized,
                 "savings": savings, "true_cost": amortized if amortized > 0 else actual,
             })
 
@@ -133,6 +136,7 @@ async def cost_overview(
     result = {
         "summary": {
             "actual_cost": total_actual, "amortized_cost": total_amortized,
+            "sp_allocated": total_amortized,
             "savings": savings_total,
             "true_cost": total_amortized if total_amortized > 0 else total_actual,
         },
@@ -191,7 +195,7 @@ async def cost_summary(
 
     savings = max(0, actual - amortized)
     result = {"actual_cost": actual, "amortized_cost": amortized, "savings": savings,
-              "true_cost": amortized if amortized > 0 else actual}
+              "sp_allocated": amortized, "true_cost": amortized if amortized > 0 else actual}
     _cache_set(cache_key, result)
     return result
 
@@ -241,6 +245,9 @@ async def cost_by_resource_group(
     user: User = Depends(get_current_user),
 ):
     start, end = _parse_dates(start_date, end_date)
+    cache_key = f"az_rg_{start}_{end}_{subscription_id}"
+    if (cached := _cache_get(cache_key)) is not None:
+        return cached
     ca = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "actual",
           AzureCostRecord.resource_group.isnot(None), AzureCostRecord.resource_group != ""]
     cm = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "amortized",
@@ -265,8 +272,10 @@ async def cost_by_resource_group(
             "resource_group": r.resource_group,
             "subscription_name": r.subscription_name,
             "actual_cost": actual, "amortized_cost": amortized,
+            "sp_allocated": amortized,
             "savings": savings, "true_cost": true_cost,
         })
+    _cache_set(cache_key, result)
     return result
 
 
@@ -282,6 +291,9 @@ async def cost_by_service(
     user: User = Depends(get_current_user),
 ):
     start, end = _parse_dates(start_date, end_date)
+    cache_key = f"az_svc_{start}_{end}_{subscription_id}_{resource_group}"
+    if (cached := _cache_get(cache_key)) is not None:
+        return cached
     ca = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "actual"]
     cm = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "amortized"]
     if subscription_id:
@@ -307,6 +319,7 @@ async def cost_by_service(
             "actual_cost": actual, "amortized_cost": amortized,
             "savings": savings, "true_cost": true_cost,
         })
+    _cache_set(cache_key, result)
     return result
 
 
@@ -322,53 +335,59 @@ async def cost_by_tag(
     user: User = Depends(get_current_user),
 ):
     start, end = _parse_dates(start_date, end_date)
-    ca = [AzureCostRecord.date >= start, AzureCostRecord.date <= end,
-          AzureCostRecord.cost_type == "actual", AzureCostRecord.tags.isnot(None)]
-    cm = [AzureCostRecord.date >= start, AzureCostRecord.date <= end,
-          AzureCostRecord.cost_type == "amortized", AzureCostRecord.tags.isnot(None)]
-    if subscription_id:
-        ca.append(AzureCostRecord.subscription_id == subscription_id)
-        cm.append(AzureCostRecord.subscription_id == subscription_id)
+    cache_key = f"az_tags_{tag_key}_{start}_{end}_{subscription_id}"
+    if (cached := _cache_get(cache_key)) is not None:
+        return cached
 
-    def _agg_by_tag_value(rows, cost_field):
-        agg: dict = {}
-        for r in rows:
-            try:
-                tags = json.loads(r.tags) if r.tags else {}
-            except Exception:
-                continue
-            val = tags.get(tag_key) or tags.get(tag_key.lower()) or "Untagged"
-            agg[val] = agg.get(val, 0) + float(getattr(r, cost_field) or 0)
-        return agg
+    # Use PostgreSQL JSON operator to extract tag value in SQL — avoids Python-side loop
+    from sqlalchemy import cast, text
+    from sqlalchemy.dialects.postgresql import JSONB
+
+    tag_val_expr = func.coalesce(
+        func.nullif(func.trim(func.replace(
+            func.replace(
+                func.json_extract_path_text(
+                    func.cast(AzureCostRecord.tags, type_=text("json")), tag_key
+                ), '"', ''
+            ), "'", ''
+        )), ''),
+        'Untagged'
+    ).label("tag_value")
+
+    base_cond = [
+        AzureCostRecord.date >= start, AzureCostRecord.date <= end,
+        AzureCostRecord.tags.isnot(None), AzureCostRecord.tags != '{}', AzureCostRecord.tags != '',
+    ]
+    if subscription_id:
+        base_cond.append(AzureCostRecord.subscription_id == subscription_id)
 
     actual_rows = (await db.execute(
-        select(AzureCostRecord.tags, func.sum(AzureCostRecord.actual_cost).label("actual_cost"))
-        .where(*ca).group_by(AzureCostRecord.tags)
+        select(tag_val_expr, func.sum(AzureCostRecord.actual_cost).label("actual_cost"))
+        .where(*base_cond, AzureCostRecord.cost_type == "actual")
+        .group_by(text("tag_value"))
+        .order_by(func.sum(AzureCostRecord.actual_cost).desc())
     )).all()
 
     amortized_rows = (await db.execute(
-        select(AzureCostRecord.tags, func.sum(AzureCostRecord.amortized_cost).label("amortized_cost"))
-        .where(*cm).group_by(AzureCostRecord.tags)
+        select(tag_val_expr, func.sum(AzureCostRecord.amortized_cost).label("amortized_cost"))
+        .where(*base_cond, AzureCostRecord.cost_type == "amortized")
+        .group_by(text("tag_value"))
     )).all()
 
-    actual_agg = _agg_by_tag_value(actual_rows, "actual_cost")
-    amortized_agg = _agg_by_tag_value(amortized_rows, "amortized_cost")
+    amortized_agg = {r.tag_value: float(r.amortized_cost or 0) for r in amortized_rows}
 
-    all_values = set(actual_agg.keys()) | set(amortized_agg.keys())
     result = []
-    for val in all_values:
-        actual = actual_agg.get(val, 0)
-        amortized = amortized_agg.get(val, actual)
+    for r in actual_rows:
+        actual = float(r.actual_cost or 0)
+        amortized = amortized_agg.get(r.tag_value, actual)
         savings = max(0, actual - amortized)
         result.append({
-            "tag_key": tag_key,
-            "tag_value": val,
-            "actual_cost": actual,
-            "amortized_cost": amortized,
-            "savings": savings,
-            "true_cost": amortized if amortized > 0 else actual,
+            "tag_key": tag_key, "tag_value": r.tag_value,
+            "actual_cost": actual, "amortized_cost": amortized,
+            "savings": savings, "true_cost": amortized if amortized > 0 else actual,
         })
-    return sorted(result, key=lambda x: x["actual_cost"], reverse=True)
+    _cache_set(cache_key, result)
+    return result
 
 
 @router.get("/tag-keys")
