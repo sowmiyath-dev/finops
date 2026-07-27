@@ -5,7 +5,7 @@ import axios from "axios";
 import { useAuthStore } from "@/store/authStore";
 import {
   Layers, Users, Box, DollarSign, ChevronRight, Plus, Trash2, X,
-  ChevronLeft, Tag, Server, CheckSquare, Square, RefreshCw,
+  ChevronLeft, Tag, Server, CheckSquare, Square, RefreshCw, Cloud,
 } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area,
@@ -71,6 +71,12 @@ interface Tower { id: string; name: string; sub_accounts: { aws_account_id: stri
 interface Account { aws_account_id: string; account_name: string; ct_name: string; ct_id: string; }
 interface Resource { resource_id: string; service: string; region: string; account_id?: string; }
 
+type AzureScope = "subscription" | "resource_group" | "tag" | "resource";
+interface AzureSub { subscription_id: string; subscription_name: string; resource_count: number; last_month_cost: number; }
+interface AzureRG { resource_group: string; resource_count: number; }
+interface AzureResource { resource_id: string; resource_name: string; service: string; resource_group: string; }
+interface AzureTagValue { tag_value: string; resource_count: number; resources: AzureResource[]; }
+
 export default function VerticalDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -117,6 +123,25 @@ export default function VerticalDetailPage() {
   const [serviceFilter, setServiceFilter] = useState("");
   const [accountLevelBiz, setAccountLevelBiz] = useState(""); // business for account-level tagging
   const [accountTagging, setAccountTagging] = useState(false);
+
+  // Azure tag modal
+  const [showAzureTag, setShowAzureTag] = useState(false);
+  const [azureScope, setAzureScope] = useState<AzureScope>("subscription");
+  const [azureBusiness, setAzureBusiness] = useState("");
+  const [azureBillingTag, setAzureBillingTag] = useState("");
+  const [azureSubs, setAzureSubs] = useState<AzureSub[]>([]);
+  const [azureSelectedSub, setAzureSelectedSub] = useState("");
+  const [azureRGs, setAzureRGs] = useState<AzureRG[]>([]);
+  const [azureSelectedRG, setAzureSelectedRG] = useState("");
+  const [azureTagKeys, setAzureTagKeys] = useState<string[]>([]);
+  const [azureTagKey, setAzureTagKey] = useState("");
+  const [azureTagValues, setAzureTagValues] = useState<AzureTagValue[]>([]);
+  const [azureSelectedTagValue, setAzureSelectedTagValue] = useState("");
+  const [azureResources, setAzureResources] = useState<AzureResource[]>([]);
+  const [azureSelectedResources, setAzureSelectedResources] = useState<Set<string>>(new Set());
+  const [azureLoading, setAzureLoading] = useState(false);
+  const [azureTagging, setAzureTagging] = useState(false);
+  const [azureServiceFilter, setAzureServiceFilter] = useState("");
 
   const load = async (gran = granularity, start?: string, end?: string) => {
     setLoading(true);
@@ -215,6 +240,122 @@ export default function VerticalDetailPage() {
   };
 
   // Bulk tag handlers
+  const openAzureTag = async () => {
+    setShowAzureTag(true);
+    setAzureScope("subscription");
+    setAzureBusiness("");
+    setAzureBillingTag("");
+    setAzureSelectedSub("");
+    setAzureSelectedRG("");
+    setAzureTagKey("");
+    setAzureTagValues([]);
+    setAzureSelectedTagValue("");
+    setAzureResources([]);
+    setAzureSelectedResources(new Set());
+    setAzureServiceFilter("");
+    setAzureLoading(true);
+    try {
+      const [subsRes, tagKeysRes] = await Promise.all([
+        axios.get(`${BASE}/api/azure-costs/browse/subscriptions`, { headers }),
+        axios.get(`${BASE}/api/azure-costs/tag-keys`, { headers }),
+      ]);
+      setAzureSubs(subsRes.data || []);
+      setAzureTagKeys(tagKeysRes.data || []);
+    } finally {
+      setAzureLoading(false);
+    }
+  };
+
+  const onAzureSubChange = async (subId: string) => {
+    setAzureSelectedSub(subId);
+    setAzureSelectedRG("");
+    setAzureResources([]);
+    setAzureSelectedResources(new Set());
+    if (!subId) return;
+    setAzureLoading(true);
+    try {
+      const res = await axios.get(`${BASE}/api/azure-costs/browse/resource-groups`, { headers, params: { subscription_id: subId } });
+      setAzureRGs(res.data || []);
+    } finally { setAzureLoading(false); }
+  };
+
+  const onAzureRGChange = async (rg: string) => {
+    setAzureSelectedRG(rg);
+    setAzureResources([]);
+    setAzureSelectedResources(new Set());
+    if (!rg || azureScope !== "resource") return;
+    setAzureLoading(true);
+    try {
+      const res = await axios.get(`${BASE}/api/azure-costs/browse/resources`, {
+        headers, params: { subscription_id: azureSelectedSub, resource_group: rg },
+      });
+      setAzureResources(res.data || []);
+    } finally { setAzureLoading(false); }
+  };
+
+  const onAzureTagKeyChange = async (key: string) => {
+    setAzureTagKey(key);
+    setAzureSelectedTagValue("");
+    setAzureTagValues([]);
+    if (!key) return;
+    setAzureLoading(true);
+    try {
+      const res = await axios.get(`${BASE}/api/azure-costs/browse/tag-values`, {
+        headers, params: { tag_key: key, subscription_id: azureSelectedSub || undefined },
+      });
+      setAzureTagValues(res.data || []);
+    } finally { setAzureLoading(false); }
+  };
+
+  const loadAzureResources = async () => {
+    if (!azureSelectedSub) return;
+    setAzureLoading(true);
+    try {
+      const res = await axios.get(`${BASE}/api/azure-costs/browse/resources`, {
+        headers, params: { subscription_id: azureSelectedSub, resource_group: azureSelectedRG || undefined },
+      });
+      setAzureResources(res.data || []);
+    } finally { setAzureLoading(false); }
+  };
+
+  const applyAzureTag = async () => {
+    setAzureTagging(true);
+    try {
+      const body: any = {
+        vertical_id: id,
+        business_id: azureBusiness || null,
+        billing_tag: azureBillingTag.trim() || null,
+        scope: azureScope,
+        subscription_id: azureSelectedSub || null,
+      };
+      if (azureScope === "subscription") {
+        const sub = azureSubs.find(s => s.subscription_id === azureSelectedSub);
+        body.subscription_name = sub?.subscription_name;
+      } else if (azureScope === "resource_group") {
+        body.resource_group = azureSelectedRG;
+      } else if (azureScope === "tag") {
+        body.tag_key = azureTagKey;
+        body.tag_value = azureSelectedTagValue;
+      } else if (azureScope === "resource") {
+        const selected = azureResources.filter(r => azureSelectedResources.has(r.resource_id));
+        body.resource_ids = selected.map(r => r.resource_id);
+        body.resource_names = selected.map(r => r.resource_name);
+        body.resource_group = azureSelectedRG || null;
+      }
+      const res = await axios.post(`${BASE}/api/verticals/bulk-tag-azure`, body, { headers });
+      alert(`✓ Tagged ${res.data.tagged} Azure resource(s) — ${res.data.tags}`);
+      setShowAzureTag(false);
+      await load();
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || "Azure tagging failed");
+    } finally { setAzureTagging(false); }
+  };
+
+  const azureFilteredResources = azureResources.filter(r =>
+    !azureServiceFilter || r.service?.toLowerCase().includes(azureServiceFilter.toLowerCase()) ||
+    r.resource_name?.toLowerCase().includes(azureServiceFilter.toLowerCase())
+  );
+
   const openBulkTag = async () => {
     setShowBulkTag(true);
     setSelectedAccounts(new Set());
@@ -479,9 +620,13 @@ export default function VerticalDetailPage() {
             </div>
           )}
 
+          <button onClick={openAzureTag}
+            className="flex items-center gap-2 px-4 py-2 bg-[#0078D4] hover:bg-[#006CBF] text-white text-xs font-bold rounded-md transition">
+            <Cloud className="w-3.5 h-3.5" /> Add Azure Resources
+          </button>
           <button onClick={openBulkTag}
             className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-md transition">
-            <Tag className="w-3.5 h-3.5" /> Tag Resources by Account
+            <Tag className="w-3.5 h-3.5" /> Tag AWS Resources
           </button>
           <button onClick={() => setShowAddBusiness(true)}
             className="flex items-center gap-2 px-4 py-2 bg-green-700 hover:bg-green-800 text-white text-xs font-bold rounded-md transition">
@@ -859,6 +1004,255 @@ export default function VerticalDetailPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Azure Tag Modal */}
+      {showAzureTag && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg border border-gray-300 shadow-lg w-full max-w-2xl p-6 max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-4 flex-shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-md flex items-center justify-center" style={{ background: "#0078D4" }}>
+                  <Cloud className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-black">Add Azure Resources to Vertical</h3>
+                  <p className="text-xs text-gray-500">Tag Azure resources with <span className="font-bold text-[#0078D4]">Vertical = {vertical?.name}</span></p>
+                </div>
+              </div>
+              <button onClick={() => setShowAzureTag(false)}><X className="w-4 h-4 text-black" /></button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-4">
+              {/* Scope selector */}
+              <div>
+                <label className="text-xs font-bold uppercase tracking-wide text-black block mb-2">Scope</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {([
+                    { value: "subscription", label: "Subscription", desc: "Entire subscription" },
+                    { value: "resource_group", label: "Resource Group", desc: "All RG resources" },
+                    { value: "tag", label: "By Tag", desc: "Match Azure tag" },
+                    { value: "resource", label: "Individual", desc: "Pick resources" },
+                  ] as { value: AzureScope; label: string; desc: string }[]).map((s) => (
+                    <button key={s.value}
+                      onClick={() => { setAzureScope(s.value); setAzureResources([]); setAzureSelectedResources(new Set()); }}
+                      className={`p-3 rounded-lg border-2 text-left transition ${
+                        azureScope === s.value
+                          ? "border-[#0078D4] bg-blue-50"
+                          : "border-gray-200 hover:border-gray-300 bg-white"
+                      }`}>
+                      <div className={`text-xs font-bold ${ azureScope === s.value ? "text-[#0078D4]" : "text-black" }`}>{s.label}</div>
+                      <div className="text-[10px] text-gray-500 mt-0.5">{s.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Subscription picker — always shown */}
+              <div>
+                <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">
+                  {azureScope === "subscription" ? "Select Subscription *" : "Subscription (optional filter)"}
+                </label>
+                {azureLoading && azureSubs.length === 0
+                  ? <div className="h-9 bg-gray-100 rounded-md animate-pulse" />
+                  : (
+                    <select value={azureSelectedSub} onChange={(e) => onAzureSubChange(e.target.value)}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-black focus:border-[#0078D4] outline-none">
+                      <option value="">— Select subscription —</option>
+                      {azureSubs.map(s => (
+                        <option key={s.subscription_id} value={s.subscription_id}>
+                          {s.subscription_name} ({s.resource_count} resources)
+                        </option>
+                      ))}
+                    </select>
+                  )}
+              </div>
+
+              {/* Resource Group picker */}
+              {(azureScope === "resource_group" || azureScope === "resource") && azureSelectedSub && (
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">
+                    {azureScope === "resource_group" ? "Select Resource Group *" : "Resource Group (optional filter)"}
+                  </label>
+                  {azureLoading && azureRGs.length === 0
+                    ? <div className="h-9 bg-gray-100 rounded-md animate-pulse" />
+                    : (
+                      <select value={azureSelectedRG} onChange={(e) => onAzureRGChange(e.target.value)}
+                        className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-black focus:border-[#0078D4] outline-none">
+                        <option value="">— All resource groups —</option>
+                        {azureRGs.map(rg => (
+                          <option key={rg.resource_group} value={rg.resource_group}>
+                            {rg.resource_group} ({rg.resource_count} resources)
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                </div>
+              )}
+
+              {/* Tag scope */}
+              {azureScope === "tag" && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">Tag Key *</label>
+                    <select value={azureTagKey} onChange={(e) => onAzureTagKeyChange(e.target.value)}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-black focus:border-[#0078D4] outline-none">
+                      <option value="">— Select tag key —</option>
+                      {azureTagKeys.map(k => <option key={k} value={k}>{k}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">Tag Value *</label>
+                    {azureLoading && azureTagKey && azureTagValues.length === 0
+                      ? <div className="h-9 bg-gray-100 rounded-md animate-pulse" />
+                      : (
+                        <select value={azureSelectedTagValue} onChange={(e) => setAzureSelectedTagValue(e.target.value)}
+                          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-black focus:border-[#0078D4] outline-none">
+                          <option value="">— Select value —</option>
+                          {azureTagValues.map(tv => (
+                            <option key={tv.tag_value} value={tv.tag_value}>
+                              {tv.tag_value} ({tv.resource_count} resources)
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                  </div>
+                </div>
+              )}
+
+              {/* Individual resource scope */}
+              {azureScope === "resource" && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-xs font-bold uppercase tracking-wide text-black">Select Resources *</label>
+                    <div className="flex items-center gap-2">
+                      <input value={azureServiceFilter} onChange={(e) => setAzureServiceFilter(e.target.value)}
+                        placeholder="Filter by service/name..."
+                        className="border border-gray-300 rounded-md px-2 py-1 text-xs text-black focus:border-[#0078D4] outline-none w-44" />
+                      {azureResources.length === 0 && (
+                        <button onClick={loadAzureResources} disabled={!azureSelectedSub || azureLoading}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0078D4] hover:bg-[#006CBF] text-white text-xs font-bold rounded-md transition disabled:opacity-50">
+                          <RefreshCw className={`w-3 h-3 ${azureLoading ? "animate-spin" : ""}`} /> Load
+                        </button>
+                      )}
+                      {azureResources.length > 0 && (
+                        <>
+                          <button onClick={() => setAzureSelectedResources(new Set(azureFilteredResources.map(r => r.resource_id)))}
+                            className="text-xs font-bold text-[#0078D4] hover:underline">All</button>
+                          <button onClick={() => setAzureSelectedResources(new Set())}
+                            className="text-xs font-bold text-gray-500 hover:underline">None</button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {azureLoading && azureResources.length === 0
+                    ? <div className="h-32 bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-center"><RefreshCw className="w-5 h-5 animate-spin text-[#0078D4]" /></div>
+                    : azureResources.length > 0 ? (
+                      <div className="border border-gray-200 rounded-lg overflow-hidden max-h-52 overflow-y-auto">
+                        <table className="w-full">
+                          <thead className="sticky top-0 bg-gray-50 border-b border-gray-200">
+                            <tr>
+                              <th className="w-8 px-2 py-2" />
+                              {["Resource", "Service", "Resource Group"].map(h => (
+                                <th key={h} className="text-left text-xs font-bold uppercase tracking-wider text-black px-3 py-2">{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {azureFilteredResources.map(r => {
+                              const checked = azureSelectedResources.has(r.resource_id);
+                              return (
+                                <tr key={r.resource_id}
+                                  className={`border-b border-gray-100 cursor-pointer transition ${ checked ? "bg-blue-50" : "hover:bg-gray-50" }`}
+                                  onClick={() => setAzureSelectedResources(prev => {
+                                    const next = new Set(prev);
+                                    next.has(r.resource_id) ? next.delete(r.resource_id) : next.add(r.resource_id);
+                                    return next;
+                                  })}>
+                                  <td className="px-2 py-2">
+                                    {checked ? <CheckSquare className="w-4 h-4 text-[#0078D4]" /> : <Square className="w-4 h-4 text-gray-400" />}
+                                  </td>
+                                  <td className="px-3 py-2 text-xs font-semibold text-black truncate max-w-[160px]">{r.resource_name}</td>
+                                  <td className="px-3 py-2">
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-[#0078D4]">{r.service}</span>
+                                  </td>
+                                  <td className="px-3 py-2 text-xs text-gray-500 truncate max-w-[120px]">{r.resource_group}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : azureSelectedSub ? (
+                      <div className="text-center py-6 text-xs text-gray-500 border border-gray-200 rounded-lg">Click Load to fetch resources</div>
+                    ) : (
+                      <div className="text-center py-6 text-xs text-gray-500 border border-gray-200 rounded-lg">Select a subscription first</div>
+                    )}
+                  {azureResources.length > 0 && (
+                    <p className="text-xs text-gray-500 mt-1">{azureSelectedResources.size} of {azureFilteredResources.length} selected</p>
+                  )}
+                </div>
+              )}
+
+              {/* Business + Billing tag */}
+              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100">
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">Business <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <select value={azureBusiness} onChange={(e) => setAzureBusiness(e.target.value)}
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-black focus:border-[#0078D4] outline-none">
+                    <option value="">— No business tag —</option>
+                    {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">Billing Tag <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <input value={azureBillingTag} onChange={(e) => setAzureBillingTag(e.target.value)}
+                    placeholder="e.g. Q1-2025"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-black focus:border-[#0078D4] outline-none" />
+                </div>
+              </div>
+
+              {/* Summary */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-xs">
+                <span className="font-bold text-[#0078D4]">Will apply: </span>
+                <span className="font-bold text-black">Vertical={vertical?.name}</span>
+                {azureBusiness && <span className="font-bold text-green-700">, Business={businesses.find(b => b.id === azureBusiness)?.name}</span>}
+                {azureBillingTag && <span className="font-bold text-teal-700">, Billing={azureBillingTag}</span>}
+                <span className="text-gray-600"> → scope: <span className="font-bold">{azureScope}</span></span>
+                {azureScope === "subscription" && azureSelectedSub && (
+                  <span className="text-gray-600"> → {azureSubs.find(s => s.subscription_id === azureSelectedSub)?.subscription_name}</span>
+                )}
+                {azureScope === "resource_group" && azureSelectedRG && (
+                  <span className="text-gray-600"> → {azureSelectedRG}</span>
+                )}
+                {azureScope === "tag" && azureTagKey && azureSelectedTagValue && (
+                  <span className="text-gray-600"> → {azureTagKey}={azureSelectedTagValue}</span>
+                )}
+                {azureScope === "resource" && azureSelectedResources.size > 0 && (
+                  <span className="text-gray-600"> → {azureSelectedResources.size} resource(s)</span>
+                )}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-gray-200 flex-shrink-0">
+              <button onClick={() => setShowAzureTag(false)}
+                className="px-4 py-2 border border-gray-300 rounded-md text-xs font-bold text-black hover:bg-gray-50 transition">
+                Cancel
+              </button>
+              <button onClick={applyAzureTag} disabled={azureTagging || (
+                azureScope === "subscription" ? !azureSelectedSub :
+                azureScope === "resource_group" ? !azureSelectedRG :
+                azureScope === "tag" ? !azureTagKey || !azureSelectedTagValue :
+                azureSelectedResources.size === 0
+              )}
+                className="px-5 py-2 bg-[#0078D4] hover:bg-[#006CBF] text-white text-xs font-bold rounded-md transition disabled:opacity-50">
+                {azureTagging ? "Tagging..." : "Apply Azure Tags"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
