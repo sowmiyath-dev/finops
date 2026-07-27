@@ -255,11 +255,12 @@ export default function VerticalDetailPage() {
     setAzureServiceFilter("");
     setAzureLoading(true);
     try {
+      // Use same api instance as Azure org page (auto-attaches token)
+      const { default: api } = await import("@/lib/api");
       const [overviewRes, tagKeysRes] = await Promise.all([
-        axios.get(`${BASE}/api/azure-costs/overview`, { headers }),
-        axios.get(`${BASE}/api/azure-costs/tag-keys`, { headers }),
+        api.get("/azure-costs/overview"),
+        api.get("/azure-costs/tag-keys"),
       ]);
-      // Use same subscription list as Azure org page
       const subs = (overviewRes.data?.subscriptions || []).map((s: any) => ({
         subscription_id: s.subscription_id,
         subscription_name: s.subscription_name,
@@ -283,8 +284,8 @@ export default function VerticalDetailPage() {
     if (!subId) return;
     setAzureLoading(true);
     try {
-      // Same endpoint as Azure org tenant detail page
-      const res = await axios.get(`${BASE}/api/azure-costs/resource-groups`, { headers, params: { subscription_id: subId } });
+      const { default: api } = await import("@/lib/api");
+      const res = await api.get("/azure-costs/resource-groups", { params: { subscription_id: subId } });
       setAzureRGs((res.data || []).map((r: any) => ({
         resource_group: r.resource_group,
         resource_count: 0,
@@ -299,8 +300,9 @@ export default function VerticalDetailPage() {
     if (!rg || azureScope !== "resource") return;
     setAzureLoading(true);
     try {
-      const res = await axios.get(`${BASE}/api/azure-costs/resources`, {
-        headers, params: { subscription_id: azureSelectedSub, resource_group: rg },
+      const { default: api } = await import("@/lib/api");
+      const res = await api.get("/azure-costs/resources", {
+        params: { subscription_id: azureSelectedSub, resource_group: rg },
       });
       setAzureResources((res.data || []).map((r: any) => ({
         resource_id: r.resource_id,
@@ -318,8 +320,9 @@ export default function VerticalDetailPage() {
     if (!key) return;
     setAzureLoading(true);
     try {
-      const res = await axios.get(`${BASE}/api/azure-costs/browse/tag-values`, {
-        headers, params: { tag_key: key, subscription_id: azureSelectedSub || undefined },
+      const { default: api } = await import("@/lib/api");
+      const res = await api.get("/azure-costs/browse/tag-values", {
+        params: { tag_key: key, subscription_id: azureSelectedSub || undefined },
       });
       setAzureTagValues(res.data || []);
     } finally { setAzureLoading(false); }
@@ -329,9 +332,9 @@ export default function VerticalDetailPage() {
     if (!azureSelectedSub) return;
     setAzureLoading(true);
     try {
-      // Same endpoint as Azure org page resource list
-      const res = await axios.get(`${BASE}/api/azure-costs/resources`, {
-        headers, params: { subscription_id: azureSelectedSub, resource_group: azureSelectedRG || undefined },
+      const { default: api } = await import("@/lib/api");
+      const res = await api.get("/azure-costs/resources", {
+        params: { subscription_id: azureSelectedSub, resource_group: azureSelectedRG || undefined },
       });
       setAzureResources((res.data || []).map((r: any) => ({
         resource_id: r.resource_id,
