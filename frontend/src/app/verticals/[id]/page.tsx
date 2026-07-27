@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import axios from "axios";
+import api from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import {
   Layers, Users, Box, DollarSign, ChevronRight, Plus, Trash2, X,
@@ -255,8 +256,6 @@ export default function VerticalDetailPage() {
     setAzureServiceFilter("");
     setAzureLoading(true);
     try {
-      // Use same api instance as Azure org page (auto-attaches token)
-      const { default: api } = await import("@/lib/api");
       const [overviewRes, tagKeysRes] = await Promise.all([
         api.get("/azure-costs/overview"),
         api.get("/azure-costs/tag-keys"),
@@ -284,7 +283,6 @@ export default function VerticalDetailPage() {
     if (!subId) return;
     setAzureLoading(true);
     try {
-      const { default: api } = await import("@/lib/api");
       const res = await api.get("/azure-costs/resource-groups", { params: { subscription_id: subId } });
       setAzureRGs((res.data || []).map((r: any) => ({
         resource_group: r.resource_group,
@@ -300,7 +298,6 @@ export default function VerticalDetailPage() {
     if (!rg || azureScope !== "resource") return;
     setAzureLoading(true);
     try {
-      const { default: api } = await import("@/lib/api");
       const res = await api.get("/azure-costs/resources", {
         params: { subscription_id: azureSelectedSub, resource_group: rg },
       });
@@ -320,7 +317,6 @@ export default function VerticalDetailPage() {
     if (!key) return;
     setAzureLoading(true);
     try {
-      const { default: api } = await import("@/lib/api");
       const res = await api.get("/azure-costs/browse/tag-values", {
         params: { tag_key: key, subscription_id: azureSelectedSub || undefined },
       });
@@ -332,7 +328,6 @@ export default function VerticalDetailPage() {
     if (!azureSelectedSub) return;
     setAzureLoading(true);
     try {
-      const { default: api } = await import("@/lib/api");
       const res = await api.get("/azure-costs/resources", {
         params: { subscription_id: azureSelectedSub, resource_group: azureSelectedRG || undefined },
       });
