@@ -257,15 +257,17 @@ export default function VerticalDetailPage() {
     setAzureLoading(true);
     try {
       const [subsRes, tagKeysRes] = await Promise.all([
-        api.get("/azure-costs/subscriptions"),
+        api.get("/azure-costs/vertical/subscriptions"),
         api.get("/azure-costs/tag-keys"),
       ]);
-      setAzureSubs((subsRes.data || []).map((s: any) => ({
-        subscription_id: s.subscription_id,
-        subscription_name: s.subscription_name,
-        resource_count: 0,
-        last_month_cost: s.actual_cost || 0,
-      })));
+      setAzureSubs(
+        (subsRes.data || []).map((s: any) => ({
+          subscription_id: s.subscription_id,
+          subscription_name: s.subscription_name,
+          resource_count: 0,
+          last_month_cost: 0,
+        }))
+      );
       setAzureTagKeys(tagKeysRes.data || []);
     } catch (err: any) {
       alert(err?.response?.data?.detail || "Failed to load Azure subscriptions");
@@ -282,11 +284,8 @@ export default function VerticalDetailPage() {
     if (!subId) return;
     setAzureLoading(true);
     try {
-      const res = await api.get("/azure-costs/resource-groups", { params: { subscription_id: subId } });
-      setAzureRGs((res.data || []).map((r: any) => ({
-        resource_group: r.resource_group,
-        resource_count: 0,
-      })));
+      const res = await api.get("/azure-costs/vertical/resource-groups", { params: { subscription_id: subId } });
+      setAzureRGs((res.data || []).map((r: any) => ({ resource_group: r.resource_group, resource_count: 0 })));
     } finally { setAzureLoading(false); }
   };
 
@@ -297,15 +296,10 @@ export default function VerticalDetailPage() {
     if (!rg || azureScope !== "resource") return;
     setAzureLoading(true);
     try {
-      const res = await api.get("/azure-costs/resources", {
+      const res = await api.get("/azure-costs/vertical/resources", {
         params: { subscription_id: azureSelectedSub, resource_group: rg },
       });
-      setAzureResources((res.data || []).map((r: any) => ({
-        resource_id: r.resource_id,
-        resource_name: r.resource_name,
-        service: r.service,
-        resource_group: r.resource_group,
-      })));
+      setAzureResources(res.data || []);
     } finally { setAzureLoading(false); }
   };
 
@@ -327,15 +321,10 @@ export default function VerticalDetailPage() {
     if (!azureSelectedSub) return;
     setAzureLoading(true);
     try {
-      const res = await api.get("/azure-costs/resources", {
+      const res = await api.get("/azure-costs/vertical/resources", {
         params: { subscription_id: azureSelectedSub, resource_group: azureSelectedRG || undefined },
       });
-      setAzureResources((res.data || []).map((r: any) => ({
-        resource_id: r.resource_id,
-        resource_name: r.resource_name,
-        service: r.service,
-        resource_group: r.resource_group,
-      })));
+      setAzureResources(res.data || []);
     } finally { setAzureLoading(false); }
   };
 

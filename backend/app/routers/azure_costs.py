@@ -591,6 +591,89 @@ async def list_resource_groups(
     return [{"resource_group": r.resource_group, "subscription_name": r.subscription_name} for r in rows]
 
 
+# ── Vertical tag modal — no-cache direct queries ─────────────────────────────
+
+@router.get("/vertical/subscriptions")
+async def vertical_subscriptions(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Direct query — no cache. For vertical Add Azure Resources modal."""
+    rows = (await db.execute(
+        select(
+            AzureCostRecord.subscription_id,
+            AzureCostRecord.subscription_name,
+        )
+        .where(AzureCostRecord.cost_type == "actual")
+        .group_by(AzureCostRecord.subscription_id, AzureCostRecord.subscription_name)
+        .order_by(AzureCostRecord.subscription_name)
+    )).all()
+    return [
+        {"subscription_id": r.subscription_id, "subscription_name": r.subscription_name or r.subscription_id}
+        for r in rows
+    ]
+
+
+@router.get("/vertical/resource-groups")
+async def vertical_resource_groups(
+    subscription_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Direct query — no cache. Resource groups for a subscription."""
+    rows = (await db.execute(
+        select(AzureCostRecord.resource_group)
+        .where(
+            AzureCostRecord.subscription_id == subscription_id,
+            AzureCostRecord.cost_type == "actual",
+            AzureCostRecord.resource_group.isnot(None),
+            AzureCostRecord.resource_group != "",
+        )
+        .group_by(AzureCostRecord.resource_group)
+        .order_by(AzureCostRecord.resource_group)
+    )).all()
+    return [{"resource_group": r.resource_group} for r in rows]
+
+
+@router.get("/vertical/resources")
+async def vertical_resources(
+    subscription_id: str,
+    resource_group: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Direct query — no cache. Resources for a subscription/resource group."""
+    conditions = [
+        AzureCostRecord.subscription_id == subscription_id,
+        AzureCostRecord.cost_type == "actual",
+        AzureCostRecord.resource_id.isnot(None),
+        AzureCostRecord.resource_id != "",
+    ]
+    if resource_group:
+        conditions.append(AzureCostRecord.resource_group == resource_group)
+    rows = (await db.execute(
+        select(
+            AzureCostRecord.resource_id,
+            AzureCostRecord.resource_name,
+            AzureCostRecord.service,
+            AzureCostRecord.resource_group,
+        )
+        .where(*conditions)
+        .group_by(
+            AzureCostRecord.resource_id, AzureCostRecord.resource_name,
+            AzureCostRecord.service, AzureCostRecord.resource_group,
+        )
+        .order_by(AzureCostRecord.service, AzureCostRecord.resource_name)
+        .limit(500)
+    )).all()
+    return [{
+        "resource_id": r.resource_id,
+        "resource_name": r.resource_name or r.resource_id.split("/")[-1],
+        "service": r.service,
+        "resource_group": r.resource_group,
+    } for r in rows]
+
+
 # ── Azure resource browsing for tag manager ──────────────────────────────────
 
 @router.get("/browse/subscriptions")
