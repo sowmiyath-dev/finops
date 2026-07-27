@@ -261,6 +261,8 @@ export default function VerticalDetailPage() {
       ]);
       setAzureSubs(subsRes.data || []);
       setAzureTagKeys(tagKeysRes.data || []);
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || "Failed to load Azure subscriptions");
     } finally {
       setAzureLoading(false);
     }

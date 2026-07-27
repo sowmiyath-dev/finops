@@ -623,12 +623,26 @@ async def browse_subscriptions(
     )).all()
     cost_map = {r.subscription_id: float(r.cost or 0) for r in cost_rows}
 
+    if rows:
+        return [{
+            "subscription_id": r.subscription_id,
+            "subscription_name": r.subscription_name or r.subscription_id,
+            "resource_count": r.resource_count,
+            "last_month_cost": cost_map.get(r.subscription_id, 0),
+        } for r in rows]
+
+    # Fallback: use ControlTower records with cloud_provider=azure
+    ct_rows = (await db.execute(
+        select(ControlTower.id, ControlTower.name)
+        .where(ControlTower.cloud_provider == "azure")
+        .order_by(ControlTower.name)
+    )).all()
     return [{
-        "subscription_id": r.subscription_id,
-        "subscription_name": r.subscription_name or r.subscription_id,
-        "resource_count": r.resource_count,
-        "last_month_cost": cost_map.get(r.subscription_id, 0),
-    } for r in rows]
+        "subscription_id": str(r.id),
+        "subscription_name": r.name,
+        "resource_count": 0,
+        "last_month_cost": 0,
+    } for r in ct_rows]
 
 
 @router.get("/browse/resource-groups")
