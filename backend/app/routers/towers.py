@@ -425,23 +425,11 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
             _sync_progress[ct_id] = {"percent": 0, "status": "failed", "message": "No export files found"}
             return
 
-        # Delete existing Azure records for the date range (only on full sync — daily sync skips to avoid timeout on large table)
         from datetime import date as dt_date
         import uuid as _uuid2
         start_dt = dt_date.fromisoformat(start_date)
         end_dt = dt_date.fromisoformat(end_date)
-
-        if existing_count == 0:
-            # Full sync — safe to delete since table was empty
-            async with AsyncSessionLocal() as db:
-                from sqlalchemy import text as sa_text2
-                await db.execute(
-                    sa_text2("DELETE FROM azure_cost_records WHERE control_tower_id = :ct_id AND date >= :s AND date <= :e")
-                    .bindparams(ct_id=_uuid2.UUID(ct_id), s=start_dt, e=end_dt)
-                )
-                await db.commit()
-        else:
-            logger.info(f"Daily sync — skipping delete to avoid timeout, will overwrite via insert")
+        logger.info(f"Azure sync — skipping pre-delete, using ON CONFLICT DO NOTHING upsert")
 
         total_inserted = 0
 
@@ -477,36 +465,54 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
                     if not batch:
                         continue
                     async with AsyncSessionLocal() as db:
-                        db.add_all([
-                            AzureCostRecord(
-                                control_tower_id=ct_id,
-                                subscription_id=r["subscription_id"],
-                                subscription_name=r["subscription_name"],
-                                resource_group=r.get("resource_group"),
-                                resource_id=r.get("resource_id"),
-                                resource_name=r.get("resource_name"),
-                                date=r["date"],
-                                billing_currency=r.get("billing_currency", "INR"),
-                                actual_cost=r.get("actual_cost", 0),
-                                amortized_cost=r.get("amortized_cost", 0),
-                                quantity=r.get("quantity", 0),
-                                unit=r.get("unit"),
-                                service=r["service"],
-                                meter_subcategory=r.get("meter_subcategory"),
-                                meter_name=r.get("meter_name"),
-                                product_name=r.get("product_name"),
-                                region=r.get("region"),
-                                charge_type=r.get("charge_type", "Usage"),
-                                pricing_model=r.get("pricing_model", "OnDemand"),
-                                is_marketplace=r.get("is_marketplace", False),
-                                tags=r.get("tags"),
-                                cost_type=r.get("cost_type", "actual"),
-                            )
-                            for r in batch
-                        ])
-                        await db.commit()
-                        total_inserted += len(batch)
-                        logger.info(f"Azure blob {blob_idx+1}/{len(csv_blobs)}: {total_inserted} total inserted")
+                        if batch:
+                            from sqlalchemy import text as _ins_text
+                            import uuid as _uuid3
+                            await db.execute(_ins_text("""
+                                INSERT INTO azure_cost_records
+                                    (id, control_tower_id, subscription_id, subscription_name,
+                                     resource_group, resource_id, resource_name, date,
+                                     billing_currency, actual_cost, amortized_cost, quantity, unit,
+                                     service, meter_subcategory, meter_name, product_name, region,
+                                     charge_type, pricing_model, is_marketplace, tags, cost_type, synced_at)
+                                VALUES
+                                    (:id, :ct_id, :sub_id, :sub_name,
+                                     :rg, :rid, :rname, :date,
+                                     :currency, :actual, :amortized, :qty, :unit,
+                                     :service, :meter_sub, :meter_name, :product, :region,
+                                     :charge_type, :pricing, :marketplace, :tags, :cost_type, NOW())
+                                ON CONFLICT DO NOTHING
+                            """), [
+                                {
+                                    "id": str(_uuid3.uuid4()),
+                                    "ct_id": ct_id,
+                                    "sub_id": r["subscription_id"],
+                                    "sub_name": r["subscription_name"],
+                                    "rg": r.get("resource_group"),
+                                    "rid": r.get("resource_id"),
+                                    "rname": r.get("resource_name"),
+                                    "date": r["date"],
+                                    "currency": r.get("billing_currency", "INR"),
+                                    "actual": r.get("actual_cost", 0),
+                                    "amortized": r.get("amortized_cost", 0),
+                                    "qty": r.get("quantity", 0),
+                                    "unit": r.get("unit"),
+                                    "service": r["service"],
+                                    "meter_sub": r.get("meter_subcategory"),
+                                    "meter_name": r.get("meter_name"),
+                                    "product": r.get("product_name"),
+                                    "region": r.get("region"),
+                                    "charge_type": r.get("charge_type", "Usage"),
+                                    "pricing": r.get("pricing_model", "OnDemand"),
+                                    "marketplace": r.get("is_marketplace", False),
+                                    "tags": r.get("tags"),
+                                    "cost_type": r.get("cost_type", "actual"),
+                                }
+                                for r in batch
+                            ])
+                            await db.commit()
+                            total_inserted += len(batch)
+                            logger.info(f"Azure blob {blob_idx+1}/{len(csv_blobs)}: {total_inserted} total inserted")
 
                 await producer
                 logger.info(f"Azure blob {blob_idx+1} done: {total_inserted} total inserted")
