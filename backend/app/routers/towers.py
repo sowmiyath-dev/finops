@@ -356,10 +356,11 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
 
         # Use EXISTS instead of COUNT(*) — much faster on large tables
         from sqlalchemy import text as sa_text
+        import uuid as _uuid
         async with AsyncSessionLocal() as db:
             result = await db.execute(
                 sa_text("SELECT EXISTS(SELECT 1 FROM azure_cost_records WHERE control_tower_id = :ct_id LIMIT 1)")
-                .bindparams(ct_id=ct_id)
+                .bindparams(ct_id=_uuid.UUID(ct_id))
             )
             existing_count = 1 if result.scalar() else 0
 
