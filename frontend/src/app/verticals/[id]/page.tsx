@@ -257,19 +257,13 @@ export default function VerticalDetailPage() {
     setAzureLoading(true);
     try {
       const [subsRes, tagKeysRes] = await Promise.all([
-        api.get("/azure-costs/vertical/subscriptions"),
+        api.get("/azure-costs/browse/subscriptions"),
         api.get("/azure-costs/tag-keys"),
       ]);
-      setAzureSubs(
-        (subsRes.data || []).map((s: any) => ({
-          subscription_id: s.subscription_id,
-          subscription_name: s.subscription_name,
-          resource_count: 0,
-          last_month_cost: 0,
-        }))
-      );
+      setAzureSubs(subsRes.data || []);
       setAzureTagKeys(tagKeysRes.data || []);
     } catch (err: any) {
+      console.error("openAzureTag error:", err?.response?.status, err?.response?.data, err?.message);
       alert(err?.response?.data?.detail || "Failed to load Azure subscriptions");
     } finally {
       setAzureLoading(false);
@@ -284,8 +278,8 @@ export default function VerticalDetailPage() {
     if (!subId) return;
     setAzureLoading(true);
     try {
-      const res = await api.get("/azure-costs/vertical/resource-groups", { params: { subscription_id: subId } });
-      setAzureRGs((res.data || []).map((r: any) => ({ resource_group: r.resource_group, resource_count: 0 })));
+      const res = await api.get("/azure-costs/browse/resource-groups", { params: { subscription_id: subId } });
+      setAzureRGs(res.data || []);
     } finally { setAzureLoading(false); }
   };
 
@@ -296,7 +290,7 @@ export default function VerticalDetailPage() {
     if (!rg || azureScope !== "resource") return;
     setAzureLoading(true);
     try {
-      const res = await api.get("/azure-costs/vertical/resources", {
+      const res = await api.get("/azure-costs/browse/resources", {
         params: { subscription_id: azureSelectedSub, resource_group: rg },
       });
       setAzureResources(res.data || []);
@@ -321,7 +315,7 @@ export default function VerticalDetailPage() {
     if (!azureSelectedSub) return;
     setAzureLoading(true);
     try {
-      const res = await api.get("/azure-costs/vertical/resources", {
+      const res = await api.get("/azure-costs/browse/resources", {
         params: { subscription_id: azureSelectedSub, resource_group: azureSelectedRG || undefined },
       });
       setAzureResources(res.data || []);
@@ -1075,7 +1069,7 @@ export default function VerticalDetailPage() {
                       <option value="">— Select subscription —</option>
                       {azureSubs.map(s => (
                         <option key={s.subscription_id} value={s.subscription_id}>
-                          {s.subscription_name} ({s.resource_count} resources)
+                          {s.subscription_name}{s.resource_count > 0 ? ` (${s.resource_count} resources)` : ""}
                         </option>
                       ))}
                     </select>
@@ -1096,7 +1090,7 @@ export default function VerticalDetailPage() {
                         <option value="">— All resource groups —</option>
                         {azureRGs.map(rg => (
                           <option key={rg.resource_group} value={rg.resource_group}>
-                            {rg.resource_group} ({rg.resource_count} resources)
+                            {rg.resource_group}{rg.resource_count > 0 ? ` (${rg.resource_count} resources)` : ""}
                           </option>
                         ))}
                       </select>
