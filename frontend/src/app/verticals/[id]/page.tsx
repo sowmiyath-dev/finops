@@ -258,8 +258,15 @@ export default function VerticalDetailPage() {
     setAzureLoading(true);
     setAzureLoadError("");
     try {
-      const subsRes = await api.get("/azure-costs/browse/subscriptions");
-      const subs = subsRes.data || [];
+      // Use /overview which already works on the Azure tenant page
+      // It uses AzureMonthlySummary first, falls back to AzureCostRecord
+      const subsRes = await api.get("/azure-costs/overview");
+      const subs = (subsRes.data?.subscriptions || []).map((s: any) => ({
+        subscription_id: s.subscription_id,
+        subscription_name: s.subscription_name,
+        resource_count: 0,
+        last_month_cost: s.actual_cost || 0,
+      }));
       setAzureSubs(subs);
       if (subs.length === 0) setAzureLoadError("No Azure subscriptions found. Ensure Azure sync has completed.");
     } catch (err: any) {
@@ -282,8 +289,8 @@ export default function VerticalDetailPage() {
     if (!subId) return;
     setAzureLoading(true);
     try {
-      const res = await api.get("/azure-costs/browse/resource-groups", { params: { subscription_id: subId } });
-      setAzureRGs(res.data || []);
+      const res = await api.get("/azure-costs/meta/resource-groups", { params: { subscription_id: subId } });
+      setAzureRGs((res.data || []).map((r: any) => ({ resource_group: r.resource_group, resource_count: 0 })));
     } finally { setAzureLoading(false); }
   };
 
