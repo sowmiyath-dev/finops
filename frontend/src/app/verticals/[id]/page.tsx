@@ -256,18 +256,18 @@ export default function VerticalDetailPage() {
     setAzureServiceFilter("");
     setAzureLoading(true);
     try {
-      const [subsRes, tagKeysRes] = await Promise.all([
-        api.get("/azure-costs/browse/subscriptions"),
-        api.get("/azure-costs/tag-keys"),
-      ]);
+      const subsRes = await api.get("/azure-costs/browse/subscriptions");
       setAzureSubs(subsRes.data || []);
-      setAzureTagKeys(tagKeysRes.data || []);
     } catch (err: any) {
       console.error("openAzureTag error:", err?.response?.status, err?.response?.data, err?.message);
       alert(err?.response?.data?.detail || "Failed to load Azure subscriptions");
     } finally {
       setAzureLoading(false);
     }
+    // Load tag-keys in background — don't block subscription dropdown
+    api.get("/azure-costs/tag-keys")
+      .then((r) => setAzureTagKeys(r.data || []))
+      .catch(() => {});
   };
 
   const onAzureSubChange = async (subId: string) => {
