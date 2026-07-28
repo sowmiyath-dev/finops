@@ -38,20 +38,32 @@ async def check_db_and_ct():
 # ── 2. Azure credential + token ───────────────────────────────────────────────
 def check_credentials(ct):
     print("\n=== [2] AZURE CREDENTIALS ===")
+    import signal
+    def _timeout(signum, frame):
+        raise TimeoutError("Token request timed out after 15s")
+    signal.signal(signal.SIGALRM, _timeout)
+    signal.alarm(15)
     try:
         from app.services.azure_session import get_azure_credential
         cred = get_azure_credential(ct)
+        t0 = time.time()
         token = cred.get_token("https://storage.azure.com/.default")
+        elapsed = time.time() - t0
         if token and token.token:
             exp = datetime.fromtimestamp(token.expires_on, tz=timezone.utc)
-            print(f"  ✓ Token obtained, expires: {exp.isoformat()}")
+            print(f"  ✓ Token obtained in {elapsed:.1f}s, expires: {exp.isoformat()}")
             return cred
         else:
             print("  ✗ Token empty")
             return None
+    except TimeoutError as e:
+        print(f"  ✗ {e} — login.microsoftonline.com unreachable or very slow")
+        return None
     except Exception as e:
         print(f"  ✗ Credential error: {e}")
         return None
+    finally:
+        signal.alarm(0)
 
 # ── 3. Clock drift ────────────────────────────────────────────────────────────
 def check_clock():
@@ -66,6 +78,22 @@ def check_clock():
         pass
     now_utc = datetime.now(timezone.utc)
     print(f"  System UTC: {now_utc.isoformat()}")
+
+    # Network reachability
+    print("\n=== [3b] NETWORK REACHABILITY ===")
+    hosts = [
+        ("login.microsoftonline.com", 443),
+        ("finoptixcostexports.blob.core.windows.net", 443),
+    ]
+    import socket
+    for host, port in hosts:
+        try:
+            t0 = time.time()
+            sock = socket.create_connection((host, port), timeout=5)
+            sock.close()
+            print(f"  ✓ {host}:{port} reachable in {time.time()-t0:.2f}s")
+        except Exception as e:
+            print(f"  ✗ {host}:{port} UNREACHABLE: {e}")
 
 # ── 4. Blob service client + container access ─────────────────────────────────
 def check_blob_access(ct):
@@ -244,7 +272,7 @@ async def main():
         print("\nCannot continue without CT. Exiting.")
         return
 
-    check_clock()
+    check_clock()  # includes network reachability
     cred = check_credentials(ct)
     container = check_blob_access(ct)
     blobs = check_container_structure(ct, container)
