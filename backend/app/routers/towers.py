@@ -411,7 +411,17 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
 
         if not csv_blobs:
             logger.warning(f"No Azure export blobs found for CT {ct_id}")
-            _sync_progress[ct_id] = {"percent": 100, "status": "done", "message": "No export files found"}
+            async with AsyncSessionLocal() as db:
+                if sync_log_id:
+                    await db.execute(
+                        update(SyncLog).where(SyncLog.id == sync_log_id).values(
+                            status="failed",
+                            error_message="No Azure export blobs found in storage container",
+                            finished_at=datetime.now(timezone.utc),
+                        )
+                    )
+                    await db.commit()
+            _sync_progress[ct_id] = {"percent": 0, "status": "failed", "message": "No export files found"}
             return
 
         # Delete existing Azure records for the date range

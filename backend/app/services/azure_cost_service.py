@@ -248,6 +248,15 @@ def find_azure_export_blobs(ct: ControlTower, start_date: str, end_date: str, is
         csv_blobs += found
         logger.info(f"Prefix '{prefix}': found {len(found)} CSVs")
 
+    # If daily sync found nothing in daily folders, fall back to historical
+    if not is_first_sync and not csv_blobs:
+        logger.warning(f"Daily folders empty for {ct.name}, falling back to historical prefixes")
+        for prefix in historical_prefixes:
+            blobs = list(container.list_blobs(name_starts_with=prefix))
+            found = [b.name for b in blobs if b.name.endswith(".csv")]
+            csv_blobs += found
+            logger.info(f"Fallback prefix '{prefix}': found {len(found)} CSVs")
+
     csv_blobs = list(set(csv_blobs))
     logger.info(f"Total Azure CSV blobs for {ct.name} ({'full' if is_first_sync else 'daily'} sync): {len(csv_blobs)}")
     return csv_blobs
