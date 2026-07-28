@@ -22,6 +22,20 @@ async def _recover_stuck_syncs():
 
     try:
         async with AsyncSessionLocal() as db:
+            # Also mark any "started" logs older than 2 hours as failed (stuck/crashed)
+            from sqlalchemy import update as sa_update
+            stale_cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
+            await db.execute(
+                sa_update(SyncLog)
+                .where(
+                    SyncLog.status == "started",
+                    SyncLog.started_at < stale_cutoff,
+                )
+                .values(status="failed", error_message="Sync timed out or worker crashed", finished_at=datetime.now(timezone.utc))
+            )
+            await db.commit()
+            logger.info("Worker: Marked stale 'started' logs as failed")
+
             result = await db.execute(
                 select(SyncLog).where(
                     and_(

@@ -2,12 +2,24 @@ import io
 import csv
 import json
 import logging
-from datetime import date
+import subprocess
+from datetime import date, datetime, timezone
 from typing import Optional
 from app.models.db_models import ControlTower
 from app.services.azure_session import get_blob_service_client
 
 logger = logging.getLogger(__name__)
+
+
+def _sync_clock():
+    """Force NTP sync to prevent Azure Storage AuthenticationFailed due to clock drift."""
+    try:
+        subprocess.run(["chronyc", "makestep"], capture_output=True, timeout=5)
+    except Exception:
+        try:
+            subprocess.run(["ntpdate", "-u", "pool.ntp.org"], capture_output=True, timeout=5)
+        except Exception:
+            pass  # Best effort — log will show auth error if still drifted
 
 
 def _find_latest_blob(ct: ControlTower, directory: str) -> Optional[str]:
@@ -217,11 +229,8 @@ def get_azure_billing_periods(start_date: str, end_date: str) -> list[str]:
 
 
 def find_azure_export_blobs(ct: ControlTower, start_date: str, end_date: str, is_first_sync: bool = False) -> list[str]:
-    """Find Azure cost export blobs from billing-account scoped export folders.
-    - Historical: finoptix-actualcost/ and finoptix-amortizedcost/
-    - Daily (current month): finoptix-daily-actualcost/ and finoptix-daily-amortizedcost/
-    Always reads all 4 folders on full resync, only daily folders on incremental.
-    """
+    """Find Azure cost export blobs from billing-account scoped export folders."""
+    _sync_clock()  # Ensure clock is in sync before Azure Storage auth
     blob_client = get_blob_service_client(ct)
     container = blob_client.get_container_client(ct.azure_container_name)
     csv_blobs: list[str] = []
