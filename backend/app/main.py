@@ -9,6 +9,11 @@ from app.routers import azure_costs
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Silence noisy Azure SDK HTTP logs
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
+logging.getLogger("azure.identity").setLevel(logging.WARNING)
+logging.getLogger("azure.storage").setLevel(logging.WARNING)
+
 app = FastAPI(title="Finoptix", version="2.0.0")
 
 # Gzip compression — reduces response size significantly for large report data
