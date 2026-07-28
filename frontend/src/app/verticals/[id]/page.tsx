@@ -258,14 +258,13 @@ export default function VerticalDetailPage() {
     setAzureLoading(true);
     setAzureLoadError("");
     try {
-      // Use /overview which already works on the Azure tenant page
-      // It uses AzureMonthlySummary first, falls back to AzureCostRecord
-      const subsRes = await api.get("/azure-costs/overview");
-      const subs = (subsRes.data?.subscriptions || []).map((s: any) => ({
+      // Dedicated no-cache endpoint — tries AzureMonthlySummary then raw records
+      const subsRes = await api.get("/azure-costs/vertical/list-subscriptions");
+      const subs = (subsRes.data || []).map((s: any) => ({
         subscription_id: s.subscription_id,
         subscription_name: s.subscription_name,
         resource_count: 0,
-        last_month_cost: s.actual_cost || 0,
+        last_month_cost: s.total_cost || 0,
       }));
       setAzureSubs(subs);
       if (subs.length === 0) setAzureLoadError("No Azure subscriptions found. Ensure Azure sync has completed.");

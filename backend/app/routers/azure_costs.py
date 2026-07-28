@@ -591,6 +591,61 @@ async def list_resource_groups(
     return [{"resource_group": r.resource_group, "subscription_name": r.subscription_name} for r in rows]
 
 
+# ── Vertical modal — dedicated no-cache subscription list ───────────────────
+
+@router.get("/vertical/list-subscriptions")
+async def vertical_list_subscriptions(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """No-cache, no date filter. Returns all subscriptions ever synced.
+    Tries AzureMonthlySummary first (fast), falls back to AzureCostRecord.
+    """
+    from app.models.db_models import AzureMonthlySummary
+    from sqlalchemy import text
+
+    # Try summary table first — always has data if sync ran
+    try:
+        rows = (await db.execute(
+            select(
+                AzureMonthlySummary.subscription_id,
+                AzureMonthlySummary.subscription_name,
+                func.sum(AzureMonthlySummary.actual_cost).label("total_cost"),
+            )
+            .group_by(AzureMonthlySummary.subscription_id, AzureMonthlySummary.subscription_name)
+            .order_by(AzureMonthlySummary.subscription_name)
+        )).all()
+        if rows:
+            return [
+                {
+                    "subscription_id": r.subscription_id,
+                    "subscription_name": r.subscription_name or r.subscription_id,
+                    "total_cost": float(r.total_cost or 0),
+                }
+                for r in rows
+            ]
+    except Exception:
+        pass
+
+    # Fallback: raw azure_cost_records — no cost_type filter so we get everything
+    rows = (await db.execute(
+        select(
+            AzureCostRecord.subscription_id,
+            AzureCostRecord.subscription_name,
+        )
+        .group_by(AzureCostRecord.subscription_id, AzureCostRecord.subscription_name)
+        .order_by(AzureCostRecord.subscription_name)
+    )).all()
+    return [
+        {
+            "subscription_id": r.subscription_id,
+            "subscription_name": r.subscription_name or r.subscription_id,
+            "total_cost": 0,
+        }
+        for r in rows
+    ]
+
+
 # ── Vertical tag modal — no-cache direct queries ─────────────────────────────
 
 @router.get("/vertical/subscriptions")
