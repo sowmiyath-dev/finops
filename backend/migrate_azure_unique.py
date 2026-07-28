@@ -7,13 +7,20 @@ import asyncio, sys, os
 async def main():
     sys.path.insert(0, "/app")
     os.chdir("/app")
-    from app.models.database import engine
+    from app.config import settings
+    from sqlalchemy.ext.asyncio import create_async_engine
     from sqlalchemy import text
 
+    # Create a dedicated engine with NO statement timeout
+    engine = create_async_engine(
+        settings.DATABASE_URL,
+        connect_args={
+            "server_settings": {"timezone": "UTC", "statement_timeout": "0"},
+            "command_timeout": 600,  # 10 min
+        },
+    )
+
     async with engine.begin() as conn:
-        # Disable statement timeout for this migration — operations on large tables need more time
-        await conn.execute(text("SET statement_timeout = 0"))
-        await conn.execute(text("SET lock_timeout = '10min'"))
 
         # Check if constraint already exists
         r = await conn.execute(text("""
