@@ -6,7 +6,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func
 
-from app.models.database import get_db, AsyncSessionLocal
+from app.models.database import get_db, AsyncSessionLocal, SyncSessionLocal
 from app.models.db_models import User, ControlTower, SubAccount, CostRecord, SyncLog, AzureCostRecord
 from app.models.schemas import OnboardKeys, OnboardRole, OnboardAzure, ControlTowerOut, SubAccountOut
 from app.services.auth_service import get_current_user
@@ -464,7 +464,7 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
                         break
                     if not batch:
                         continue
-                    async with AsyncSessionLocal() as db:
+                    async with SyncSessionLocal() as db:
                         if batch:
                             from sqlalchemy import text as _ins_text
                             import uuid as _uuid3
