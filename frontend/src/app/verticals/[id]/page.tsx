@@ -141,6 +141,7 @@ export default function VerticalDetailPage() {
   const [azureResources, setAzureResources] = useState<AzureResource[]>([]);
   const [azureSelectedResources, setAzureSelectedResources] = useState<Set<string>>(new Set());
   const [azureLoading, setAzureLoading] = useState(false);
+  const [azureLoadError, setAzureLoadError] = useState("");
   const [azureTagging, setAzureTagging] = useState(false);
   const [azureServiceFilter, setAzureServiceFilter] = useState("");
 
@@ -255,16 +256,19 @@ export default function VerticalDetailPage() {
     setAzureSelectedResources(new Set());
     setAzureServiceFilter("");
     setAzureLoading(true);
+    setAzureLoadError("");
     try {
       const subsRes = await api.get("/azure-costs/browse/subscriptions");
-      setAzureSubs(subsRes.data || []);
+      const subs = subsRes.data || [];
+      setAzureSubs(subs);
+      if (subs.length === 0) setAzureLoadError("No Azure subscriptions found. Ensure Azure sync has completed.");
     } catch (err: any) {
+      const msg = err?.response?.data?.detail || err?.message || "Failed to load Azure subscriptions";
       console.error("openAzureTag error:", err?.response?.status, err?.response?.data, err?.message);
-      alert(err?.response?.data?.detail || "Failed to load Azure subscriptions");
+      setAzureLoadError(`Error ${err?.response?.status || ""}: ${msg}`);
     } finally {
       setAzureLoading(false);
     }
-    // Load tag-keys in background — don't block subscription dropdown
     api.get("/azure-costs/tag-keys")
       .then((r) => setAzureTagKeys(r.data || []))
       .catch(() => {});
@@ -1061,8 +1065,10 @@ export default function VerticalDetailPage() {
                 <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">
                   {azureScope === "subscription" ? "Select Subscription *" : "Subscription (optional filter)"}
                 </label>
-                {azureLoading && azureSubs.length === 0
+                {azureLoading
                   ? <div className="h-9 bg-gray-100 rounded-md animate-pulse" />
+                  : azureLoadError
+                  ? <div className="text-xs text-red-600 font-semibold px-1 py-2">{azureLoadError}</div>
                   : (
                     <select value={azureSelectedSub} onChange={(e) => onAzureSubChange(e.target.value)}
                       className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-black focus:border-[#0078D4] outline-none">
