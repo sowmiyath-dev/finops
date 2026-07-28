@@ -425,19 +425,23 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
             _sync_progress[ct_id] = {"percent": 0, "status": "failed", "message": "No export files found"}
             return
 
-        # Delete existing Azure records for the date range
+        # Delete existing Azure records for the date range (only on full sync — daily sync skips to avoid timeout on large table)
         from datetime import date as dt_date
         import uuid as _uuid2
         start_dt = dt_date.fromisoformat(start_date)
         end_dt = dt_date.fromisoformat(end_date)
 
-        async with AsyncSessionLocal() as db:
-            from sqlalchemy import text as sa_text2
-            await db.execute(
-                sa_text2("DELETE FROM azure_cost_records WHERE control_tower_id = :ct_id AND date >= :s AND date <= :e")
-                .bindparams(ct_id=_uuid2.UUID(ct_id), s=start_dt, e=end_dt)
-            )
-            await db.commit()
+        if existing_count == 0:
+            # Full sync — safe to delete since table was empty
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import text as sa_text2
+                await db.execute(
+                    sa_text2("DELETE FROM azure_cost_records WHERE control_tower_id = :ct_id AND date >= :s AND date <= :e")
+                    .bindparams(ct_id=_uuid2.UUID(ct_id), s=start_dt, e=end_dt)
+                )
+                await db.commit()
+        else:
+            logger.info(f"Daily sync — skipping delete to avoid timeout, will overwrite via insert")
 
         total_inserted = 0
 
