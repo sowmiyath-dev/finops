@@ -35,7 +35,7 @@ async def _upsert_sub_accounts(db: AsyncSession, ct_id: str, accounts: list[dict
                 SubAccount.aws_account_id == acc["aws_account_id"],
             )
         )
-        row = existing.scalar_one_or_none()
+        row = existing.scalars().first()
         if row:
             row.account_name = acc["account_name"]
             row.is_active = True
@@ -427,16 +427,15 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
 
         # Delete existing Azure records for the date range
         from datetime import date as dt_date
+        import uuid as _uuid2
         start_dt = dt_date.fromisoformat(start_date)
         end_dt = dt_date.fromisoformat(end_date)
 
         async with AsyncSessionLocal() as db:
+            from sqlalchemy import text as sa_text2
             await db.execute(
-                delete(AzureCostRecord).where(
-                    AzureCostRecord.control_tower_id == ct_id,
-                    AzureCostRecord.date >= start_dt,
-                    AzureCostRecord.date <= end_dt,
-                )
+                sa_text2("DELETE FROM azure_cost_records WHERE control_tower_id = :ct_id AND date >= :s AND date <= :e")
+                .bindparams(ct_id=_uuid2.UUID(ct_id), s=start_dt, e=end_dt)
             )
             await db.commit()
 
