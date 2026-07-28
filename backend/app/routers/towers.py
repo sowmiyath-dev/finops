@@ -353,13 +353,15 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
         # Step 2 — determine date range
         _sync_progress[ct_id]["message"] = "Checking existing data"
         _sync_progress[ct_id]["percent"] = 20
+
+        # Use EXISTS instead of COUNT(*) — much faster on large tables
+        from sqlalchemy import text as sa_text
         async with AsyncSessionLocal() as db:
-            count_result = await db.execute(
-                select(func.count()).where(
-                    AzureCostRecord.control_tower_id == ct_id
-                )
+            result = await db.execute(
+                sa_text("SELECT EXISTS(SELECT 1 FROM azure_cost_records WHERE control_tower_id = :ct_id LIMIT 1)")
+                .bindparams(ct_id=ct_id)
             )
-            existing_count = count_result.scalar() or 0
+            existing_count = 1 if result.scalar() else 0
 
         if existing_count == 0:
             start_date, end_date = "2026-01-01", get_sync_date_range()[1]

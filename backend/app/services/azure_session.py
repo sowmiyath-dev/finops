@@ -42,9 +42,12 @@ def list_azure_subscriptions(ct: ControlTower) -> list[dict]:
         sub_client = SubscriptionClient(credential)
         subs = []
         for sub in sub_client.subscriptions.list():
-            if sub.state and sub.state.value == "Enabled":
+            state = sub.state
+            # state can be a string or an enum depending on SDK version
+            state_val = state.value if hasattr(state, 'value') else str(state)
+            if state_val == "Enabled":
                 subs.append({
-                    "aws_account_id": sub.subscription_id,  # reuse field
+                    "aws_account_id": sub.subscription_id,
                     "account_name": sub.display_name,
                 })
         return subs
