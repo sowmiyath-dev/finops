@@ -229,33 +229,48 @@ def get_azure_billing_periods(start_date: str, end_date: str) -> list[str]:
 
 
 def find_azure_export_blobs(ct: ControlTower, start_date: str, end_date: str, is_first_sync: bool = False) -> list[str]:
-    """Find Azure cost export blobs from billing-account scoped export folders."""
+    """Find Azure cost export blobs — uses export_name from CT config, not hardcoded names."""
     _sync_clock()  # Ensure clock is in sync before Azure Storage auth
     blob_client = get_blob_service_client(ct)
     container = blob_client.get_container_client(ct.azure_container_name)
     csv_blobs: list[str] = []
 
-    # Historical folders (Jan–May billing-account scoped exports)
-    historical_prefixes = ["finoptix-actualcost/", "finoptix-amortizedcost/"]
-    # Daily folders (current month BillingMonthToDate)
-    daily_prefixes = ["finoptix-daily-actualcost/", "finoptix-daily-amortizedcost/"]
+    export_name = ct.azure_export_name or ""
 
-    prefixes = (historical_prefixes + daily_prefixes) if is_first_sync else daily_prefixes
+    # Build prefixes from the actual export name configured on the CT
+    # Azure exports land at: <export_name>/<export_name>/YYYYMMDD-YYYYMMDD/<file>.csv
+    # Daily exports land at:  <export_name>-daily-actualcost/ etc. OR same path with daily flag
+    # We scan all top-level prefixes derived from the export name to be resilient
+    candidate_prefixes = []
+    if export_name:
+        candidate_prefixes += [
+            f"{export_name}/",
+            f"{export_name}-actualcost/",
+            f"{export_name}-amortizedcost/",
+            f"{export_name}-daily-actualcost/",
+            f"{export_name}-daily-amortizedcost/",
+        ]
+    # Always include legacy hardcoded names as fallback
+    candidate_prefixes += [
+        "finoptix-actualcost/",
+        "finoptix-amortizedcost/",
+        "finoptix-daily-actualcost/",
+        "finoptix-daily-amortizedcost/",
+    ]
+    # Deduplicate while preserving order
+    seen: set = set()
+    prefixes: list = []
+    for p in candidate_prefixes:
+        if p not in seen:
+            seen.add(p)
+            prefixes.append(p)
 
     for prefix in prefixes:
         blobs = list(container.list_blobs(name_starts_with=prefix))
         found = [b.name for b in blobs if b.name.endswith(".csv")]
-        csv_blobs += found
-        logger.info(f"Prefix '{prefix}': found {len(found)} CSVs")
-
-    # If daily sync found nothing in daily folders, fall back to historical
-    if not is_first_sync and not csv_blobs:
-        logger.warning(f"Daily folders empty for {ct.name}, falling back to historical prefixes")
-        for prefix in historical_prefixes:
-            blobs = list(container.list_blobs(name_starts_with=prefix))
-            found = [b.name for b in blobs if b.name.endswith(".csv")]
+        if found:
             csv_blobs += found
-            logger.info(f"Fallback prefix '{prefix}': found {len(found)} CSVs")
+            logger.info(f"Prefix '{prefix}': found {len(found)} CSVs")
 
     csv_blobs = list(set(csv_blobs))
     logger.info(f"Total Azure CSV blobs for {ct.name} ({'full' if is_first_sync else 'daily'} sync): {len(csv_blobs)}")

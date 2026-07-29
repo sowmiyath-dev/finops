@@ -1,4 +1,4 @@
-import uuid, asyncio, logging
+﻿import uuid, asyncio, logging
 from datetime import datetime, timezone, date, timedelta
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
@@ -25,7 +25,7 @@ _executor = ThreadPoolExecutor(max_workers=8)
 _sync_semaphore = asyncio.Semaphore(3)
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+# â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async def _upsert_sub_accounts(db: AsyncSession, ct_id: str, accounts: list[dict]):
     for acc in accounts:
@@ -83,7 +83,7 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Option
                 await db.refresh(sync_log)
                 sync_log_id = sync_log.id
 
-            # Step 1 — discover sub-accounts
+            # Step 1 â€” discover sub-accounts
             _sync_progress[ct_id]["message"] = "Discovering accounts"
             _sync_progress[ct_id]["percent"] = 10
             loop = asyncio.get_running_loop()
@@ -95,7 +95,7 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Option
             async with AsyncSessionLocal() as db:
                 await _upsert_sub_accounts(db, ct_id, org_accounts)
 
-            # Step 2 — determine date range
+            # Step 2 â€” determine date range
             _sync_progress[ct_id]["message"] = "Checking existing data"
             _sync_progress[ct_id]["percent"] = 20
             async with AsyncSessionLocal() as db:
@@ -108,15 +108,15 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Option
 
             if force_start and force_end:
                 start_date, end_date = force_start, force_end
-                logger.info(f"Forced date range for CT {ct_id}: {start_date} → {end_date}")
+                logger.info(f"Forced date range for CT {ct_id}: {start_date} â†’ {end_date}")
             elif existing_count == 0:
                 start_date, end_date = get_full_year_date_range()
-                logger.info(f"First sync for CT {ct_id} — full year: {start_date} → {end_date}")
+                logger.info(f"First sync for CT {ct_id} â€” full year: {start_date} â†’ {end_date}")
             else:
                 start_date, end_date = get_sync_date_range(days_back=7)
-                logger.info(f"Incremental sync for CT {ct_id} — last 7 days: {start_date} → {end_date}")
+                logger.info(f"Incremental sync for CT {ct_id} â€” last 7 days: {start_date} â†’ {end_date}")
 
-            # Step 3 — load sub_map
+            # Step 3 â€” load sub_map
             async with AsyncSessionLocal() as db:
                 sub_result = await db.execute(
                     select(SubAccount).where(SubAccount.control_tower_id == ct_id)
@@ -141,7 +141,7 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Option
                     logger.info(f"Auto-created sub-account for {aws_account_id}")
                     return sub
 
-            # Step 4 — fetch and insert ONE FILE AT A TIME to avoid OOM
+            # Step 4 â€” fetch and insert ONE FILE AT A TIME to avoid OOM
             from app.services.cost_service import _get_billing_periods_for_range
             billing_periods = _get_billing_periods_for_range(start_date, end_date)
             total_inserted = 0
@@ -183,7 +183,7 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Option
                 for file_idx, report_key in enumerate(report_keys):
                     logger.info(f"Period {period} file {file_idx+1}/{len(report_keys)}: {report_key}")
                     try:
-                        # stream_cur_file_batches is a generator — runs in executor per batch
+                        # stream_cur_file_batches is a generator â€” runs in executor per batch
                         streamer = await loop.run_in_executor(
                             _executor,
                             lambda rk=report_key: list(stream_cur_file_batches(
@@ -232,7 +232,7 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Option
 
                     del streamer
 
-            # Step 5 — finalize
+            # Step 5 â€” finalize
             async with AsyncSessionLocal() as db:
                 await db.execute(
                     update(ControlTower)
@@ -276,7 +276,7 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Option
             _sync_progress[ct_id] = {"percent": 0, "status": "failed", "message": str(e)}
 
 
-# ── Azure sync ────────────────────────────────────────────────────────────────
+# â”€â”€ Azure sync â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async def _refresh_azure_monthly_summary(ct_id: str):
     """Pre-aggregate Azure cost by subscription per month into azure_monthly_summary."""
@@ -333,7 +333,7 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
             await db.refresh(sync_log)
             sync_log_id = sync_log.id
 
-        # Step 1 — discover subscriptions
+        # Step 1 -- discover subscriptions
         _sync_progress[ct_id]["message"] = "Discovering Azure subscriptions"
         _sync_progress[ct_id]["percent"] = 10
         loop = asyncio.get_running_loop()
@@ -350,11 +350,10 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
         except Exception as sub_err:
             logger.warning(f"Azure subscription discovery failed (non-fatal): {sub_err}")
 
-        # Step 2 — determine date range
+        # Step 2 -- determine date range
         _sync_progress[ct_id]["message"] = "Checking existing data"
         _sync_progress[ct_id]["percent"] = 20
 
-        # Use EXISTS instead of COUNT(*) — much faster on large tables
         from sqlalchemy import text as sa_text
         import uuid as _uuid
         async with AsyncSessionLocal() as db:
@@ -364,18 +363,20 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
             )
             existing_count = 1 if result.scalar() else 0
 
+        from datetime import date as dt_date
+        today = dt_date.today()
         if existing_count == 0:
-            start_date, end_date = "2026-01-01", get_sync_date_range()[1]
-            logger.info(f"Azure full sync for CT {ct_id}: {start_date} → {end_date}")
-        else:
-            # Daily incremental — only re-read daily folders for current month
-            from datetime import date as dt_date
-            today = dt_date.today()
-            start_date = today.replace(day=1).isoformat()
+            # Full sync -- start of current year
+            start_date = today.replace(month=1, day=1).isoformat()
             end_date = today.isoformat()
-            logger.info(f"Azure daily sync for CT {ct_id}: {start_date} → {end_date}")
+            logger.info(f"Azure full sync for CT {ct_id}: {start_date} to {end_date}")
+        else:
+            # Daily incremental -- last 3 days to catch late-arriving records
+            start_date = (today - timedelta(days=3)).isoformat()
+            end_date = today.isoformat()
+            logger.info(f"Azure daily sync for CT {ct_id}: {start_date} to {end_date}")
 
-        # Step 3 — load sub_map
+        # Step 3 -- load sub_map
         async with AsyncSessionLocal() as db:
             sub_result = await db.execute(
                 select(SubAccount).where(SubAccount.control_tower_id == ct_id)
@@ -398,7 +399,7 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
                 sub_map[subscription_id] = sub
                 return sub
 
-        # Step 4 — find blobs and parse
+        # Step 4 -- find blobs
         _sync_progress[ct_id]["message"] = "Finding Azure export files"
         _sync_progress[ct_id]["percent"] = 30
 
@@ -425,11 +426,21 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
             _sync_progress[ct_id] = {"percent": 0, "status": "failed", "message": "No export files found"}
             return
 
-        from datetime import date as dt_date
-        import uuid as _uuid2
         start_dt = dt_date.fromisoformat(start_date)
         end_dt = dt_date.fromisoformat(end_date)
-        logger.info(f"Azure sync — skipping pre-delete, using ON CONFLICT DO NOTHING upsert")
+
+        # Delete existing records for the date range before re-inserting
+        # azure_cost_records has no unique constraint -- delete-then-insert avoids duplicates
+        logger.info(f"Azure sync -- deleting {start_dt} to {end_dt} before re-insert")
+        async with SyncSessionLocal() as db:
+            await db.execute(
+                delete(AzureCostRecord).where(
+                    AzureCostRecord.control_tower_id == ct_id,
+                    AzureCostRecord.date >= start_dt,
+                    AzureCostRecord.date <= end_dt,
+                )
+            )
+            await db.commit()
 
         total_inserted = 0
 
@@ -439,12 +450,10 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
             logger.info(f"Azure processing blob {blob_idx+1}/{len(csv_blobs)}: {blob_name}")
 
             try:
-                # Re-fetch CT to avoid stale connection
                 async with AsyncSessionLocal() as db:
                     result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
                     ct_ref = result.scalar_one_or_none()
 
-                # Use a queue to bridge sync generator → async consumer
                 import queue as _queue
                 q: _queue.Queue = _queue.Queue(maxsize=4)
                 DONE = object()
@@ -465,54 +474,52 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
                     if not batch:
                         continue
                     async with SyncSessionLocal() as db:
-                        if batch:
-                            from sqlalchemy import text as _ins_text
-                            import uuid as _uuid3
-                            await db.execute(_ins_text("""
-                                INSERT INTO azure_cost_records
-                                    (id, control_tower_id, subscription_id, subscription_name,
-                                     resource_group, resource_id, resource_name, date,
-                                     billing_currency, actual_cost, amortized_cost, quantity, unit,
-                                     service, meter_subcategory, meter_name, product_name, region,
-                                     charge_type, pricing_model, is_marketplace, tags, cost_type, synced_at)
-                                VALUES
-                                    (:id, :ct_id, :sub_id, :sub_name,
-                                     :rg, :rid, :rname, :date,
-                                     :currency, :actual, :amortized, :qty, :unit,
-                                     :service, :meter_sub, :meter_name, :product, :region,
-                                     :charge_type, :pricing, :marketplace, :tags, :cost_type, NOW())
-                                ON CONFLICT DO NOTHING
-                            """), [
-                                {
-                                    "id": str(_uuid3.uuid4()),
-                                    "ct_id": ct_id,
-                                    "sub_id": r["subscription_id"],
-                                    "sub_name": r["subscription_name"],
-                                    "rg": r.get("resource_group"),
-                                    "rid": r.get("resource_id"),
-                                    "rname": r.get("resource_name"),
-                                    "date": r["date"],
-                                    "currency": r.get("billing_currency", "INR"),
-                                    "actual": r.get("actual_cost", 0),
-                                    "amortized": r.get("amortized_cost", 0),
-                                    "qty": r.get("quantity", 0),
-                                    "unit": r.get("unit"),
-                                    "service": r["service"],
-                                    "meter_sub": r.get("meter_subcategory"),
-                                    "meter_name": r.get("meter_name"),
-                                    "product": r.get("product_name"),
-                                    "region": r.get("region"),
-                                    "charge_type": r.get("charge_type", "Usage"),
-                                    "pricing": r.get("pricing_model", "OnDemand"),
-                                    "marketplace": r.get("is_marketplace", False),
-                                    "tags": r.get("tags"),
-                                    "cost_type": r.get("cost_type", "actual"),
-                                }
-                                for r in batch
-                            ])
-                            await db.commit()
-                            total_inserted += len(batch)
-                            logger.info(f"Azure blob {blob_idx+1}/{len(csv_blobs)}: {total_inserted} total inserted")
+                        from sqlalchemy import text as _ins_text
+                        import uuid as _uuid3
+                        await db.execute(_ins_text("""
+                            INSERT INTO azure_cost_records
+                                (id, control_tower_id, subscription_id, subscription_name,
+                                 resource_group, resource_id, resource_name, date,
+                                 billing_currency, actual_cost, amortized_cost, quantity, unit,
+                                 service, meter_subcategory, meter_name, product_name, region,
+                                 charge_type, pricing_model, is_marketplace, tags, cost_type, synced_at)
+                            VALUES
+                                (:id, :ct_id, :sub_id, :sub_name,
+                                 :rg, :rid, :rname, :date,
+                                 :currency, :actual, :amortized, :qty, :unit,
+                                 :service, :meter_sub, :meter_name, :product, :region,
+                                 :charge_type, :pricing, :marketplace, :tags, :cost_type, NOW())
+                        """), [
+                            {
+                                "id": str(_uuid3.uuid4()),
+                                "ct_id": ct_id,
+                                "sub_id": r["subscription_id"],
+                                "sub_name": r["subscription_name"],
+                                "rg": r.get("resource_group"),
+                                "rid": r.get("resource_id"),
+                                "rname": r.get("resource_name"),
+                                "date": r["date"],
+                                "currency": r.get("billing_currency", "INR"),
+                                "actual": r.get("actual_cost", 0),
+                                "amortized": r.get("amortized_cost", 0),
+                                "qty": r.get("quantity", 0),
+                                "unit": r.get("unit"),
+                                "service": r["service"],
+                                "meter_sub": r.get("meter_subcategory"),
+                                "meter_name": r.get("meter_name"),
+                                "product": r.get("product_name"),
+                                "region": r.get("region"),
+                                "charge_type": r.get("charge_type", "Usage"),
+                                "pricing": r.get("pricing_model", "OnDemand"),
+                                "marketplace": r.get("is_marketplace", False),
+                                "tags": r.get("tags"),
+                                "cost_type": r.get("cost_type", "actual"),
+                            }
+                            for r in batch
+                        ])
+                        await db.commit()
+                        total_inserted += len(batch)
+                        logger.info(f"Azure blob {blob_idx+1}/{len(csv_blobs)}: {total_inserted} total inserted")
 
                 await producer
                 logger.info(f"Azure blob {blob_idx+1} done: {total_inserted} total inserted")
@@ -521,7 +528,7 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
                 logger.error(f"Failed to process Azure blob {blob_name}: {file_err}", exc_info=True)
                 continue
 
-        # Step 5 — finalize
+        # Step 5 -- finalize
         async with AsyncSessionLocal() as db:
             await db.execute(
                 update(ControlTower)
@@ -540,10 +547,9 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
                 )
             await db.commit()
 
-        _sync_progress[ct_id] = {"percent": 100, "status": "done", "message": f"Completed — {total_inserted} records"}
+        _sync_progress[ct_id] = {"percent": 100, "status": "done", "message": f"Completed -- {total_inserted} records"}
         logger.info(f"Azure sync done for CT {ct_id}: {total_inserted} records")
 
-        # Refresh Azure monthly summary cache
         try:
             await _refresh_azure_monthly_summary(ct_id)
         except Exception as cache_err:
@@ -563,9 +569,6 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
                 await db.commit()
         _sync_progress[ct_id] = {"percent": 0, "status": "failed", "message": str(e)}
 
-
-# ── static routes MUST be before /{ct_id} dynamic routes ─────────────────────
-
 @router.get("/generate-external-id")
 async def generate_external_id(user: User = Depends(get_current_user)):
     """Generate an External ID to use in CFT before onboarding"""
@@ -575,7 +578,7 @@ async def generate_external_id(user: User = Depends(get_current_user)):
             "1. Copy this External ID",
             "2. Deploy the CFT in your management account using this External ID",
             "3. Copy the Role ARN from CFT Outputs",
-            "4. Come back and click Add Control Tower → IAM Role",
+            "4. Come back and click Add Control Tower â†’ IAM Role",
             "5. Paste the Role ARN and this same External ID",
         ],
     }
@@ -688,7 +691,7 @@ async def onboard_azure(payload: OnboardAzure, bg: BackgroundTasks, db: AsyncSes
         azure_container_name=payload.container_name,
         azure_export_name=payload.export_name,
     )
-    # Skip blocking connectivity test — sync will fail with clear error if creds are wrong
+    # Skip blocking connectivity test â€” sync will fail with clear error if creds are wrong
     temp.is_active = True
     db.add(temp)
     await db.commit()
@@ -719,7 +722,7 @@ async def list_towers(db: AsyncSession = Depends(get_db), user: User = Depends(g
     if not towers:
         return []
 
-    # Single query for all sub_accounts — eliminates N+1
+    # Single query for all sub_accounts â€” eliminates N+1
     tower_ids = [t.id for t in towers]
     sub_result = await db.execute(select(SubAccount).where(SubAccount.control_tower_id.in_(tower_ids)))
     all_subs = sub_result.scalars().all()
@@ -751,7 +754,7 @@ async def list_towers(db: AsyncSession = Depends(get_db), user: User = Depends(g
     ]
 
 
-# ── dynamic /{ct_id} routes AFTER all static routes ──────────────────────────
+# â”€â”€ dynamic /{ct_id} routes AFTER all static routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post("/{ct_id}/sync")
 async def sync_tower(
@@ -769,6 +772,27 @@ async def sync_tower(
         raise HTTPException(status_code=404, detail="Control Tower not found")
     bg.add_task(_do_sync, ct_id, "manual", start_date, end_date)
     return {"message": "Sync started", "start_date": start_date, "end_date": end_date}
+
+
+@router.post("/sync-all-azure")
+async def sync_all_azure(
+    bg: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Trigger daily sync for all Azure control towers immediately."""
+    if user.role == "viewer":
+        raise HTTPException(status_code=403, detail="Viewers cannot sync")
+    result = await db.execute(
+        select(ControlTower).where(
+            ControlTower.cloud_provider == "azure",
+            ControlTower.auto_sync_enabled == True,
+        )
+    )
+    cts = result.scalars().all()
+    for ct in cts:
+        bg.add_task(_do_sync, str(ct.id), "manual")
+    return {"message": f"Sync triggered for {len(cts)} Azure control tower(s)", "ids": [str(ct.id) for ct in cts]}
 
 
 @router.get("/{ct_id}/sync-status")
@@ -817,3 +841,4 @@ async def delete_tower(ct_id: str, db: AsyncSession = Depends(get_db), user: Use
         raise HTTPException(status_code=404, detail="Not found")
     await db.delete(ct)
     await db.commit()
+

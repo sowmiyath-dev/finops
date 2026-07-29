@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -42,7 +43,6 @@ app.include_router(azure_costs.router, prefix="/api")
 
 @app.on_event("startup")
 async def startup():
-    import asyncio
     max_retries = 10
     for attempt in range(1, max_retries + 1):
         try:

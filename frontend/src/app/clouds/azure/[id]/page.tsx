@@ -46,6 +46,10 @@ export default function AzureTenantDetail() {
   const [spResources, setSpResources] = useState<any[]>([]);
   const [spLoading, setSpLoading] = useState(false);
   const [showSpModal, setShowSpModal] = useState(false);
+  const [showSyncModal, setShowSyncModal] = useState(false);
+  const [syncMonth, setSyncMonth] = useState(() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}`; });
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState("");
 
   useEffect(() => {
     api.get("/towers/").then((r) => {
@@ -114,6 +118,20 @@ export default function AzureTenantDetail() {
 
   const openLogs = () => { setShowLogs(true); loadLogs(); };
 
+  const triggerMonthSync = async () => {
+    setSyncing(true); setSyncResult("");
+    try {
+      const [year, month] = syncMonth.split("-").map(Number);
+      const start = `${year}-${String(month).padStart(2,"0")}-01`;
+      const lastDay = new Date(year, month, 0).getDate();
+      const end = `${year}-${String(month).padStart(2,"0")}-${String(lastDay).padStart(2,"0")}`;
+      await api.post(`/towers/${id}/sync?start_date=${start}&end_date=${end}`);
+      setSyncResult(`Sync started for ${syncMonth} (${start} to ${end}). Check Sync Logs for progress.`);
+    } catch (e: any) {
+      setSyncResult(`Error: ${e?.response?.data?.detail || e.message}`);
+    } finally { setSyncing(false); }
+  };
+
   const openSpModal = async () => {
     setShowSpModal(true); setSpResources([]); setSpLoading(true);
     try {
@@ -167,6 +185,10 @@ export default function AzureTenantDetail() {
             className="border border-gray-400 rounded-md px-3 py-2 text-xs text-black focus:border-blue-900 outline-none" />
           <button onClick={() => loadData(tab, startDate, endDate)}
             className="px-3 py-2 bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold rounded-md transition">Apply</button>
+          <button onClick={() => { setShowSyncModal(true); setSyncResult(""); }}
+            className="flex items-center gap-1.5 px-3 py-2 bg-[#0078D4] hover:bg-[#006CBF] text-white text-xs font-bold rounded-md transition">
+            <RefreshCw className="w-3.5 h-3.5" /> Sync Month
+          </button>
           <button onClick={openLogs}
             className="flex items-center gap-1.5 px-3 py-2 border border-gray-300 rounded-md text-xs font-bold text-black hover:bg-gray-50 transition">
             <List className="w-3.5 h-3.5" /> Sync Logs
@@ -291,6 +313,43 @@ export default function AzureTenantDetail() {
           </tbody>
         </table>
       </div>
+
+      {/* Sync Month Modal */}
+      {showSyncModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg border border-gray-300 shadow-lg w-full max-w-sm p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-md flex items-center justify-center" style={{ background: "#0078D4" }}>
+                  <RefreshCw className="w-4 h-4 text-white" />
+                </div>
+                <h3 className="text-sm font-bold text-black">Sync Azure Month</h3>
+              </div>
+              <button onClick={() => setShowSyncModal(false)} className="text-gray-400 hover:text-black font-bold text-lg">×</button>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">Select a month to re-sync Azure cost data from blob storage into the database.</p>
+            <div className="mb-4">
+              <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">Month</label>
+              <input type="month" value={syncMonth} onChange={(e) => { setSyncMonth(e.target.value); setSyncResult(""); }}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-black focus:border-[#0078D4] outline-none" />
+            </div>
+            {syncResult && (
+              <div className={`text-xs px-3 py-2 rounded-md mb-4 ${
+                syncResult.startsWith("Error") ? "bg-red-50 text-red-700 border border-red-200" : "bg-green-50 text-green-700 border border-green-200"
+              }`}>{syncResult}</div>
+            )}
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setShowSyncModal(false)}
+                className="px-4 py-2 border border-gray-300 rounded-md text-xs font-bold text-black hover:bg-gray-50 transition">Cancel</button>
+              <button onClick={triggerMonthSync} disabled={syncing || !syncMonth}
+                className="flex items-center gap-2 px-4 py-2 bg-[#0078D4] hover:bg-[#006CBF] text-white text-xs font-bold rounded-md transition disabled:opacity-50">
+                <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
+                {syncing ? "Starting..." : "Start Sync"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* SP Resources Modal */}
       {showSpModal && (

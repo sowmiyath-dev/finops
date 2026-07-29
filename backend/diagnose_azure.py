@@ -1,5 +1,5 @@
 """
-Azure Sync Diagnostics — run inside backend container:
+Azure Sync Diagnostics -- run inside backend container:
   docker-compose exec backend python diagnose_azure.py
 """
 import asyncio, sys, os, time
@@ -7,7 +7,7 @@ from datetime import date, datetime, timezone
 
 CT_ID = "051dd3a4-9b33-42b4-ad09-e4606264fd11"
 
-# ── 1. DB connection + fetch CT ───────────────────────────────────────────────
+# -- 1. DB connection + fetch CT ----------------------------------------------
 async def check_db_and_ct():
     print("\n=== [1] DB CONNECTION + CONTROL TOWER ===")
     from app.models.database import AsyncSessionLocal
@@ -16,14 +16,13 @@ async def check_db_and_ct():
     try:
         async with AsyncSessionLocal() as db:
             await db.execute(text("SELECT 1"))
-            print("  ✓ DB connected")
-
+            print("  OK DB connected")
             result = await db.execute(select(ControlTower).where(ControlTower.id == CT_ID))
             ct = result.scalar_one_or_none()
             if not ct:
-                print(f"  ✗ ControlTower {CT_ID} NOT FOUND in DB")
+                print(f"  FAIL ControlTower {CT_ID} NOT FOUND in DB")
                 return None
-            print(f"  ✓ CT found: name={ct.name}, provider={ct.cloud_provider}")
+            print(f"  OK CT found: name={ct.name}, provider={ct.cloud_provider}")
             print(f"    tenant_id={ct.azure_tenant_id}")
             print(f"    client_id={ct.azure_client_id}")
             print(f"    storage_account={ct.azure_storage_account}")
@@ -32,17 +31,13 @@ async def check_db_and_ct():
             print(f"    secret_set={'YES' if ct.encrypted_azure_client_secret else 'NO'}")
             return ct
     except Exception as e:
-        print(f"  ✗ DB error: {e}")
+        print(f"  FAIL DB error: {e}")
         return None
 
-# ── 2. Azure credential + token ───────────────────────────────────────────────
+
+# -- 2. Azure credential + token ----------------------------------------------
 def check_credentials(ct):
     print("\n=== [2] AZURE CREDENTIALS ===")
-    import signal
-    def _timeout(signum, frame):
-        raise TimeoutError("Token request timed out after 15s")
-    signal.signal(signal.SIGALRM, _timeout)
-    signal.alarm(15)
     try:
         from app.services.azure_session import get_azure_credential
         cred = get_azure_credential(ct)
@@ -51,21 +46,17 @@ def check_credentials(ct):
         elapsed = time.time() - t0
         if token and token.token:
             exp = datetime.fromtimestamp(token.expires_on, tz=timezone.utc)
-            print(f"  ✓ Token obtained in {elapsed:.1f}s, expires: {exp.isoformat()}")
+            print(f"  OK Token obtained in {elapsed:.1f}s, expires: {exp.isoformat()}")
             return cred
         else:
-            print("  ✗ Token empty")
+            print("  FAIL Token empty")
             return None
-    except TimeoutError as e:
-        print(f"  ✗ {e} — login.microsoftonline.com unreachable or very slow")
-        return None
     except Exception as e:
-        print(f"  ✗ Credential error: {e}")
+        print(f"  FAIL Credential error: {e}")
         return None
-    finally:
-        signal.alarm(0)
 
-# ── 3. Clock drift ────────────────────────────────────────────────────────────
+
+# -- 3. Clock + network -------------------------------------------------------
 def check_clock():
     print("\n=== [3] SYSTEM CLOCK ===")
     import subprocess
@@ -76,26 +67,25 @@ def check_clock():
                 print(f"  {line.strip()}")
     except Exception:
         pass
-    now_utc = datetime.now(timezone.utc)
-    print(f"  System UTC: {now_utc.isoformat()}")
+    print(f"  System UTC: {datetime.now(timezone.utc).isoformat()}")
 
-    # Network reachability
     print("\n=== [3b] NETWORK REACHABILITY ===")
+    import socket
     hosts = [
         ("login.microsoftonline.com", 443),
-        ("finoptixcostexports.blob.core.windows.net", 443),
+        ("blob.core.windows.net", 443),
     ]
-    import socket
     for host, port in hosts:
         try:
             t0 = time.time()
             sock = socket.create_connection((host, port), timeout=5)
             sock.close()
-            print(f"  ✓ {host}:{port} reachable in {time.time()-t0:.2f}s")
+            print(f"  OK {host}:{port} reachable in {time.time()-t0:.2f}s")
         except Exception as e:
-            print(f"  ✗ {host}:{port} UNREACHABLE: {e}")
+            print(f"  FAIL {host}:{port} UNREACHABLE: {e}")
 
-# ── 4. Blob service client + container access ─────────────────────────────────
+
+# -- 4. Blob container access -------------------------------------------------
 def check_blob_access(ct):
     print("\n=== [4] BLOB STORAGE ACCESS ===")
     try:
@@ -103,90 +93,106 @@ def check_blob_access(ct):
         client = get_blob_service_client(ct)
         container = client.get_container_client(ct.azure_container_name)
         props = container.get_container_properties()
-        print(f"  ✓ Container '{ct.azure_container_name}' accessible")
-        print(f"    Last modified: {props.get('last_modified', 'N/A')}")
+        print(f"  OK Container '{ct.azure_container_name}' accessible")
         return container
     except Exception as e:
-        print(f"  ✗ Blob access error: {e}")
+        print(f"  FAIL Blob access error: {e}")
         return None
 
-# ── 5. List ALL top-level prefixes in container ───────────────────────────────
+
+# -- 5. Container structure ---------------------------------------------------
 def check_container_structure(ct, container):
     print("\n=== [5] CONTAINER STRUCTURE (top-level folders) ===")
     try:
-        # List blobs with delimiter to get virtual folders
-        from azure.storage.blob import BlobServiceClient
-        client = get_blob_service_client(ct) if container is None else None
-        svc = ct  # reuse
-        from app.services.azure_session import get_blob_service_client as gbsc
-        blob_svc = gbsc(ct)
+        from app.services.azure_session import get_blob_service_client
+        blob_svc = get_blob_service_client(ct)
         cont = blob_svc.get_container_client(ct.azure_container_name)
-
-        # Walk top-level prefixes
-        seen = set()
         blobs = list(cont.list_blobs())
         print(f"  Total blobs in container: {len(blobs)}")
+        seen = set()
         for b in blobs:
-            top = b.name.split("/")[0]
-            seen.add(top)
+            seen.add(b.name.split("/")[0])
         print(f"  Top-level folders ({len(seen)}):")
         for f in sorted(seen):
             count = sum(1 for b in blobs if b.name.startswith(f + "/") and b.name.endswith(".csv"))
-            print(f"    {f}/  → {count} CSV files")
+            print(f"    {f}/  -> {count} CSV files")
         return blobs
     except Exception as e:
-        print(f"  ✗ Container listing error: {e}")
+        print(f"  FAIL Container listing error: {e}")
         return []
 
-# ── 6. Check specific prefixes used by sync ───────────────────────────────────
+
+# -- 6. Sync prefixes check ---------------------------------------------------
 def check_sync_prefixes(ct, blobs):
     print("\n=== [6] SYNC PREFIXES CHECK ===")
-    prefixes = [
+    export_name = ct.azure_export_name or ""
+    prefixes = []
+    if export_name:
+        prefixes += [
+            f"{export_name}/",
+            f"{export_name}-actualcost/",
+            f"{export_name}-amortizedcost/",
+            f"{export_name}-daily-actualcost/",
+            f"{export_name}-daily-amortizedcost/",
+        ]
+    prefixes += [
         "finoptix-actualcost/",
         "finoptix-amortizedcost/",
         "finoptix-daily-actualcost/",
         "finoptix-daily-amortizedcost/",
     ]
+    prefixes = list(dict.fromkeys(prefixes))
+    print(f"  export_name from CT config: '{export_name}'")
     for prefix in prefixes:
         found = [b for b in blobs if b.name.startswith(prefix) and b.name.endswith(".csv")]
         if found:
             latest = max(found, key=lambda b: b.last_modified)
             oldest = min(found, key=lambda b: b.last_modified)
-            print(f"  ✓ {prefix}: {len(found)} CSVs")
+            print(f"  OK {prefix}: {len(found)} CSVs")
             print(f"      oldest: {oldest.name} ({oldest.last_modified.date()})")
             print(f"      latest: {latest.name} ({latest.last_modified.date()})")
         else:
-            print(f"  ✗ {prefix}: 0 CSVs — NOT FOUND")
+            print(f"  -- {prefix}: 0 CSVs (not found)")
 
-# ── 7. Check date coverage in daily blobs ─────────────────────────────────────
+
+# -- 7. Daily blob date coverage ----------------------------------------------
 def check_daily_date_coverage(ct, blobs):
     print("\n=== [7] DAILY BLOB DATE COVERAGE ===")
     today = date.today()
     print(f"  Today: {today}")
-    for prefix in ["finoptix-daily-actualcost/", "finoptix-daily-amortizedcost/"]:
+    export_name = ct.azure_export_name or "finoptix"
+    daily_prefixes = [
+        f"{export_name}-daily-actualcost/",
+        f"{export_name}-daily-amortizedcost/",
+        "finoptix-daily-actualcost/",
+        "finoptix-daily-amortizedcost/",
+    ]
+    for prefix in list(dict.fromkeys(daily_prefixes)):
         found = [b for b in blobs if b.name.startswith(prefix) and b.name.endswith(".csv")]
         if not found:
-            print(f"  {prefix}: no files")
             continue
         dates = sorted(set(b.last_modified.date() for b in found))
-        print(f"  {prefix}: {len(found)} files, date range {dates[0]} → {dates[-1]}")
-        if dates[-1] < today:
-            print(f"    ⚠ Latest file is {(today - dates[-1]).days} day(s) old — Azure export may be delayed")
-        else:
-            print(f"    ✓ Has today's data")
+        lag = (today - dates[-1]).days
+        status = "OK" if lag == 0 else f"WARNING {lag} day(s) old"
+        print(f"  {prefix}: {len(found)} files, {dates[0]} -> {dates[-1]}  [{status}]")
 
-# ── 8. Sample parse one daily blob ────────────────────────────────────────────
+
+# -- 8. Sample blob parse -----------------------------------------------------
 def check_sample_parse(ct, blobs):
     print("\n=== [8] SAMPLE BLOB PARSE ===")
-    daily = [b for b in blobs if b.name.startswith("finoptix-daily-actualcost/") and b.name.endswith(".csv")]
-    if not daily:
-        print("  No daily actual blobs to sample")
+    # Prefer daily actual, fall back to any CSV
+    candidates = [b for b in blobs if "daily" in b.name.lower() and "actual" in b.name.lower() and b.name.endswith(".csv")]
+    if not candidates:
+        candidates = [b for b in blobs if b.name.endswith(".csv")]
+    if not candidates:
+        print("  No blobs to sample")
         return
-    sample = max(daily, key=lambda b: b.last_modified)
+    sample = max(candidates, key=lambda b: b.last_modified)
     print(f"  Sampling: {sample.name}")
     try:
         from app.services.azure_cost_service import stream_azure_cost_batches
         today = date.today()
+        # Try current month
         start = today.replace(day=1).isoformat()
         end = today.isoformat()
         rows = 0
@@ -194,20 +200,23 @@ def check_sample_parse(ct, blobs):
             rows += len(batch)
             if rows >= 500:
                 break
-        print(f"  ✓ Parsed {rows} rows from blob (date range {start} → {end})")
+        print(f"  Current month ({start} -> {end}): {rows} rows")
         if rows == 0:
-            print(f"  ⚠ 0 rows parsed — blob may have data outside {start}→{end} range")
-            # Try wider range
+            # Try full year
+            year_start = today.replace(month=1, day=1).isoformat()
             rows2 = 0
-            for batch in stream_azure_cost_batches(ct, sample.name, "2026-01-01", end, 500):
+            for batch in stream_azure_cost_batches(ct, sample.name, year_start, end, 500):
                 rows2 += len(batch)
                 if rows2 >= 500:
                     break
-            print(f"  Wide range (2026-01-01→{end}): {rows2} rows")
+            print(f"  Full year ({year_start} -> {end}): {rows2} rows")
+            if rows2 == 0:
+                print("  WARNING 0 rows in both ranges -- check date column format in blob")
     except Exception as e:
-        print(f"  ✗ Parse error: {e}")
+        print(f"  FAIL Parse error: {e}")
 
-# ── 9. DB record counts ───────────────────────────────────────────────────────
+
+# -- 9. DB record counts ------------------------------------------------------
 async def check_db_counts():
     print("\n=== [9] DB RECORD COUNTS ===")
     from app.models.database import AsyncSessionLocal
@@ -215,53 +224,51 @@ async def check_db_counts():
     import uuid as _uuid
     try:
         async with AsyncSessionLocal() as db:
-            # Total azure records
             r = await db.execute(text("SELECT COUNT(*) FROM azure_cost_records WHERE control_tower_id = :id").bindparams(id=_uuid.UUID(CT_ID)))
-            total = r.scalar()
-            print(f"  azure_cost_records total: {total}")
+            print(f"  azure_cost_records total: {r.scalar()}")
 
-            # By cost_type
             r = await db.execute(text("SELECT cost_type, COUNT(*) FROM azure_cost_records WHERE control_tower_id = :id GROUP BY cost_type").bindparams(id=_uuid.UUID(CT_ID)))
             for row in r.fetchall():
                 print(f"    cost_type={row[0]}: {row[1]} rows")
 
-            # Date range
             r = await db.execute(text("SELECT MIN(date), MAX(date) FROM azure_cost_records WHERE control_tower_id = :id").bindparams(id=_uuid.UUID(CT_ID)))
             row = r.fetchone()
-            print(f"  Date range in DB: {row[0]} → {row[1]}")
+            print(f"  Date range in DB: {row[0]} -> {row[1]}")
 
-            # Recent sync logs
             r = await db.execute(text("SELECT status, records_synced, error_message, started_at, finished_at FROM sync_logs WHERE control_tower_id = :id ORDER BY started_at DESC LIMIT 5").bindparams(id=_uuid.UUID(CT_ID)))
-            print(f"\n  Last 5 sync logs:")
+            print("\n  Last 5 sync logs:")
             for row in r.fetchall():
                 duration = (row[4] - row[3]).seconds if row[3] and row[4] else "?"
                 print(f"    [{row[0]}] records={row[1]} duration={duration}s error={row[2]}")
     except Exception as e:
-        print(f"  ✗ DB count error: {e}")
+        print(f"  FAIL DB count error: {e}")
 
-# ── 10. RDS timeout test ──────────────────────────────────────────────────────
-async def check_rds_timeout():
-    print("\n=== [10] RDS DELETE TIMEOUT TEST ===")
-    from app.models.database import AsyncSessionLocal
+
+# -- 10. Delete timeout test --------------------------------------------------
+async def check_delete_timeout():
+    print("\n=== [10] DELETE TIMEOUT TEST ===")
+    from app.models.database import SyncSessionLocal
     from sqlalchemy import text
     import uuid as _uuid
+    today = date.today()
+    start = (today.replace(day=1)).isoformat()
+    end = today.isoformat()
     try:
-        async with AsyncSessionLocal() as db:
+        async with SyncSessionLocal() as db:
             t0 = time.time()
-            # EXPLAIN only — don't actually delete
             r = await db.execute(
-                text("EXPLAIN SELECT COUNT(*) FROM azure_cost_records WHERE control_tower_id = :id AND date >= '2026-07-01' AND date <= '2026-07-28'")
-                .bindparams(id=_uuid.UUID(CT_ID))
+                text("EXPLAIN SELECT COUNT(*) FROM azure_cost_records WHERE control_tower_id = :id AND date >= :s AND date <= :e")
+                .bindparams(id=_uuid.UUID(CT_ID), s=start, e=end)
             )
             elapsed = time.time() - t0
-            rows = r.fetchall()
-            print(f"  EXPLAIN took {elapsed:.2f}s")
-            for row in rows:
+            print(f"  EXPLAIN took {elapsed:.2f}s (using SyncSessionLocal with 5min timeout)")
+            for row in r.fetchall():
                 print(f"    {row[0]}")
     except Exception as e:
-        print(f"  ✗ RDS test error: {e}")
+        print(f"  FAIL: {e}")
 
-# ── main ──────────────────────────────────────────────────────────────────────
+
+# -- main ---------------------------------------------------------------------
 async def main():
     print("=" * 60)
     print("AZURE SYNC DIAGNOSTICS")
@@ -272,8 +279,8 @@ async def main():
         print("\nCannot continue without CT. Exiting.")
         return
 
-    check_clock()  # includes network reachability
-    cred = check_credentials(ct)
+    check_clock()
+    check_credentials(ct)
     container = check_blob_access(ct)
     blobs = check_container_structure(ct, container)
     if blobs:
@@ -281,11 +288,12 @@ async def main():
         check_daily_date_coverage(ct, blobs)
         check_sample_parse(ct, blobs)
     await check_db_counts()
-    await check_rds_timeout()
+    await check_delete_timeout()
 
     print("\n" + "=" * 60)
     print("DIAGNOSTICS COMPLETE")
     print("=" * 60)
+
 
 if __name__ == "__main__":
     sys.path.insert(0, "/app")
