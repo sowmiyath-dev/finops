@@ -63,7 +63,7 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Option
 
             # Route to Azure sync if cloud_provider is azure
             if ct.cloud_provider == "azure":
-                await _do_azure_sync(ct_id, triggered_by)
+                await _do_azure_sync(ct_id, triggered_by, force_start=force_start, force_end=force_end)
                 return
 
             # Create sync log
@@ -311,7 +311,7 @@ async def _refresh_azure_monthly_summary(ct_id: str):
         logger.info(f"Azure monthly summary refreshed for CT {ct_id}")
 
 
-async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
+async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: Optional[str] = None, force_end: Optional[str] = None):
     """Sync cost data from Azure Cost Management Export."""
     _sync_progress[ct_id] = {"percent": 0, "status": "running", "message": "Starting Azure sync"}
     sync_log_id = None
@@ -365,7 +365,11 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual"):
 
         from datetime import date as dt_date
         today = dt_date.today()
-        if existing_count == 0:
+        if force_start and force_end:
+            start_date = force_start
+            end_date = force_end
+            logger.info(f"Azure manual sync for CT {ct_id}: {start_date} to {end_date}")
+        elif existing_count == 0:
             # Full sync -- start of current year
             start_date = today.replace(month=1, day=1).isoformat()
             end_date = today.isoformat()
