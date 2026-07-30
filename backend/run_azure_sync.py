@@ -37,10 +37,10 @@ async def main():
         result = await db.execute(select(ControlTower).where(ControlTower.id == CT_ID))
         ct = result.scalar_one_or_none()
 
-    csv_blobs = find_azure_export_blobs(ct, START_DATE, END_DATE, False)
-    if not csv_blobs:
-        logger.error("No blobs found"); return
-    logger.info(f"Found {len(csv_blobs)} blobs")
+    csv_blobs = [
+        "finoptixs-Cost-export-actual/20260601-20260630/facc4432-0062-4644-aac9-0430b0883426/part_0_0001.csv.gz"
+    ]
+    logger.info(f"Using {len(csv_blobs)} specific blob(s)")
 
     # Delete existing records for date range
     start_dt = date.fromisoformat(START_DATE)

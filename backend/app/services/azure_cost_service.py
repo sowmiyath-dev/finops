@@ -127,6 +127,7 @@ def _parse_azure_row(row: dict, start: date, end: date, cost_type: str = "actual
 
 def stream_azure_cost_batches(ct: ControlTower, blob_name: str, start_date: str, end_date: str, batch_size: int = 500):
     """Stream-parse an Azure cost CSV blob line by line to avoid OOM."""
+    import gzip as _gzip
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
     cost_type = "amortized" if "amortized" in blob_name.lower() else "actual"
@@ -139,7 +140,6 @@ def stream_azure_cost_batches(ct: ControlTower, blob_name: str, start_date: str,
 
         logger.info(f"Streaming Azure blob: {blob_name}")
 
-        # Download in chunks and decode line by line — never load full file
         stream = blob_obj.download_blob()
         leftover = b""
         header_line = None
@@ -147,7 +147,15 @@ def stream_azure_cost_batches(ct: ControlTower, blob_name: str, start_date: str,
         fieldnames = None
         row_count = 0
 
-        for chunk in stream.chunks():
+        # For .gz files, decompress the full content then iterate lines
+        if blob_name.endswith(".gz"):
+            raw = stream.readall()
+            lines = _gzip.decompress(raw).split(b"\n")
+            chunks_iter = [b"\n".join(lines)]
+        else:
+            chunks_iter = stream.chunks()
+
+        for chunk in chunks_iter:
             data = leftover + chunk
             lines = data.split(b"\n")
             leftover = lines[-1]  # incomplete last line saved for next chunk
@@ -267,7 +275,7 @@ def find_azure_export_blobs(ct: ControlTower, start_date: str, end_date: str, is
 
     for prefix in prefixes:
         blobs = list(container.list_blobs(name_starts_with=prefix))
-        found = [b.name for b in blobs if b.name.endswith(".csv")]
+        found = [b.name for b in blobs if b.name.endswith(".csv") or b.name.endswith(".csv.gz")]
         if found:
             csv_blobs += found
             logger.info(f"Prefix '{prefix}': found {len(found)} CSVs")
