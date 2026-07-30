@@ -10,8 +10,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 CT_ID = "051dd3a4-9b33-42b4-ad09-e4606264fd11"
-START_DATE = "2026-06-01"
-END_DATE = "2026-06-30"
+START_DATE = "2026-07-01"
+END_DATE = "2026-07-30"
 
 
 async def main():
@@ -38,8 +38,8 @@ async def main():
         ct = result.scalar_one_or_none()
 
     csv_blobs = [
-        "finoptix/finoptixs-Cost-export-actual/20260601-20260630/facc4432-0062-4644-aac9-0430b0883426/part_0_0001.csv.gz",
-        "finoptix/finoptixs-cost-export-amortized/20260601-20260630/074f4048-6014-4f97-89b8-133773939e9a/part_0_0001.csv.gz",
+        "finoptix-daily-actualcost/all-subs-daily-actualcost/20260701-20260731/all-subs-daily-actualcost_0606bf22-8341-45e4-ad81-d0aef47b82ec.csv",
+        "finoptix-daily-amortizedcost/all-subs-daily-amortizedcost/20260701-20260731/all-subs-daily-amortizedcost_571b556d-ed84-41ab-8979-fac156c745c1.csv",
     ]
     logger.info(f"Using {len(csv_blobs)} specific blob(s)")
 

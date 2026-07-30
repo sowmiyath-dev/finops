@@ -458,28 +458,18 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
                     result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
                     ct_ref = result.scalar_one_or_none()
 
-                import queue as _queue
-                q: _queue.Queue = _queue.Queue(maxsize=4)
-                DONE = object()
+                # Run blob streaming synchronously in executor — no queue deadlock
+                batches = await loop.run_in_executor(
+                    _executor,
+                    lambda bn=blob_name, c=ct_ref: list(stream_azure_cost_batches(c, bn, start_date, end_date, 1000))
+                )
 
-                def _produce(bn=blob_name, c=ct_ref):
-                    try:
-                        for batch in stream_azure_cost_batches(c, bn, start_date, end_date, 500):
-                            q.put(batch)
-                    finally:
-                        q.put(DONE)
-
-                producer = loop.run_in_executor(_executor, _produce)
-
-                while True:
-                    batch = await loop.run_in_executor(None, q.get)
-                    if batch is DONE:
-                        break
+                import uuid as _uuid3
+                from sqlalchemy import text as _ins_text
+                for batch in batches:
                     if not batch:
                         continue
                     async with SyncSessionLocal() as db:
-                        from sqlalchemy import text as _ins_text
-                        import uuid as _uuid3
                         await db.execute(_ins_text("""
                             INSERT INTO azure_cost_records
                                 (id, control_tower_id, subscription_id, subscription_name,
@@ -495,37 +485,24 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
                                  :charge_type, :pricing, :marketplace, :tags, :cost_type, NOW())
                         """), [
                             {
-                                "id": str(_uuid3.uuid4()),
-                                "ct_id": ct_id,
-                                "sub_id": r["subscription_id"],
-                                "sub_name": r["subscription_name"],
-                                "rg": r.get("resource_group"),
-                                "rid": r.get("resource_id"),
-                                "rname": r.get("resource_name"),
-                                "date": r["date"],
+                                "id": str(_uuid3.uuid4()), "ct_id": ct_id,
+                                "sub_id": r["subscription_id"], "sub_name": r["subscription_name"],
+                                "rg": r.get("resource_group"), "rid": r.get("resource_id"),
+                                "rname": r.get("resource_name"), "date": r["date"],
                                 "currency": r.get("billing_currency", "INR"),
-                                "actual": r.get("actual_cost", 0),
-                                "amortized": r.get("amortized_cost", 0),
-                                "qty": r.get("quantity", 0),
-                                "unit": r.get("unit"),
-                                "service": r["service"],
-                                "meter_sub": r.get("meter_subcategory"),
-                                "meter_name": r.get("meter_name"),
-                                "product": r.get("product_name"),
-                                "region": r.get("region"),
-                                "charge_type": r.get("charge_type", "Usage"),
+                                "actual": r.get("actual_cost", 0), "amortized": r.get("amortized_cost", 0),
+                                "qty": r.get("quantity", 0), "unit": r.get("unit"),
+                                "service": r["service"], "meter_sub": r.get("meter_subcategory"),
+                                "meter_name": r.get("meter_name"), "product": r.get("product_name"),
+                                "region": r.get("region"), "charge_type": r.get("charge_type", "Usage"),
                                 "pricing": r.get("pricing_model", "OnDemand"),
                                 "marketplace": r.get("is_marketplace", False),
-                                "tags": r.get("tags"),
-                                "cost_type": r.get("cost_type", "actual"),
+                                "tags": r.get("tags"), "cost_type": r.get("cost_type", "actual"),
                             }
                             for r in batch
                         ])
                         await db.commit()
                         total_inserted += len(batch)
-                        logger.info(f"Azure blob {blob_idx+1}/{len(csv_blobs)}: {total_inserted} total inserted")
-
-                await producer
                 logger.info(f"Azure blob {blob_idx+1} done: {total_inserted} total inserted")
 
             except Exception as file_err:
