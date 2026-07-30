@@ -19,8 +19,11 @@ def get_blob_service_client(ct: ControlTower) -> BlobServiceClient:
     account_url = f"https://{ct.azure_storage_account}.blob.core.windows.net"
     # Use storage account key if available — bypasses login.microsoftonline.com auth
     if getattr(ct, "azure_storage_key", None):
-        from app.services.crypto_service import decrypt as _decrypt
-        key = _decrypt(ct.azure_storage_key) if ct.azure_storage_key.startswith("enc:") else ct.azure_storage_key
+        key = ct.azure_storage_key
+        # SAS token starts with ? or sv=
+        if key.startswith("?") or key.startswith("sv="):
+            sas = key if key.startswith("?") else f"?{key}"
+            return BlobServiceClient(account_url=f"{account_url}{sas}")
         return BlobServiceClient(account_url=account_url, credential=key)
     credential = get_azure_credential(ct)
     return BlobServiceClient(account_url=account_url, credential=credential)
