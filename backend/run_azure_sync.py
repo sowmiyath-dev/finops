@@ -38,7 +38,8 @@ async def main():
         ct = result.scalar_one_or_none()
 
     csv_blobs = [
-        "finoptixs-Cost-export-actual/20260601-20260630/facc4432-0062-4644-aac9-0430b0883426/part_0_0001.csv.gz"
+        "finoptix/finoptixs-Cost-export-actual/20260601-20260630/facc4432-0062-4644-aac9-0430b0883426/part_0_0001.csv.gz",
+        "finoptix/finoptixs-cost-export-amortized/20260601-20260630/074f4048-6014-4f97-89b8-133773939e9a/part_0_0001.csv.gz",
     ]
     logger.info(f"Using {len(csv_blobs)} specific blob(s)")
 
