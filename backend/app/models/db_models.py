@@ -45,6 +45,7 @@ class ControlTower(Base):
     azure_storage_account = Column(String, nullable=True)
     azure_container_name = Column(String, nullable=True)
     azure_export_name = Column(String, nullable=True)
+    azure_storage_key = Column(Text, nullable=True)  # optional storage account key — bypasses AAD auth
     # Common
     is_active = Column(Boolean, default=False)
     last_synced_at = Column(DateTime(timezone=True), nullable=True)
