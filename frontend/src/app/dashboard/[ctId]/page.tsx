@@ -279,7 +279,7 @@ export default function CTDetailPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-black">{ct?.name}</h1>
-          <p className="text-xs text-black mt-0.5 font-mono">{ct?.management_account_id} · {ct?.management_account_name}</p>
+          <p className="text-xs text-black mt-0.5 font-mono">{ct?.management_account_id} &middot; {ct?.management_account_name}</p>
         </div>
 
         {/* Date + Granularity controls */}
@@ -331,7 +331,7 @@ export default function CTDetailPage() {
                 <span className="text-[10px] font-bold uppercase tracking-wider text-black">Total Cost</span>
               </div>
               <div className="text-2xl font-bold text-blue-900 font-mono">{fmt(totalCost)}</div>
-              <div className="text-xs text-black mt-1">{startDate} → {endDate}</div>
+              <div className="text-xs text-black mt-1">{startDate} {'->'} {endDate}</div>
             </div>
             <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5">
               <div className="text-[10px] font-bold uppercase tracking-wider text-black mb-2">Top Service</div>
@@ -693,7 +693,7 @@ export default function CTDetailPage() {
                         </span>
                       ))}
                       <span className="text-xs font-semibold text-orange-900 ml-2">
-                        Total {fmt(spDist.total_sp_fee)} → distributed to sub-accounts below based on SP usage
+                        Total {fmt(spDist.total_sp_fee)} {'→'} distributed to sub-accounts below based on SP usage
                       </span>
                     </div>
                   </div>
@@ -986,7 +986,7 @@ export default function CTDetailPage() {
                   <TrendingDown className="w-4 h-4 text-green-700" />
                   SP Covered Resources — {spResourceModal.accountName}
                 </h3>
-                <p className="text-[10px] text-gray-500 mt-0.5 font-mono">{spResourceModal.accountId} · {startDate} → {endDate}</p>
+                <p className="text-[10px] text-gray-500 mt-0.5 font-mono">{spResourceModal.accountId} &middot; {startDate} {'->'} {endDate}</p>
               </div>
               <button onClick={() => setSpResourceModal(null)} className="p-1.5 rounded hover:bg-gray-100 transition">
                 <span className="text-black font-bold text-sm">✕</span>
