@@ -139,12 +139,14 @@ export default function CTDetailPage() {
     finally { setSpResLoading(false); }
   };
 
-  const loadAllSpResources = async () => {
+  const loadAllSpResources = async (ctSubAccounts?: any[]) => {
     setAllSpResLoading(true);
     try {
+      const accounts = ctSubAccounts || subAccounts;
       const accountParam = selectedAccounts.length > 0
         ? selectedAccounts.join(",")
-        : subAccounts.map((a: any) => a.aws_account_id).join(",");
+        : accounts.map((a: any) => a.aws_account_id).join(",");
+      if (!accountParam) return;
       const res = await api.get("/reports/savings/resources", {
         params: { start_date: startDate, end_date: endDate, account_ids: accountParam, limit: 2000 },
       });
@@ -156,10 +158,10 @@ export default function CTDetailPage() {
   useEffect(() => { if (!token) router.push("/auth"); }, [token]);
   useEffect(() => { setAllSpResources([]); }, [startDate, endDate, selectedAccounts]);
   useEffect(() => {
-    if (trueCostView === "resource" && showTrueCost && allSpResources.length === 0) {
-      loadAllSpResources();
+    if (trueCostView === "resource" && showTrueCost && allSpResources.length === 0 && subAccounts.length > 0) {
+      loadAllSpResources(subAccounts);
     }
-  }, [trueCostView, showTrueCost, allSpResources.length]);
+  }, [trueCostView, showTrueCost, allSpResources.length, subAccounts.length]);
 
   const { data: boundary } = useQuery({
     queryKey: ["boundary"],
