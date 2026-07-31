@@ -140,12 +140,13 @@ export default function CTDetailPage() {
   };
 
   const loadAllSpResources = async () => {
-    if (allSpResources.length > 0) return;
     setAllSpResLoading(true);
     try {
-      const accountParam = selectedAccounts.length > 0 ? selectedAccounts.join(",") : undefined;
+      const accountParam = selectedAccounts.length > 0
+        ? selectedAccounts.join(",")
+        : subAccounts.map((a: any) => a.aws_account_id).join(",");
       const res = await api.get("/reports/savings/resources", {
-        params: { start_date: startDate, end_date: endDate, ...(accountParam ? { account_ids: accountParam } : {}), limit: 2000 },
+        params: { start_date: startDate, end_date: endDate, account_ids: accountParam, limit: 2000 },
       });
       setAllSpResources(res.data);
     } catch (e) { console.error(e); }
@@ -379,7 +380,11 @@ export default function CTDetailPage() {
                   onClick={async () => {
                     if (showTrueCost && trueCostView === "resource") {
                       const data = allSpResources.length > 0 ? allSpResources : await api.get("/reports/savings/resources", {
-                        params: { start_date: startDate, end_date: endDate, ...(selectedAccounts.length > 0 ? { account_ids: selectedAccounts.join(",") } : {}), limit: 2000 },
+                        params: {
+                          start_date: startDate, end_date: endDate,
+                          account_ids: selectedAccounts.length > 0 ? selectedAccounts.join(",") : subAccounts.map((a: any) => a.aws_account_id).join(","),
+                          limit: 2000
+                        },
                       }).then((r: any) => r.data);
                       const headers = ["Service", "Resource ID", "Account", "Account ID", "Region", "On-Demand Equiv", "SP Allocated", "Uncovered Hours", "True Cost", "Savings", "Savings %"];
                       const rows = (data as any[]).map((r: any) => [
