@@ -154,6 +154,11 @@ export default function CTDetailPage() {
 
   useEffect(() => { if (!token) router.push("/auth"); }, [token]);
   useEffect(() => { setAllSpResources([]); }, [startDate, endDate, selectedAccounts]);
+  useEffect(() => {
+    if (trueCostView === "resource" && showTrueCost && allSpResources.length === 0) {
+      loadAllSpResources();
+    }
+  }, [trueCostView, showTrueCost, allSpResources.length]);
 
   const { data: boundary } = useQuery({
     queryKey: ["boundary"],
@@ -362,7 +367,7 @@ export default function CTDetailPage() {
                       Account Wise
                     </button>
                     <button
-                      onClick={() => { setTrueCostView("resource"); loadAllSpResources(); }}
+                      onClick={() => { setAllSpResources([]); setTrueCostView("resource"); }}
                       className={`px-3 py-1 text-xs font-bold border-l border-gray-300 transition ${
                         trueCostView === "resource" ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-gray-50"
                       }`}>
