@@ -132,7 +132,7 @@ export default function CTDetailPage() {
     setSpResLoading(true);
     try {
       const res = await api.get("/reports/savings/resources", {
-        params: { start_date: startDate, end_date: endDate, account_ids: accountId, limit: 500 },
+        params: { ct_id: ctId, start_date: startDate, end_date: endDate, account_ids: accountId, limit: 500 },
       });
       setSpResources(res.data);
     } catch (e) { console.error(e); }
@@ -148,7 +148,7 @@ export default function CTDetailPage() {
         : accounts.map((a: any) => a.aws_account_id).join(",");
       if (!accountParam) return;
       const res = await api.get("/reports/savings/resources", {
-        params: { start_date: startDate, end_date: endDate, account_ids: accountParam, limit: 2000 },
+        params: { ct_id: ctId, start_date: startDate, end_date: endDate, account_ids: accountParam, limit: 2000 },
       });
       setAllSpResources(res.data);
     } catch (e) { console.error(e); }
@@ -383,6 +383,7 @@ export default function CTDetailPage() {
                     if (showTrueCost && trueCostView === "resource") {
                       const data = allSpResources.length > 0 ? allSpResources : await api.get("/reports/savings/resources", {
                         params: {
+                          ct_id: ctId,
                           start_date: startDate, end_date: endDate,
                           account_ids: selectedAccounts.length > 0 ? selectedAccounts.join(",") : subAccounts.map((a: any) => a.aws_account_id).join(","),
                           limit: 2000

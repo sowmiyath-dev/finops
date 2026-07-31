@@ -886,27 +886,22 @@ async def savings_summary(
 async def savings_resources(
     start_date: str,
     end_date: str,
+    ct_id: Optional[str] = None,
     account_ids: Optional[str] = None,
     services: Optional[str] = None,
     limit: int = 500,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """
-    Per-resource true cost breakdown.
-    For each resource that has ANY SP coverage:
-      - sp_on_demand_cost  = unblended_cost of SavingsPlanCoveredUsage rows (benchmark)
-      - sp_allocated_cost  = amortized_cost of SavingsPlanCoveredUsage rows (SP share)
-      - uncovered_cost     = unblended_cost of Usage rows for the same resource (hours beyond SP)
-      - true_cost          = sp_allocated_cost + uncovered_cost
-      - savings            = sp_on_demand_cost - sp_allocated_cost (saving on SP-covered hours only)
-    """
     ct_ids = await _get_user_ct_ids(db, user)
     start = date.fromisoformat(start_date)
     end   = date.fromisoformat(end_date)
 
+    # Always scope to specific CT to prevent cross-CT data bleed
+    scoped_ct_ids = [ct_id] if ct_id and ct_id in ct_ids else ct_ids
+
     base = [
-        CostRecord.control_tower_id.in_(ct_ids),
+        CostRecord.control_tower_id.in_(scoped_ct_ids),
         CostRecord.date >= start,
         CostRecord.date <= end,
         CostRecord.resource_id.isnot(None),
