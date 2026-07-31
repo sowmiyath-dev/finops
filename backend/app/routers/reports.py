@@ -925,6 +925,7 @@ async def savings_resources(
             func.sum(CostRecord.unblended_cost).label("sp_on_demand_cost"),
             func.sum(CostRecord.amortized_cost).label("sp_allocated_cost"),
             func.sum(CostRecord.usage_quantity).label("sp_hours"),
+            func.max(CostRecord.usage_type).label("usage_type"),
         )
         .where(and_(*base, CostRecord.line_item_type == "SavingsPlanCoveredUsage"))
         .group_by(
@@ -975,12 +976,17 @@ async def savings_resources(
         savings       = sp_on_demand - sp_allocated  # savings only on SP-covered portion
         on_demand_total = sp_on_demand + uncovered   # full on-demand equivalent
 
+        # Extract instance type from usage_type e.g. "ap-south-1-BoxUsage:m5.xlarge" -> "m5.xlarge"
+        raw_usage_type = r.usage_type or ""
+        instance_type = raw_usage_type.split(":")[-1] if ":" in raw_usage_type else ""
+
         result.append({
             "resource_id":       r.resource_id,
             "aws_account_id":    r.aws_account_id,
             "account_name":      r.account_name or r.aws_account_id,
             "service":           r.service,
             "region":            r.region or "",
+            "instance_type":     instance_type,
             "sp_on_demand_cost": round(sp_on_demand, 4),   # what SP hours would cost on-demand
             "sp_allocated_cost": round(sp_allocated, 4),   # actual SP cost (amortized)
             "uncovered_cost":    round(uncovered, 4),       # hours beyond SP at on-demand rate
