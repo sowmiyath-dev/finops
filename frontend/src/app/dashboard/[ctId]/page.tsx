@@ -81,19 +81,23 @@ function downloadCSV(filename: string, rows: string[][]) {
   URL.revokeObjectURL(url);
 }
 
+function xlsCell(val: string) {
+  const escaped = String(val).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return "<Cell><Data ss:Type=\"String\">" + escaped + "</Data></Cell>";
+}
+
 function downloadMultiSheetXls(filename: string, sheets: { name: string; headers: string[]; rows: string[][] }[]) {
-  const sheetXml = sheets.map((s) => `
-    <Worksheet ss:Name="${s.name}">
-      <Table>
-        <Row>${s.headers.map((h) => `<Cell><Data ss:Type="String">${h}</Data></Cell>`).join("")}</Row>
-        ${s.rows.map((r) => `<Row>${r.map((c) => `<Cell><Data ss:Type="String">${String(c).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</Data></Cell>`).join("")}</Row>`).join("")}
-      </Table>
-    </Worksheet>`).join("");
-  const xml = `<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?>
-<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
-  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
-  ${sheetXml}
-</Workbook>`;
+  let xml = "<?xml version=\"1.0\"?><?mso-application progid=\"Excel.Sheet\"?>";
+  xml += "<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\" xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\">";
+  for (const s of sheets) {
+    xml += "<Worksheet ss:Name=\"" + s.name + "\"><Table>";
+    xml += "<Row>" + s.headers.map(xlsCell).join("") + "</Row>";
+    for (const row of s.rows) {
+      xml += "<Row>" + row.map(xlsCell).join("") + "</Row>";
+    }
+    xml += "</Table></Worksheet>";
+  }
+  xml += "</Workbook>";
   const blob = new Blob([xml], { type: "application/vnd.ms-excel" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
