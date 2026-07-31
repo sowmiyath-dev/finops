@@ -157,11 +157,6 @@ export default function CTDetailPage() {
 
   useEffect(() => { if (!token) router.push("/auth"); }, [token]);
   useEffect(() => { setAllSpResources([]); }, [startDate, endDate, selectedAccounts]);
-  useEffect(() => {
-    if (trueCostView === "resource" && showTrueCost && allSpResources.length === 0 && subAccounts.length > 0) {
-      loadAllSpResources(subAccounts);
-    }
-  }, [trueCostView, showTrueCost, allSpResources.length, subAccounts.length]);
 
   const { data: boundary } = useQuery({
     queryKey: ["boundary"],
@@ -179,6 +174,12 @@ export default function CTDetailPage() {
 
   const ct = towers.find((t: any) => t.id === ctId);
   const subAccounts: any[] = ct?.sub_accounts || [];
+
+  useEffect(() => {
+    if (trueCostView === "resource" && showTrueCost && allSpResources.length === 0 && subAccounts.length > 0) {
+      loadAllSpResources(subAccounts);
+    }
+  }, [trueCostView, showTrueCost, allSpResources.length, subAccounts.length]);
 
   const filter = {
     control_tower_ids: [ctId],
