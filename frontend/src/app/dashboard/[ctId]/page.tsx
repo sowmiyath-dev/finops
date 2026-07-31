@@ -6,7 +6,7 @@ import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
 import Link from "next/link";
 import {
-  ChevronRight, DollarSign, RefreshCw, TrendingDown,
+  ChevronRight, DollarSign, RefreshCw, TrendingDown, Download,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -70,6 +70,15 @@ function getLast7Days(accurateUntil?: string) {
 
 function fmt(n: number) {
   return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function downloadCSV(filename: string, rows: string[][]) {
+  const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
 }
 
 export default function CTDetailPage() {
@@ -322,6 +331,40 @@ export default function CTDetailPage() {
                     Usage + SP amortized cost distributed by usage
                   </span>
                 )}
+                {/* CSV download for subaccount table */}
+                <button
+                  onClick={() => {
+                    if (showTrueCost && trueCostData.length > 0) {
+                      const headers = ["Account", "Account ID", "Usage Cost", "SP Allocated", "True Cost", "Savings", "Savings %"];
+                      const rows = trueCostData
+                        .filter((acc: any) => selectedAccounts.length === 0 || selectedAccounts.includes(acc.aws_account_id))
+                        .map((acc: any) => [
+                          acc.account_name || "",
+                          acc.aws_account_id,
+                          acc.usage_cost?.toFixed(2) || "0",
+                          acc.is_payer ? `-${acc.sp_fee_distributed?.toFixed(2)}` : (acc.sp_allocated?.toFixed(2) || "0"),
+                          acc.true_cost?.toFixed(2) || "0",
+                          acc.savings?.toFixed(2) || "0",
+                          acc.savings_pct ? `${acc.savings_pct}%` : "0%",
+                        ]);
+                      downloadCSV(`true-cost-${ct?.name}-${startDate}-${endDate}.csv`, [headers, ...rows]);
+                    } else if (!showTrueCost && summary?.per_account?.length > 0) {
+                      const headers = ["Account", "Account ID", "Cost (USD)", "% of Total"];
+                      const rows = (summary.per_account as any[])
+                        .filter((acc: any) => selectedAccounts.length === 0 || selectedAccounts.includes(acc.aws_account_id))
+                        .map((acc: any) => [
+                          acc.account_name || "Unknown",
+                          acc.aws_account_id,
+                          acc.cost?.toFixed(2) || "0",
+                          totalCost > 0 ? `${((acc.cost / totalCost) * 100).toFixed(1)}%` : "0%",
+                        ]);
+                      downloadCSV(`subaccount-cost-${ct?.name}-${startDate}-${endDate}.csv`, [headers, ...rows]);
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-md border border-gray-300 text-xs font-bold text-black hover:border-blue-900 hover:text-blue-900 transition bg-white"
+                  title="Download CSV">
+                  <Download className="w-3.5 h-3.5" /> CSV
+                </button>
               </div>
               <div className="flex items-center gap-3">
                 {/* Charge Type filter */}
@@ -617,17 +660,41 @@ export default function CTDetailPage() {
 
           {/* Service / Resource / Tag tabs */}
           <div className="bg-white rounded-lg border border-gray-300 shadow-sm">
-            <div className="flex border-b border-gray-200">
-              {TABS.map((tab) => (
-                <button key={tab.value} onClick={() => setActiveTab(tab.value)}
-                  className={`px-5 py-3 text-sm font-bold transition border-b-2 ${
-                    activeTab === tab.value
-                      ? "border-blue-900 text-blue-900"
-                      : "border-transparent text-black hover:text-blue-900"
-                  }`}>
-                  {tab.label}
+            <div className="flex items-center justify-between border-b border-gray-200">
+              <div className="flex">
+                {TABS.map((tab) => (
+                  <button key={tab.value} onClick={() => setActiveTab(tab.value)}
+                    className={`px-5 py-3 text-sm font-bold transition border-b-2 ${
+                      activeTab === tab.value
+                        ? "border-blue-900 text-blue-900"
+                        : "border-transparent text-black hover:text-blue-900"
+                    }`}>
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+              {tabData.length > 0 && (
+                <button
+                  onClick={() => {
+                    if (activeTab === "service") {
+                      const headers = ["Service", "Cost (USD)"];
+                      const rows = (tabData as any[]).map((r: any) => [r.service || "—", r.cost?.toFixed(2) || "0"]);
+                      downloadCSV(`service-wise-${ct?.name}-${startDate}-${endDate}.csv`, [headers, ...rows]);
+                    } else if (activeTab === "resource") {
+                      const headers = ["Resource ID", "Service", "Region", "Cost (USD)"];
+                      const rows = (tabData as any[]).map((r: any) => [r.resource_id || "—", r.service || "—", r.region || "—", r.cost?.toFixed(2) || "0"]);
+                      downloadCSV(`resource-wise-${ct?.name}-${startDate}-${endDate}.csv`, [headers, ...rows]);
+                    } else {
+                      const headers = ["Tag Key", "Tag Value", "Cost (USD)"];
+                      const rows = (tabData as any[]).map((r: any) => [r.tag_key || "—", r.tag_value || "(untagged)", r.cost?.toFixed(2) || "0"]);
+                      downloadCSV(`tag-wise-${ct?.name}-${startDate}-${endDate}.csv`, [headers, ...rows]);
+                    }
+                  }}
+                  className="flex items-center gap-1.5 mr-4 px-3 py-1.5 rounded-md border border-gray-300 text-xs font-bold text-black hover:border-blue-900 hover:text-blue-900 transition bg-white"
+                  title="Download CSV">
+                  <Download className="w-3.5 h-3.5" /> CSV
                 </button>
-              ))}
+              )}
             </div>
 
             <div className="p-5">
