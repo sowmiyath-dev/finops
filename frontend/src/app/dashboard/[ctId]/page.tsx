@@ -73,7 +73,8 @@ function fmt(n: number) {
 }
 
 function downloadCSV(filename: string, rows: string[][]) {
-  const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const Q = String.fromCharCode(34);
+  const csv = rows.map((r) => r.map((c) => Q + String(c).split(Q).join(Q + Q) + Q).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -82,15 +83,18 @@ function downloadCSV(filename: string, rows: string[][]) {
 }
 
 function xlsCell(val: string) {
-  const escaped = String(val).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return "<Cell><Data ss:Type=\"String\">" + escaped + "</Data></Cell>";
+  const s = String(val).split("&").join("&amp;").split("<").join("&lt;").split(">").join("&gt;");
+  return "<Cell><Data ss:Type='String'>" + s + "</Data></Cell>";
 }
 
 function downloadMultiSheetXls(filename: string, sheets: { name: string; headers: string[]; rows: string[][] }[]) {
-  let xml = "<?xml version=\"1.0\"?><?mso-application progid=\"Excel.Sheet\"?>";
-  xml += "<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\" xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\">";
+  const dq = String.fromCharCode(34);
+  let xml = "<?xml version=" + dq + "1.0" + dq + "?>";
+  xml += "<?mso-application progid=" + dq + "Excel.Sheet" + dq + "?>";
+  xml += "<Workbook xmlns=" + dq + "urn:schemas-microsoft-com:office:spreadsheet" + dq;
+  xml += " xmlns:ss=" + dq + "urn:schemas-microsoft-com:office:spreadsheet" + dq + ">";
   for (const s of sheets) {
-    xml += "<Worksheet ss:Name=\"" + s.name + "\"><Table>";
+    xml += "<Worksheet ss:Name=" + dq + s.name + dq + "><Table>";
     xml += "<Row>" + s.headers.map(xlsCell).join("") + "</Row>";
     for (const row of s.rows) {
       xml += "<Row>" + row.map(xlsCell).join("") + "</Row>";
