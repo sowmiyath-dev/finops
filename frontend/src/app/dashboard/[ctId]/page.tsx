@@ -190,7 +190,7 @@ export default function CTDetailPage() {
     group_by: "account",
   };
 
-  // Main summary — subaccount costs
+  // Main summary - subaccount costs
   const { data: summary, isLoading: summaryLoading } = useQuery({
     queryKey: ["ct-summary", ctId, startDate, endDate, granularity, selectedAccounts, selectedChargeTypes],
     queryFn: () => api.post("/reports/summary", filter).then((r) => r.data),
@@ -198,7 +198,7 @@ export default function CTDetailPage() {
     staleTime: 2 * 60 * 1000,
   });
 
-  // True cost with SP allocation — uses CT-specific distribution endpoint
+  // True cost with SP allocation - uses CT-specific distribution endpoint
   const { data: spDist, isLoading: spLoading } = useQuery({
     queryKey: ["ct-sp-dist", ctId, startDate, endDate],
     queryFn: () => api.get(`/reports/savings/ct-distribution`, {
@@ -229,7 +229,7 @@ export default function CTDetailPage() {
     staleTime: 2 * 60 * 1000,
   });
 
-  // Build stacked chart data — one bar per date, stacked by account
+  // Build stacked chart data - one bar per date, stacked by account
   const chartData = (() => {
     if (!summary?.daily_trend) return [];
     if (granularity === "monthly") {
@@ -245,7 +245,7 @@ export default function CTDetailPage() {
   // Build per-account stacked data for the top chart
   const stackedData = (() => {
     if (!summary?.per_account) return [];
-    // For daily: we need account-wise daily data — use per_account as totals for now
+    // For daily: we need account-wise daily data - use per_account as totals for now
     return summary.per_account?.slice(0, 10).map((acc: any) => ({
       name: (acc.account_name || acc.aws_account_id).slice(0, 15),
       cost: parseFloat(acc.cost.toFixed(2)),
@@ -335,7 +335,7 @@ export default function CTDetailPage() {
             </div>
             <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5">
               <div className="text-[10px] font-bold uppercase tracking-wider text-black mb-2">Top Service</div>
-              <div className="text-base font-bold text-orange-600 truncate">{summary?.top_services?.[0]?.service || "—"}</div>
+              <div className="text-base font-bold text-orange-600 truncate">{summary?.top_services?.[0]?.service || "-"}</div>
               <div className="text-xs font-mono text-black mt-1">{fmt(summary?.top_services?.[0]?.cost || 0)}</div>
             </div>
             <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5">
@@ -348,7 +348,7 @@ export default function CTDetailPage() {
           {/* Subaccount cost chart */}
           <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5 mb-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-bold text-black">Subaccount Cost — {granularity === "daily" ? "Daily Trend" : "By Account"}</h2>
+              <h2 className="text-sm font-bold text-black">Subaccount Cost - {granularity === "daily" ? "Daily Trend" : "By Account"}</h2>
             </div>
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={stackedData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
@@ -415,8 +415,8 @@ export default function CTDetailPage() {
                       }).then((r: any) => r.data);
                       const headers = ["Service", "Resource ID", "Account", "Account ID", "Region", "On-Demand Cost", "SP Allocated (True Cost)", "Savings", "Savings %"];
                       const rows = (data as any[]).map((r: any) => [
-                        r.service || "—", r.resource_id || "—", r.account_name || "—", r.aws_account_id || "—",
-                        r.region || "—", r.on_demand_cost?.toFixed(2) || "0",
+                        r.service || "-", r.resource_id || "-", r.account_name || "-", r.aws_account_id || "-",
+                        r.region || "-", r.on_demand_cost?.toFixed(2) || "0",
                         r.sp_allocated_cost?.toFixed(2) || "0", r.savings?.toFixed(2) || "0",
                         r.savings_pct ? `${r.savings_pct}%` : "0%",
                       ]);
@@ -448,7 +448,7 @@ export default function CTDetailPage() {
                         );
                         spRows = results.flatMap(({ accountName, accountId, resources }) =>
                           (resources as any[]).map((r: any) => [
-                            accountName, accountId, r.resource_id || "—", r.service || "—", r.region || "—",
+                            accountName, accountId, r.resource_id || "-", r.service || "-", r.region || "-",
                             r.on_demand_cost?.toFixed(2) || "0", r.sp_allocated_cost?.toFixed(2) || "0",
                             r.savings?.toFixed(2) || "0", r.savings_pct ? `${r.savings_pct}%` : "0%",
                           ])
@@ -490,7 +490,7 @@ export default function CTDetailPage() {
                     <div className="absolute right-0 top-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-20 w-56">
                       <div className="p-2 border-b border-gray-100 flex items-center justify-between">
                         <span className="text-xs font-bold text-black">Charge Types</span>
-                        <button onClick={() => setChargeFilterOpen(false)} className="text-xs text-gray-400 hover:text-black">✕</button>
+                        <button onClick={() => setChargeFilterOpen(false)} className="text-xs text-gray-400 hover:text-black">x</button>
                       </div>
                       <div className="p-2 space-y-0.5 max-h-56 overflow-y-auto">
                         {[
@@ -603,7 +603,7 @@ export default function CTDetailPage() {
             {showTrueCost ? (
               <>
                 {trueCostView === "resource" ? (
-                  /* ── Resource-wise true cost view ── */
+                  /* -- Resource-wise true cost view -- */
                   <>
                     {allSpResLoading ? (
                       <div className="flex items-center justify-center h-32">
@@ -626,7 +626,7 @@ export default function CTDetailPage() {
                                 {/* Service category header row */}
                                 <tr className="bg-blue-900">
                                   <td colSpan={8} className="px-4 py-2 text-xs font-bold text-white tracking-wider">
-                                    {svc} <span className="font-normal opacity-75">({byService[svc].length} resources · {fmt(byService[svc].reduce((s: number, r: any) => s + (r.sp_allocated_cost || 0), 0))} true cost)</span>
+                                    {svc} <span className="font-normal opacity-75">({byService[svc].length} resources . {fmt(byService[svc].reduce((s: number, r: any) => s + (r.sp_allocated_cost || 0), 0))} true cost)</span>
                                   </td>
                                 </tr>
                                 {byService[svc].map((r: any, i: number) => (
@@ -636,7 +636,7 @@ export default function CTDetailPage() {
                                       <div className="text-xs font-semibold text-black">{r.account_name}</div>
                                       <div className="text-[10px] font-mono text-gray-500">{r.aws_account_id}</div>
                                     </td>
-                                    <td className="px-4 py-2.5 text-xs text-black">{r.region || "—"}</td>
+                                    <td className="px-4 py-2.5 text-xs text-black">{r.region || "-"}</td>
                                     <td className="px-4 py-2.5 text-xs font-mono text-gray-500">{fmt(r.on_demand_cost)}</td>
                                     <td className="px-4 py-2.5 text-xs font-bold font-mono text-orange-700">{fmt(r.sp_allocated_cost)}</td>
                                     {/* True Cost = sp_allocated_cost (what you actually pay) */}
@@ -654,7 +654,7 @@ export default function CTDetailPage() {
                                 ))}
                                 {/* Service subtotal */}
                                 <tr className="bg-gray-50 border-b-2 border-gray-300">
-                                  <td className="px-4 py-2 text-xs font-bold text-black" colSpan={3}>Subtotal — {svc}</td>
+                                  <td className="px-4 py-2 text-xs font-bold text-black" colSpan={3}>Subtotal - {svc}</td>
                                   <td className="px-4 py-2 text-xs font-bold font-mono text-gray-500">{fmt(byService[svc].reduce((s: number, r: any) => s + (r.on_demand_cost || 0), 0))}</td>
                                   <td className="px-4 py-2 text-xs font-bold font-mono text-orange-700">{fmt(byService[svc].reduce((s: number, r: any) => s + (r.sp_allocated_cost || 0), 0))}</td>
                                   <td className="px-4 py-2 text-xs font-bold font-mono text-blue-900">{fmt(byService[svc].reduce((s: number, r: any) => s + (r.sp_allocated_cost || 0), 0))}</td>
@@ -677,7 +677,7 @@ export default function CTDetailPage() {
                     )}
                   </>
                 ) : (
-                  /* ── Account-wise true cost view ── */
+                  /* -- Account-wise true cost view -- */
                   <>
                 {/* Payer account banner */}
                 {spDist?.payer_accounts?.length > 0 && (
@@ -693,7 +693,7 @@ export default function CTDetailPage() {
                         </span>
                       ))}
                       <span className="text-xs font-semibold text-orange-900 ml-2">
-                        Total {fmt(spDist.total_sp_fee)} {'→'} distributed to sub-accounts below based on SP usage
+                        Total {fmt(spDist.total_sp_fee)} {'->'} distributed to sub-accounts below based on SP usage
                       </span>
                     </div>
                   </div>
@@ -724,7 +724,7 @@ export default function CTDetailPage() {
                                 <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-white ${
                                   acc.is_payer ? "bg-orange-600" : "bg-blue-900"
                                 }`}>
-                                  {(acc.account_name || "?")[0].toUpperCase()}
+                                  {(acc.account_name || ""-")[0].toUpperCase()}
                                 </div>
                                 <div>
                                   <span className="text-sm font-bold text-black">{acc.account_name}</span>
@@ -745,14 +745,14 @@ export default function CTDetailPage() {
                             <td className="px-5 py-3">
                               {acc.is_payer ? (
                                 <span className="text-xs font-bold text-orange-700 bg-orange-100 px-2 py-0.5 rounded">
-                                  −{fmt(acc.sp_fee_distributed)} distributed
+                                  -{fmt(acc.sp_fee_distributed)} distributed
                                 </span>
                               ) : acc.sp_allocated > 0 ? (
                                 <div>
                                   <span className="text-sm font-bold font-mono text-orange-700">+{fmt(acc.sp_allocated)}</span>
                                   <div className="text-[10px] text-gray-500">{acc.sp_share_pct}% of SP pool</div>
                                 </div>
-                              ) : <span className="text-xs text-gray-400">—</span>}
+                              ) : <span className="text-xs text-gray-400">-</span>}
                             </td>
                             {/* True Cost */}
                             <td className="px-5 py-3">
@@ -762,7 +762,7 @@ export default function CTDetailPage() {
                             <td className="px-5 py-3">
                               {!acc.is_payer && acc.savings > 0
                                 ? <span className="text-sm font-bold font-mono text-green-700">{fmt(acc.savings)}</span>
-                                : <span className="text-xs text-gray-400">—</span>}
+                                : <span className="text-xs text-gray-400">-</span>}
                             </td>
                             {/* Savings % */}
                             <td className="px-5 py-3">
@@ -773,7 +773,7 @@ export default function CTDetailPage() {
                                   </div>
                                   <span className="text-xs font-bold text-green-700">{acc.savings_pct}%</span>
                                 </div>
-                              ) : <span className="text-xs text-gray-400">—</span>}
+                              ) : <span className="text-xs text-gray-400">-</span>}
                             </td>
                             {/* SP Resources */}
                             <td className="px-5 py-3 text-sm font-semibold text-black">
@@ -784,7 +784,7 @@ export default function CTDetailPage() {
                                   {acc.sp_resources.toLocaleString()} resources
                                   <ChevronRight className="w-3 h-3" />
                                 </button>
-                              ) : "—"}
+                              ) : "-"}
                             </td>
                           </tr>
                         ))
@@ -823,7 +823,7 @@ export default function CTDetailPage() {
                         <td className="px-5 py-3">
                           <div className="flex items-center gap-2">
                             <div className="w-7 h-7 rounded-lg bg-blue-900 flex items-center justify-center text-xs font-bold text-white">
-                              {(acc.account_name || "?")[0].toUpperCase()}
+                              {(acc.account_name || ""-")[0].toUpperCase()}
                             </div>
                             <span className="text-sm font-bold text-black">{acc.account_name || "Unknown"}</span>
                           </div>
@@ -866,15 +866,15 @@ export default function CTDetailPage() {
                   onClick={() => {
                     if (activeTab === "service") {
                       const headers = ["Service", "Cost (USD)"];
-                      const rows = (tabData as any[]).map((r: any) => [r.service || "—", r.cost?.toFixed(2) || "0"]);
+                      const rows = (tabData as any[]).map((r: any) => [r.service || "-", r.cost?.toFixed(2) || "0"]);
                       downloadCSV(`service-wise-${ct?.name}-${startDate}-${endDate}.csv`, [headers, ...rows]);
                     } else if (activeTab === "resource") {
                       const headers = ["Resource ID", "Service", "Region", "Cost (USD)"];
-                      const rows = (tabData as any[]).map((r: any) => [r.resource_id || "—", r.service || "—", r.region || "—", r.cost?.toFixed(2) || "0"]);
+                      const rows = (tabData as any[]).map((r: any) => [r.resource_id || "-", r.service || "-", r.region || "-", r.cost?.toFixed(2) || "0"]);
                       downloadCSV(`resource-wise-${ct?.name}-${startDate}-${endDate}.csv`, [headers, ...rows]);
                     } else {
                       const headers = ["Tag Key", "Tag Value", "Cost (USD)"];
-                      const rows = (tabData as any[]).map((r: any) => [r.tag_key || "—", r.tag_value || "(untagged)", r.cost?.toFixed(2) || "0"]);
+                      const rows = (tabData as any[]).map((r: any) => [r.tag_key || "-", r.tag_value || "(untagged)", r.cost?.toFixed(2) || "0"]);
                       downloadCSV(`tag-wise-${ct?.name}-${startDate}-${endDate}.csv`, [headers, ...rows]);
                     }
                   }}
@@ -896,12 +896,12 @@ export default function CTDetailPage() {
                   {tabData.length > 0 && (
                     <div className="mb-5">
                       <h3 className="text-xs font-bold uppercase tracking-wider text-black mb-3">
-                        Cumulative Cost — {TABS.find(t => t.value === activeTab)?.label}
+                        Cumulative Cost - {TABS.find(t => t.value === activeTab)?.label}
                       </h3>
                       <ResponsiveContainer width="100%" height={200}>
                         <BarChart
                           data={tabData.slice(0, 15).map((r: any) => ({
-                            name: (r.service || r.resource_id || r.tag_value || "—").slice(0, 20),
+                            name: (r.service || r.resource_id || r.tag_value || "-").slice(0, 20),
                             cost: parseFloat((r.cost || 0).toFixed(2)),
                           }))}
                           margin={{ top: 0, right: 0, left: 0, bottom: 40 }}
@@ -949,7 +949,7 @@ export default function CTDetailPage() {
                             <>
                               <td className="px-4 py-2.5 text-xs font-mono font-semibold text-black max-w-xs truncate">{row.resource_id}</td>
                               <td className="px-4 py-2.5 text-xs font-semibold text-black">{row.service}</td>
-                              <td className="px-4 py-2.5 text-xs text-black">{row.region || "—"}</td>
+                              <td className="px-4 py-2.5 text-xs text-black">{row.region || "-"}</td>
                             </>
                           )}
                           {activeTab === "tag" && (
@@ -984,12 +984,12 @@ export default function CTDetailPage() {
               <div>
                 <h3 className="text-sm font-bold text-black flex items-center gap-2">
                   <TrendingDown className="w-4 h-4 text-green-700" />
-                  SP Covered Resources — {spResourceModal.accountName}
+                  SP Covered Resources - {spResourceModal.accountName}
                 </h3>
                 <p className="text-[10px] text-gray-500 mt-0.5 font-mono">{spResourceModal.accountId} &middot; {startDate} {'->'} {endDate}</p>
               </div>
               <button onClick={() => setSpResourceModal(null)} className="p-1.5 rounded hover:bg-gray-100 transition">
-                <span className="text-black font-bold text-sm">✕</span>
+                <span className="text-black font-bold text-sm">x</span>
               </button>
             </div>
             <div className="flex-1 overflow-y-auto">
@@ -1016,7 +1016,7 @@ export default function CTDetailPage() {
                         <td className="px-4 py-2.5">
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-900">{r.service}</span>
                         </td>
-                        <td className="px-4 py-2.5 text-xs text-black">{r.region || "—"}</td>
+                        <td className="px-4 py-2.5 text-xs text-black">{r.region || "-"}</td>
                         <td className="px-4 py-2.5 text-sm font-mono text-gray-500">{fmt(r.on_demand_cost)}</td>
                         <td className="px-4 py-2.5 text-sm font-bold font-mono text-orange-700">{fmt(r.sp_allocated_cost)}</td>
                         <td className="px-4 py-2.5 text-sm font-bold font-mono text-green-700">{fmt(r.savings)}</td>
