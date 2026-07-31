@@ -506,19 +506,19 @@ export default function CTDetailPage() {
                           { value: "Refund",                  label: "Refund" },
                           { value: "OCBLateFee",              label: "Late Fee (OCB)" },
                           { value: "Fee",                     label: "Fee" },
-                        ].map((ct) => (
-                          <label key={ct.value} className="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer hover:bg-gray-50 transition">
+                        ].map((chargeType) => (
+                          <label key={chargeType.value} className="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer hover:bg-gray-50 transition">
                             <input
                               type="checkbox"
-                              checked={selectedChargeTypes.includes(ct.value)}
+                              checked={selectedChargeTypes.includes(chargeType.value)}
                               onChange={() => setSelectedChargeTypes((prev) =>
-                                prev.includes(ct.value)
-                                  ? prev.filter((x) => x !== ct.value)
-                                  : [...prev, ct.value]
+                                prev.includes(chargeType.value)
+                                  ? prev.filter((x) => x !== chargeType.value)
+                                  : [...prev, chargeType.value]
                               )}
                               className="w-3.5 h-3.5 accent-blue-900"
                             />
-                            <span className="text-xs font-medium text-black">{ct.label}</span>
+                            <span className="text-xs font-medium text-black">{chargeType.label}</span>
                           </label>
                         ))}
                       </div>
