@@ -246,6 +246,15 @@ export default function CTDetailPage() {
 
   const totalCost = summary?.total_cost || 0;
 
+  // Pre-compute resource-wise grouped data (avoids IIFE inside JSX)
+  const byService: Record<string, any[]> = {};
+  allSpResources.forEach((r: any) => {
+    const svc = r.service || "Other";
+    if (!byService[svc]) byService[svc] = [];
+    byService[svc].push(r);
+  });
+  const serviceKeys = Object.keys(byService).sort();
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
 
@@ -594,16 +603,7 @@ export default function CTDetailPage() {
                       </div>
                     ) : allSpResources.length === 0 ? (
                       <div className="p-10 text-center text-sm text-black">No SP covered resources found for this period.</div>
-                    ) : (() => {
-                      // Group by service
-                      const byService: Record<string, any[]> = {};
-                      allSpResources.forEach((r: any) => {
-                        const svc = r.service || "Other";
-                        if (!byService[svc]) byService[svc] = [];
-                        byService[svc].push(r);
-                      });
-                      const services = Object.keys(byService).sort();
-                      return (
+                    ) : (
                         <table className="w-full">
                           <thead>
                             <tr className="bg-gray-50 border-b border-gray-200">
@@ -613,7 +613,7 @@ export default function CTDetailPage() {
                             </tr>
                           </thead>
                           <tbody>
-                            {services.map((svc) => (
+                            {serviceKeys.map((svc) => (
                               <Fragment key={svc}>
                                 {/* Service category header row */}
                                 <tr className="bg-blue-900">
@@ -666,8 +666,7 @@ export default function CTDetailPage() {
                             </tr>
                           </tbody>
                         </table>
-                      );
-                    })()}
+                    )}
                   </>
                 ) : (
                   /* ── Account-wise true cost view ── */
