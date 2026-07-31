@@ -117,9 +117,12 @@ export default function CTDetailPage() {
   const [accountDropdownOpen, setAccountDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("service");
   const [showTrueCost, setShowTrueCost] = useState(false);
+  const [trueCostView, setTrueCostView] = useState<"account" | "resource">("account");
   const [spResourceModal, setSpResourceModal] = useState<{ accountId: string; accountName: string } | null>(null);
   const [spResources, setSpResources] = useState<any[]>([]);
   const [spResLoading, setSpResLoading] = useState(false);
+  const [allSpResources, setAllSpResources] = useState<any[]>([]);
+  const [allSpResLoading, setAllSpResLoading] = useState(false);
 
   const openSpResources = async (accountId: string, accountName: string) => {
     setSpResourceModal({ accountId, accountName });
@@ -134,7 +137,22 @@ export default function CTDetailPage() {
     finally { setSpResLoading(false); }
   };
 
+  const loadAllSpResources = async () => {
+    if (allSpResources.length > 0) return;
+    setAllSpResLoading(true);
+    try {
+      const accountParam = selectedAccounts.length > 0 ? selectedAccounts.join(",") : undefined;
+      const res = await api.get("/reports/savings/resources", {
+        params: { start_date: startDate, end_date: endDate, ...(accountParam ? { account_ids: accountParam } : {}), limit: 2000 },
+      });
+      setAllSpResources(res.data);
+    } catch (e) { console.error(e); }
+    finally { setAllSpResLoading(false); }
+  };
+
   useEffect(() => { if (!token) router.push("/auth"); }, [token]);
+  // Reset resource-wise cache when filters change
+  useEffect(() => { setAllSpResources([]); }, [startDate, endDate, selectedAccounts]);
 
   const { data: boundary } = useQuery({
     queryKey: ["boundary"],
@@ -351,24 +369,54 @@ export default function CTDetailPage() {
                     Usage + SP amortized cost distributed by usage
                   </span>
                 )}
+                {/* Account / Resource view toggle */}
+                {showTrueCost && (
+                  <div className="flex border border-gray-300 rounded-md overflow-hidden">
+                    <button
+                      onClick={() => setTrueCostView("account")}
+                      className={`px-3 py-1 text-xs font-bold transition ${
+                        trueCostView === "account" ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-gray-50"
+                      }`}>
+                      Account Wise
+                    </button>
+                    <button
+                      onClick={() => { setTrueCostView("resource"); loadAllSpResources(); }}
+                      className={`px-3 py-1 text-xs font-bold border-l border-gray-300 transition ${
+                        trueCostView === "resource" ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-gray-50"
+                      }`}>
+                      Resource Wise
+                    </button>
+                  </div>
+                )}
                 {/* Download button for subaccount table */}
                 <button
                   onClick={async () => {
-                    if (showTrueCost && trueCostData.length > 0) {
-                      // Sheet 1 — True Cost
+                    if (showTrueCost && trueCostView === "resource") {
+                      // Resource-wise XLS download
+                      const data = allSpResources.length > 0 ? allSpResources : await api.get("/reports/savings/resources", {
+                        params: { start_date: startDate, end_date: endDate, ...(selectedAccounts.length > 0 ? { account_ids: selectedAccounts.join(",") } : {}), limit: 2000 },
+                      }).then((r: any) => r.data);
+                      const headers = ["Service", "Resource ID", "Account", "Account ID", "Region", "On-Demand Cost", "SP Allocated (True Cost)", "Savings", "Savings %"];
+                      const rows = (data as any[]).map((r: any) => [
+                        r.service || "—", r.resource_id || "—", r.account_name || "—", r.aws_account_id || "—",
+                        r.region || "—", r.on_demand_cost?.toFixed(2) || "0",
+                        r.sp_allocated_cost?.toFixed(2) || "0", r.savings?.toFixed(2) || "0",
+                        r.savings_pct ? `${r.savings_pct}%` : "0%",
+                      ]);
+                      downloadMultiSheetXls(`true-cost-resource-wise-${ct?.name}-${startDate}-${endDate}.xls`, [
+                        { name: "Resource True Cost", headers, rows },
+                      ]);
+                    } else if (showTrueCost && trueCostData.length > 0) {
                       const tcHeaders = ["Account", "Account ID", "Usage Cost", "SP Allocated", "True Cost", "Savings", "Savings %"];
                       const tcRows = trueCostData
                         .filter((acc: any) => selectedAccounts.length === 0 || selectedAccounts.includes(acc.aws_account_id))
                         .map((acc: any) => [
-                          acc.account_name || "",
-                          acc.aws_account_id,
+                          acc.account_name || "", acc.aws_account_id,
                           acc.usage_cost?.toFixed(2) || "0",
                           acc.is_payer ? `-${acc.sp_fee_distributed?.toFixed(2)}` : (acc.sp_allocated?.toFixed(2) || "0"),
-                          acc.true_cost?.toFixed(2) || "0",
-                          acc.savings?.toFixed(2) || "0",
+                          acc.true_cost?.toFixed(2) || "0", acc.savings?.toFixed(2) || "0",
                           acc.savings_pct ? `${acc.savings_pct}%` : "0%",
                         ]);
-                      // Sheet 2 — SP Resources (fetch all accounts with sp_resources > 0)
                       const accountsWithSp = trueCostData.filter((acc: any) => !acc.is_payer && acc.sp_resources > 0);
                       let spRows: string[][] = [];
                       const spHeaders = ["Account", "Account ID", "Resource ID", "Service", "Region", "On-Demand Cost", "SP Allocated", "Savings", "Savings %"];
@@ -383,15 +431,9 @@ export default function CTDetailPage() {
                         );
                         spRows = results.flatMap(({ accountName, accountId, resources }) =>
                           (resources as any[]).map((r: any) => [
-                            accountName,
-                            accountId,
-                            r.resource_id || "—",
-                            r.service || "—",
-                            r.region || "—",
-                            r.on_demand_cost?.toFixed(2) || "0",
-                            r.sp_allocated_cost?.toFixed(2) || "0",
-                            r.savings?.toFixed(2) || "0",
-                            r.savings_pct ? `${r.savings_pct}%` : "0%",
+                            accountName, accountId, r.resource_id || "—", r.service || "—", r.region || "—",
+                            r.on_demand_cost?.toFixed(2) || "0", r.sp_allocated_cost?.toFixed(2) || "0",
+                            r.savings?.toFixed(2) || "0", r.savings_pct ? `${r.savings_pct}%` : "0%",
                           ])
                         );
                       }
@@ -404,8 +446,7 @@ export default function CTDetailPage() {
                       const rows = (summary.per_account as any[])
                         .filter((acc: any) => selectedAccounts.length === 0 || selectedAccounts.includes(acc.aws_account_id))
                         .map((acc: any) => [
-                          acc.account_name || "Unknown",
-                          acc.aws_account_id,
+                          acc.account_name || "Unknown", acc.aws_account_id,
                           acc.cost?.toFixed(2) || "0",
                           totalCost > 0 ? `${((acc.cost / totalCost) * 100).toFixed(1)}%` : "0%",
                         ]);
@@ -413,7 +454,7 @@ export default function CTDetailPage() {
                     }
                   }}
                   className="flex items-center gap-1.5 px-3 py-1 rounded-md border border-gray-300 text-xs font-bold text-black hover:border-blue-900 hover:text-blue-900 transition bg-white"
-                  title={showTrueCost ? "Download XLS (True Cost + SP Resources)" : "Download CSV"}>
+                  title={showTrueCost ? "Download XLS" : "Download CSV"}>
                   <Download className="w-3.5 h-3.5" /> {showTrueCost ? "XLS" : "CSV"}
                 </button>
               </div>
@@ -544,6 +585,93 @@ export default function CTDetailPage() {
             {/* True cost table */}
             {showTrueCost ? (
               <>
+                {trueCostView === "resource" ? (
+                  /* ── Resource-wise true cost view ── */
+                  <>
+                    {allSpResLoading ? (
+                      <div className="flex items-center justify-center h-32">
+                        <RefreshCw className="w-5 h-5 animate-spin text-blue-900" />
+                      </div>
+                    ) : allSpResources.length === 0 ? (
+                      <div className="p-10 text-center text-sm text-black">No SP covered resources found for this period.</div>
+                    ) : (() => {
+                      // Group by service
+                      const byService: Record<string, any[]> = {};
+                      allSpResources.forEach((r: any) => {
+                        const svc = r.service || "Other";
+                        if (!byService[svc]) byService[svc] = [];
+                        byService[svc].push(r);
+                      });
+                      const services = Object.keys(byService).sort();
+                      return (
+                        <table className="w-full">
+                          <thead>
+                            <tr className="bg-gray-50 border-b border-gray-200">
+                              {["Resource ID", "Account", "Region", "On-Demand Cost", "SP Allocated", "True Cost", "Savings", "Savings %"].map((h) => (
+                                <th key={h} className="text-left text-xs font-bold uppercase tracking-wider text-black px-4 py-3">{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {services.map((svc) => (
+                              <>
+                                {/* Service category header row */}
+                                <tr key={`svc-${svc}`} className="bg-blue-900">
+                                  <td colSpan={8} className="px-4 py-2 text-xs font-bold text-white tracking-wider">
+                                    {svc} <span className="font-normal opacity-75">({byService[svc].length} resources · {fmt(byService[svc].reduce((s: number, r: any) => s + (r.sp_allocated_cost || 0), 0))} true cost)</span>
+                                  </td>
+                                </tr>
+                                {byService[svc].map((r: any, i: number) => (
+                                  <tr key={`${svc}-${i}`} className="border-b border-gray-200 hover:bg-blue-50 transition">
+                                    <td className="px-4 py-2.5 text-xs font-mono font-semibold text-black max-w-[200px] truncate">{r.resource_id}</td>
+                                    <td className="px-4 py-2.5">
+                                      <div className="text-xs font-semibold text-black">{r.account_name}</div>
+                                      <div className="text-[10px] font-mono text-gray-500">{r.aws_account_id}</div>
+                                    </td>
+                                    <td className="px-4 py-2.5 text-xs text-black">{r.region || "—"}</td>
+                                    <td className="px-4 py-2.5 text-xs font-mono text-gray-500">{fmt(r.on_demand_cost)}</td>
+                                    <td className="px-4 py-2.5 text-xs font-bold font-mono text-orange-700">{fmt(r.sp_allocated_cost)}</td>
+                                    {/* True Cost = sp_allocated_cost (what you actually pay) */}
+                                    <td className="px-4 py-2.5 text-xs font-bold font-mono text-blue-900">{fmt(r.sp_allocated_cost)}</td>
+                                    <td className="px-4 py-2.5 text-xs font-bold font-mono text-green-700">{fmt(r.savings)}</td>
+                                    <td className="px-4 py-2.5">
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-14 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                                          <div className="h-full rounded-full bg-green-600" style={{ width: `${Math.min(r.savings_pct, 100)}%` }} />
+                                        </div>
+                                        <span className="text-xs font-bold text-green-700">{r.savings_pct}%</span>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                                {/* Service subtotal */}
+                                <tr key={`sub-${svc}`} className="bg-gray-50 border-b-2 border-gray-300">
+                                  <td className="px-4 py-2 text-xs font-bold text-black" colSpan={3}>Subtotal — {svc}</td>
+                                  <td className="px-4 py-2 text-xs font-bold font-mono text-gray-500">{fmt(byService[svc].reduce((s: number, r: any) => s + (r.on_demand_cost || 0), 0))}</td>
+                                  <td className="px-4 py-2 text-xs font-bold font-mono text-orange-700">{fmt(byService[svc].reduce((s: number, r: any) => s + (r.sp_allocated_cost || 0), 0))}</td>
+                                  <td className="px-4 py-2 text-xs font-bold font-mono text-blue-900">{fmt(byService[svc].reduce((s: number, r: any) => s + (r.sp_allocated_cost || 0), 0))}</td>
+                                  <td className="px-4 py-2 text-xs font-bold font-mono text-green-700">{fmt(byService[svc].reduce((s: number, r: any) => s + (r.savings || 0), 0))}</td>
+                                  <td className="px-4 py-2" />
+                                </tr>
+                              </>
+                            ))}
+                            {/* Grand total */}
+                            <tr className="bg-blue-50 border-t-2 border-blue-900">
+                              <td className="px-4 py-3 text-sm font-bold text-black" colSpan={3}>Grand Total ({allSpResources.length} resources)</td>
+                              <td className="px-4 py-3 text-sm font-bold font-mono text-gray-500">{fmt(allSpResources.reduce((s: number, r: any) => s + (r.on_demand_cost || 0), 0))}</td>
+                              <td className="px-4 py-3 text-sm font-bold font-mono text-orange-700">{fmt(allSpResources.reduce((s: number, r: any) => s + (r.sp_allocated_cost || 0), 0))}</td>
+                              <td className="px-4 py-3 text-sm font-bold font-mono text-blue-900">{fmt(allSpResources.reduce((s: number, r: any) => s + (r.sp_allocated_cost || 0), 0))}</td>
+                              <td className="px-4 py-3 text-sm font-bold font-mono text-green-700">{fmt(allSpResources.reduce((s: number, r: any) => s + (r.savings || 0), 0))}</td>
+                              <td className="px-4 py-3" />
+                            </tr>
+                          </tbody>
+                        </table>
+                      );
+                    })()}
+                  </>
+                ) : (
+                  /* ── Account-wise true cost view ── */
+                  <>
                 {/* Payer account banner */}
                 {spDist?.payer_accounts?.length > 0 && (
                   <div className="mx-5 mt-3 bg-orange-50 border border-orange-200 border-l-4 border-l-orange-500 rounded-lg px-4 py-3">
@@ -666,7 +794,9 @@ export default function CTDetailPage() {
                     )}
                   </tbody>
                 </table>
-              </>
+                </> {/* end account-wise */}
+                )} {/* end trueCostView ternary */}
+              </> {/* end showTrueCost outer fragment */}
             ) : (
             <table className="w-full">
               <thead>

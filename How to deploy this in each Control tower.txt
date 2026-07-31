@@ -1,3 +1,10 @@
+('Automall', 'rilcurmall', 'rilcurmall/rilcurmall26NN')
+('Indostar', 'rilcurstar', 'rilcurstar/rilcurstar26NM')
+('Novac Account', 'finops-daily-billing-report', '/daily-report/daily-report')
+('Novac WonderlendHubs & CreditNirvana', 'rilcur334', 'rilcur334/rilcur334M')
+
+
+
 How to deploy this in each Control Tower management account:
 
 Step 1 — Go to AWS Console of the management account
