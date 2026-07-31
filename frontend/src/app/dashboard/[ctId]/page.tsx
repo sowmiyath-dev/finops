@@ -81,6 +81,26 @@ function downloadCSV(filename: string, rows: string[][]) {
   URL.revokeObjectURL(url);
 }
 
+function downloadMultiSheetXls(filename: string, sheets: { name: string; headers: string[]; rows: string[][] }[]) {
+  const sheetXml = sheets.map((s) => `
+    <Worksheet ss:Name="${s.name}">
+      <Table>
+        <Row>${s.headers.map((h) => `<Cell><Data ss:Type="String">${h}</Data></Cell>`).join("")}</Row>
+        ${s.rows.map((r) => `<Row>${r.map((c) => `<Cell><Data ss:Type="String">${String(c).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</Data></Cell>`).join("")}</Row>`).join("")}
+      </Table>
+    </Worksheet>`).join("");
+  const xml = `<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+  ${sheetXml}
+</Workbook>`;
+  const blob = new Blob([xml], { type: "application/vnd.ms-excel" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function CTDetailPage() {
   const { ctId } = useParams<{ ctId: string }>();
   const { token } = useAuthStore();
@@ -331,12 +351,13 @@ export default function CTDetailPage() {
                     Usage + SP amortized cost distributed by usage
                   </span>
                 )}
-                {/* CSV download for subaccount table */}
+                {/* Download button for subaccount table */}
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     if (showTrueCost && trueCostData.length > 0) {
-                      const headers = ["Account", "Account ID", "Usage Cost", "SP Allocated", "True Cost", "Savings", "Savings %"];
-                      const rows = trueCostData
+                      // Sheet 1 — True Cost
+                      const tcHeaders = ["Account", "Account ID", "Usage Cost", "SP Allocated", "True Cost", "Savings", "Savings %"];
+                      const tcRows = trueCostData
                         .filter((acc: any) => selectedAccounts.length === 0 || selectedAccounts.includes(acc.aws_account_id))
                         .map((acc: any) => [
                           acc.account_name || "",
@@ -347,7 +368,37 @@ export default function CTDetailPage() {
                           acc.savings?.toFixed(2) || "0",
                           acc.savings_pct ? `${acc.savings_pct}%` : "0%",
                         ]);
-                      downloadCSV(`true-cost-${ct?.name}-${startDate}-${endDate}.csv`, [headers, ...rows]);
+                      // Sheet 2 — SP Resources (fetch all accounts with sp_resources > 0)
+                      const accountsWithSp = trueCostData.filter((acc: any) => !acc.is_payer && acc.sp_resources > 0);
+                      let spRows: string[][] = [];
+                      const spHeaders = ["Account", "Account ID", "Resource ID", "Service", "Region", "On-Demand Cost", "SP Allocated", "Savings", "Savings %"];
+                      if (accountsWithSp.length > 0) {
+                        const results = await Promise.all(
+                          accountsWithSp.map((acc: any) =>
+                            api.get("/reports/savings/resources", {
+                              params: { start_date: startDate, end_date: endDate, account_ids: acc.aws_account_id, limit: 1000 },
+                            }).then((r) => ({ accountName: acc.account_name, accountId: acc.aws_account_id, resources: r.data }))
+                            .catch(() => ({ accountName: acc.account_name, accountId: acc.aws_account_id, resources: [] }))
+                          )
+                        );
+                        spRows = results.flatMap(({ accountName, accountId, resources }) =>
+                          (resources as any[]).map((r: any) => [
+                            accountName,
+                            accountId,
+                            r.resource_id || "—",
+                            r.service || "—",
+                            r.region || "—",
+                            r.on_demand_cost?.toFixed(2) || "0",
+                            r.sp_allocated_cost?.toFixed(2) || "0",
+                            r.savings?.toFixed(2) || "0",
+                            r.savings_pct ? `${r.savings_pct}%` : "0%",
+                          ])
+                        );
+                      }
+                      downloadMultiSheetXls(`true-cost-${ct?.name}-${startDate}-${endDate}.xls`, [
+                        { name: "True Cost", headers: tcHeaders, rows: tcRows },
+                        { name: "SP Resources", headers: spHeaders, rows: spRows },
+                      ]);
                     } else if (!showTrueCost && summary?.per_account?.length > 0) {
                       const headers = ["Account", "Account ID", "Cost (USD)", "% of Total"];
                       const rows = (summary.per_account as any[])
@@ -362,8 +413,8 @@ export default function CTDetailPage() {
                     }
                   }}
                   className="flex items-center gap-1.5 px-3 py-1 rounded-md border border-gray-300 text-xs font-bold text-black hover:border-blue-900 hover:text-blue-900 transition bg-white"
-                  title="Download CSV">
-                  <Download className="w-3.5 h-3.5" /> CSV
+                  title={showTrueCost ? "Download XLS (True Cost + SP Resources)" : "Download CSV"}>
+                  <Download className="w-3.5 h-3.5" /> {showTrueCost ? "XLS" : "CSV"}
                 </button>
               </div>
               <div className="flex items-center gap-3">
