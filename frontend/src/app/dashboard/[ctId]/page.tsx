@@ -139,17 +139,12 @@ export default function CTDetailPage() {
     finally { setSpResLoading(false); }
   };
 
-  const loadAllSpResources = async (ctSubAccounts?: any[]) => {
+  const loadAllSpResources = async () => {
     setAllSpResLoading(true);
     try {
-      const accounts = ctSubAccounts || subAccounts;
-      const accountParam = selectedAccounts.length > 0
-        ? selectedAccounts.join(",")
-        : accounts.map((a: any) => a.aws_account_id).join(",");
-      if (!accountParam) return;
-      const res = await api.get("/reports/savings/resources", {
-        params: { ct_id: ctId, start_date: startDate, end_date: endDate, account_ids: accountParam, limit: 2000 },
-      });
+      const params: any = { ct_id: ctId, start_date: startDate, end_date: endDate, limit: 2000 };
+      if (selectedAccounts.length > 0) params.account_ids = selectedAccounts.join(",");
+      const res = await api.get("/reports/savings/resources", { params });
       setAllSpResources(res.data);
     } catch (e) { console.error(e); }
     finally { setAllSpResLoading(false); }
@@ -176,10 +171,10 @@ export default function CTDetailPage() {
   const subAccounts: any[] = ct?.sub_accounts || [];
 
   useEffect(() => {
-    if (trueCostView === "resource" && showTrueCost && allSpResources.length === 0 && subAccounts.length > 0) {
-      loadAllSpResources(subAccounts);
+    if (trueCostView === "resource" && showTrueCost && allSpResources.length === 0) {
+      loadAllSpResources();
     }
-  }, [trueCostView, showTrueCost, allSpResources.length, subAccounts.length]);
+  }, [trueCostView, showTrueCost, allSpResources.length]);
 
   const filter = {
     control_tower_ids: [ctId],
@@ -382,14 +377,9 @@ export default function CTDetailPage() {
                 <button
                   onClick={async () => {
                     if (showTrueCost && trueCostView === "resource") {
-                      const data = allSpResources.length > 0 ? allSpResources : await api.get("/reports/savings/resources", {
-                        params: {
-                          ct_id: ctId,
-                          start_date: startDate, end_date: endDate,
-                          account_ids: selectedAccounts.length > 0 ? selectedAccounts.join(",") : subAccounts.map((a: any) => a.aws_account_id).join(","),
-                          limit: 2000
-                        },
-                      }).then((r: any) => r.data);
+                      const xlsParams: any = { ct_id: ctId, start_date: startDate, end_date: endDate, limit: 2000 };
+                      if (selectedAccounts.length > 0) xlsParams.account_ids = selectedAccounts.join(",");
+                      const data = allSpResources.length > 0 ? allSpResources : await api.get("/reports/savings/resources", { params: xlsParams }).then((r: any) => r.data);
                       const headers = ["Service", "Resource ID", "Account", "Account ID", "Region", "On-Demand Equiv", "SP Allocated", "Uncovered Hours", "True Cost", "Savings", "Savings %"];
                       const rows = (data as any[]).map((r: any) => [
                         r.service || "-", r.resource_id || "-", r.account_name || "-", r.aws_account_id || "-",
