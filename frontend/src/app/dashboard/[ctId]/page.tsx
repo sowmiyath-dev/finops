@@ -118,7 +118,7 @@ export default function CTDetailPage() {
   const [chargeFilterOpen, setChargeFilterOpen] = useState(false);
   const [accountDropdownOpen, setAccountDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("service");
-  const [showTrueCost, setShowTrueCost] = useState(false);
+  const [showTrueCost] = useState(true);
   const [trueCostView, setTrueCostView] = useState<"account" | "resource">("account");
   const [spResourceModal, setSpResourceModal] = useState<{ accountId: string; accountName: string } | null>(null);
   const [spResources, setSpResources] = useState<any[]>([]);
@@ -199,7 +199,7 @@ export default function CTDetailPage() {
     queryFn: () => api.get(`/reports/savings/ct-distribution`, {
       params: { ct_id: ctId, start_date: startDate, end_date: endDate }
     }).then((r) => r.data),
-    enabled: !!token && !!ctId && showTrueCost,
+    enabled: !!token && !!ctId,
     staleTime: 5 * 60 * 1000,
   });
 
@@ -341,46 +341,29 @@ export default function CTDetailPage() {
             <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <h2 className="text-sm font-bold text-black">Subaccount Costs</h2>
-                <button
-                  onClick={() => setShowTrueCost(!showTrueCost)}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border transition ${
-                    showTrueCost
-                      ? "bg-green-700 text-white border-green-700"
-                      : "bg-white text-black border-gray-300 hover:border-green-700 hover:text-green-700"
-                  }`}>
-                  <TrendingDown className="w-3 h-3" />
-                  {showTrueCost ? "True Cost (SP Allocated)" : "Show True Cost"}
-                </button>
-                {showTrueCost && (
-                  <span className="text-[10px] text-gray-500">
-                    Usage + SP amortized cost distributed by usage
-                  </span>
-                )}
-                {showTrueCost && (
-                  <div className="flex border border-gray-300 rounded-md overflow-hidden">
-                    <button
-                      onClick={() => setTrueCostView("account")}
-                      className={`px-3 py-1 text-xs font-bold transition ${
-                        trueCostView === "account" ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-gray-50"
-                      }`}>
-                      Account Wise
-                    </button>
-                    <button
-                      onClick={() => { setAllSpResources([]); setTrueCostView("resource"); }}
-                      className={`px-3 py-1 text-xs font-bold border-l border-gray-300 transition ${
-                        trueCostView === "resource" ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-gray-50"
-                      }`}>
-                      Resource Wise
-                    </button>
-                  </div>
-                )}
+                <div className="flex border border-gray-300 rounded-md overflow-hidden">
+                  <button
+                    onClick={() => setTrueCostView("account")}
+                    className={`px-3 py-1 text-xs font-bold transition ${
+                      trueCostView === "account" ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-gray-50"
+                    }`}>
+                    Account Wise
+                  </button>
+                  <button
+                    onClick={() => { setAllSpResources([]); setTrueCostView("resource"); }}
+                    className={`px-3 py-1 text-xs font-bold border-l border-gray-300 transition ${
+                      trueCostView === "resource" ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-gray-50"
+                    }`}>
+                    Resource Wise
+                  </button>
+                </div>
                 <button
                   onClick={async () => {
-                    if (showTrueCost && trueCostView === "resource") {
+                    if (trueCostView === "resource") {
                       const xlsParams: any = { ct_id: ctId, start_date: startDate, end_date: endDate, limit: 2000 };
                       if (selectedAccounts.length > 0) xlsParams.account_ids = selectedAccounts.join(",");
                       const data = allSpResources.length > 0 ? allSpResources : await api.get("/reports/savings/resources", { params: xlsParams }).then((r: any) => r.data);
-                      const headers = ["Service", "Resource ID", "Instance Type", "Account", "Account ID", "Region", "Usage Time", "On-Demand Equiv", "SP Allocated", "Uncovered Cost", "True Cost", "Savings", "Savings %"];
+                      const headers = ["Service", "Resource ID", "Instance Type", "Account", "Account ID", "Region", "Usage Time", "On-Demand Equiv", "SP Allocated", "Uncovered Cost", "Actual Cost", "Savings", "Savings %"];
                       const rows = (data as any[]).map((r: any) => [
                         r.service || "-", r.resource_id || "-", r.instance_type || "-", r.account_name || "-", r.aws_account_id || "-",
                         r.region || "-", r.total_hours != null ? `${Math.floor(r.total_hours)}h ${Math.round((r.total_hours % 1) * 60)}m` : "-",
@@ -394,7 +377,7 @@ export default function CTDetailPage() {
                       downloadMultiSheetXls(`true-cost-resource-wise-${ct?.name}-${startDate}-${endDate}.xls`, [
                         { name: "Resource True Cost", headers, rows },
                       ]);
-                    } else if (showTrueCost && trueCostData.length > 0) {
+                    } else if (trueCostData.length > 0) {
                       const tcHeaders = ["Account", "Account ID", "Usage Cost", "SP Allocated", "True Cost", "Savings", "Savings %"];
                       const tcRows = trueCostData
                         .filter((acc: any) => selectedAccounts.length === 0 || selectedAccounts.includes(acc.aws_account_id))
@@ -429,7 +412,7 @@ export default function CTDetailPage() {
                         { name: "True Cost", headers: tcHeaders, rows: tcRows },
                         { name: "SP Resources", headers: spHeaders, rows: spRows },
                       ]);
-                    } else if (!showTrueCost && summary?.per_account?.length > 0) {
+                    } else if (summary?.per_account?.length > 0) {
                       const headers = ["Account", "Account ID", "Cost (USD)", "% of Total"];
                       const rows = (summary.per_account as any[])
                         .filter((acc: any) => selectedAccounts.length === 0 || selectedAccounts.includes(acc.aws_account_id))
@@ -442,8 +425,8 @@ export default function CTDetailPage() {
                     }
                   }}
                   className="flex items-center gap-1.5 px-3 py-1 rounded-md border border-gray-300 text-xs font-bold text-black hover:border-blue-900 hover:text-blue-900 transition bg-white"
-                  title={showTrueCost ? "Download XLS" : "Download CSV"}>
-                  <Download className="w-3.5 h-3.5" /> {showTrueCost ? "XLS" : "CSV"}
+                  title="Download XLS">
+                  <Download className="w-3.5 h-3.5" /> XLS
                 </button>
               </div>
               <div className="flex items-center gap-3">
@@ -568,9 +551,7 @@ export default function CTDetailPage() {
               </div>
             </div>
 
-            {showTrueCost ? (
-              <>
-                {trueCostView === "resource" ? (
+            {trueCostView === "resource" ? (
                   <>
                     {allSpResLoading ? (
                       <div className="flex items-center justify-center h-32">
@@ -582,7 +563,7 @@ export default function CTDetailPage() {
                       <table className="w-full">
                         <thead>
                           <tr className="bg-gray-50 border-b border-gray-200">
-                            {["Resource ID", "Instance Type", "Account", "Region", "Usage Time", "On-Demand Equiv", "SP Allocated", "Uncovered Cost", "True Cost", "Savings", "Savings %"].map((h) => (
+                            {["Resource ID", "Instance Type", "Account", "Region", "Usage Time", "On-Demand Equiv", "SP Allocated", "Uncovered Cost", "Actual Cost", "Savings", "Savings %"].map((h) => (
                               <th key={h} className="text-left text-xs font-bold uppercase tracking-wider text-black px-4 py-3">{h}</th>
                             ))}
                           </tr>
@@ -651,9 +632,9 @@ export default function CTDetailPage() {
                       </table>
                     )}
                   </>
-                ) : (
-                  <>
-                    {spDist?.payer_accounts?.length > 0 && (
+            ) : (
+              <>
+                {spDist?.payer_accounts?.length > 0 && (
                       <div className="mx-5 mt-3 bg-orange-50 border border-orange-200 border-l-4 border-l-orange-500 rounded-lg px-4 py-3">
                         <div className="flex items-center gap-2 flex-wrap">
                           <TrendingDown className="w-4 h-4 text-orange-600 flex-shrink-0" />
@@ -671,143 +652,102 @@ export default function CTDetailPage() {
                         </div>
                       </div>
                     )}
-                    <table className="w-full mt-2">
-                      <thead>
-                        <tr className="bg-gray-50 border-b border-gray-200">
-                          {["Account", "Account ID", "Usage Cost", "SP Allocated", "True Cost", "Savings", "Savings %", "SP Resources"].map((h) => (
-                            <th key={h} className="text-left text-xs font-bold uppercase tracking-wider text-black px-5 py-3">{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {trueCostLoading ? (
-                          <tr><td colSpan={8} className="px-5 py-8 text-center">
-                            <RefreshCw className="w-5 h-5 animate-spin text-blue-900 mx-auto" />
-                          </td></tr>
-                        ) : (
-                          trueCostData
-                            .filter((acc: any) => selectedAccounts.length === 0 || selectedAccounts.includes(acc.aws_account_id))
-                            .map((acc: any) => (
-                              <tr key={acc.aws_account_id}
-                                className={`border-b border-gray-200 transition ${
-                                  acc.is_payer ? "bg-orange-50 hover:bg-orange-100" : "hover:bg-blue-50"
-                                }`}>
-                                <td className="px-5 py-3">
-                                  <div className="flex items-center gap-2">
-                                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-white ${
-                                      acc.is_payer ? "bg-orange-600" : "bg-blue-900"
-                                    }`}>
-                                      {(acc.account_name || "?")[0].toUpperCase()}
-                                    </div>
-                                    <div>
-                                      <span className="text-sm font-bold text-black">{acc.account_name}</span>
-                                      {acc.is_payer && (
-                                        <div className="text-[10px] text-orange-700 font-semibold">
-                                          SP fee {fmt(acc.sp_fee_distributed)} distributed to sub-accounts
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                </td>
-                                <td className="px-5 py-3 text-xs font-mono font-semibold text-black">{acc.aws_account_id}</td>
-                                <td className="px-5 py-3 text-sm font-mono font-semibold text-black">{fmt(acc.usage_cost)}</td>
-                                <td className="px-5 py-3">
-                                  {acc.is_payer ? (
-                                    <span className="text-xs font-bold text-orange-700 bg-orange-100 px-2 py-0.5 rounded">
-                                      -{fmt(acc.sp_fee_distributed)} distributed
-                                    </span>
-                                  ) : acc.sp_allocated > 0 ? (
-                                    <div>
-                                      <span className="text-sm font-bold font-mono text-orange-700">+{fmt(acc.sp_allocated)}</span>
-                                      <div className="text-[10px] text-gray-500">{acc.sp_share_pct}% of SP pool</div>
-                                    </div>
-                                  ) : <span className="text-xs text-gray-400">-</span>}
-                                </td>
-                                <td className="px-5 py-3">
-                                  <span className="text-sm font-bold font-mono text-blue-900">{fmt(acc.true_cost)}</span>
-                                </td>
-                                <td className="px-5 py-3">
-                                  {!acc.is_payer && acc.savings > 0
-                                    ? <span className="text-sm font-bold font-mono text-green-700">{fmt(acc.savings)}</span>
-                                    : <span className="text-xs text-gray-400">-</span>}
-                                </td>
-                                <td className="px-5 py-3">
-                                  {!acc.is_payer && acc.savings_pct > 0 ? (
-                                    <div className="flex items-center gap-2">
-                                      <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
-                                        <div className="h-full rounded-full bg-green-600" style={{ width: `${Math.min(acc.savings_pct, 100)}%` }} />
-                                      </div>
-                                      <span className="text-xs font-bold text-green-700">{acc.savings_pct}%</span>
-                                    </div>
-                                  ) : <span className="text-xs text-gray-400">-</span>}
-                                </td>
-                                <td className="px-5 py-3 text-sm font-semibold text-black">
-                                  {!acc.is_payer && acc.sp_resources > 0 ? (
-                                    <button
-                                      onClick={() => openSpResources(acc.aws_account_id, acc.account_name)}
-                                      className="flex items-center gap-1.5 text-xs font-bold text-blue-900 hover:underline">
-                                      {acc.sp_resources.toLocaleString()} resources
-                                      <ChevronRight className="w-3 h-3" />
-                                    </button>
-                                  ) : "-"}
-                                </td>
-                              </tr>
-                            ))
-                        )}
-                        {!trueCostLoading && spDist && (
-                          <tr className="bg-gray-50 border-t-2 border-gray-300">
-                            <td className="px-5 py-3 text-sm font-bold text-black" colSpan={2}>Total</td>
-                            <td className="px-5 py-3 text-sm font-bold font-mono text-black">{fmt(spDist.total_usage_cost || 0)}</td>
-                            <td className="px-5 py-3 text-sm font-bold font-mono text-orange-700">+{fmt(spDist.total_sp_allocated)}</td>
-                            <td className="px-5 py-3 text-sm font-bold font-mono text-blue-900">{fmt(spDist.total_true_cost)}</td>
-                            <td className="px-5 py-3 text-sm font-bold font-mono text-green-700">{fmt(spDist.total_savings)}</td>
-                            <td className="px-5 py-3" colSpan={2} />
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </>
-                )}
-              </>
-            ) : (
-              <table className="w-full">
-                <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200">
-                    {["Account", "Account ID", "Cost", "% of Total"].map((h) => (
+                <table className="w-full mt-2">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      {["Account", "Account ID", "Usage Cost", "SP Allocated", "Actual Cost", "Savings", "Savings %", "SP Resources"].map((h) => (
                       <th key={h} className="text-left text-xs font-bold uppercase tracking-wider text-black px-5 py-3">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {(summary?.per_account || [])
-                    .filter((acc: any) => selectedAccounts.length === 0 || selectedAccounts.includes(acc.aws_account_id))
-                    .map((acc: any) => {
-                      const pct = totalCost > 0 ? (acc.cost / totalCost) * 100 : 0;
-                      return (
-                        <tr key={acc.aws_account_id} className="border-b border-gray-200 hover:bg-blue-50 transition">
+                  {trueCostLoading ? (
+                    <tr><td colSpan={8} className="px-5 py-8 text-center">
+                      <RefreshCw className="w-5 h-5 animate-spin text-blue-900 mx-auto" />
+                    </td></tr>
+                  ) : (
+                    trueCostData
+                      .filter((acc: any) => selectedAccounts.length === 0 || selectedAccounts.includes(acc.aws_account_id))
+                      .map((acc: any) => (
+                        <tr key={acc.aws_account_id}
+                          className={`border-b border-gray-200 transition ${
+                            acc.is_payer ? "bg-orange-50 hover:bg-orange-100" : "hover:bg-blue-50"
+                          }`}>
                           <td className="px-5 py-3">
                             <div className="flex items-center gap-2">
-                              <div className="w-7 h-7 rounded-lg bg-blue-900 flex items-center justify-center text-xs font-bold text-white">
+                              <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-white ${
+                                acc.is_payer ? "bg-orange-600" : "bg-blue-900"
+                              }`}>
                                 {(acc.account_name || "?")[0].toUpperCase()}
                               </div>
-                              <span className="text-sm font-bold text-black">{acc.account_name || "Unknown"}</span>
+                              <div>
+                                <span className="text-sm font-bold text-black">{acc.account_name}</span>
+                                {acc.is_payer && (
+                                  <div className="text-[10px] text-orange-700 font-semibold">
+                                    SP fee {fmt(acc.sp_fee_distributed)} distributed to sub-accounts
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </td>
                           <td className="px-5 py-3 text-xs font-mono font-semibold text-black">{acc.aws_account_id}</td>
-                          <td className="px-5 py-3 text-sm font-bold font-mono text-blue-900">{fmt(acc.cost)}</td>
+                          <td className="px-5 py-3 text-sm font-mono font-semibold text-black">{fmt(acc.usage_cost)}</td>
                           <td className="px-5 py-3">
-                            <div className="flex items-center gap-2">
-                              <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
-                                <div className="h-full rounded-full bg-blue-900" style={{ width: `${pct}%` }} />
+                            {acc.is_payer ? (
+                              <span className="text-xs font-bold text-orange-700 bg-orange-100 px-2 py-0.5 rounded">
+                                -{fmt(acc.sp_fee_distributed)} distributed
+                              </span>
+                            ) : acc.sp_allocated > 0 ? (
+                              <div>
+                                <span className="text-sm font-bold font-mono text-orange-700">+{fmt(acc.sp_allocated)}</span>
+                                <div className="text-[10px] text-gray-500">{acc.sp_share_pct}% of SP pool</div>
                               </div>
-                              <span className="text-xs font-bold text-black">{pct.toFixed(1)}%</span>
-                            </div>
+                            ) : <span className="text-xs text-gray-400">-</span>}
+                          </td>
+                          <td className="px-5 py-3">
+                            <span className="text-sm font-bold font-mono text-blue-900">{fmt(acc.true_cost)}</span>
+                          </td>
+                          <td className="px-5 py-3">
+                            {!acc.is_payer && acc.savings > 0
+                              ? <span className="text-sm font-bold font-mono text-green-700">{fmt(acc.savings)}</span>
+                              : <span className="text-xs text-gray-400">-</span>}
+                          </td>
+                          <td className="px-5 py-3">
+                            {!acc.is_payer && acc.savings_pct > 0 ? (
+                              <div className="flex items-center gap-2">
+                                <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                  <div className="h-full rounded-full bg-green-600" style={{ width: `${Math.min(acc.savings_pct, 100)}%` }} />
+                                </div>
+                                <span className="text-xs font-bold text-green-700">{acc.savings_pct}%</span>
+                              </div>
+                            ) : <span className="text-xs text-gray-400">-</span>}
+                          </td>
+                          <td className="px-5 py-3 text-sm font-semibold text-black">
+                            {!acc.is_payer && acc.sp_resources > 0 ? (
+                              <button
+                                onClick={() => openSpResources(acc.aws_account_id, acc.account_name)}
+                                className="flex items-center gap-1.5 text-xs font-bold text-blue-900 hover:underline">
+                                {acc.sp_resources.toLocaleString()} resources
+                                <ChevronRight className="w-3 h-3" />
+                              </button>
+                            ) : "-"}
                           </td>
                         </tr>
-                      );
-                    })}
+                      ))
+                  )}
+                  {!trueCostLoading && spDist && (
+                    <tr className="bg-gray-50 border-t-2 border-gray-300">
+                      <td className="px-5 py-3 text-sm font-bold text-black" colSpan={2}>Total</td>
+                      <td className="px-5 py-3 text-sm font-bold font-mono text-black">{fmt(spDist.total_usage_cost || 0)}</td>
+                      <td className="px-5 py-3 text-sm font-bold font-mono text-orange-700">+{fmt(spDist.total_sp_allocated)}</td>
+                      <td className="px-5 py-3 text-sm font-bold font-mono text-blue-900">{fmt(spDist.total_true_cost)}</td>
+                      <td className="px-5 py-3 text-sm font-bold font-mono text-green-700">{fmt(spDist.total_savings)}</td>
+                      <td className="px-5 py-3" colSpan={2} />
+                    </tr>
+                  )}
                 </tbody>
               </table>
+            </>
             )}
           </div>
 
@@ -830,16 +770,16 @@ export default function CTDetailPage() {
                 <button
                   onClick={() => {
                     if (activeTab === "service") {
-                      const headers = ["Service", "Cost (USD)"];
-                      const rows = (tabData as any[]).map((r: any) => [r.service || "-", r.cost?.toFixed(2) || "0"]);
+                      const headers = ["Service", "Usage Cost (USD)", "Actual Cost (USD)"];
+                      const rows = (tabData as any[]).map((r: any) => [r.service || "-", r.usage_cost?.toFixed(2) || "0", r.actual_cost?.toFixed(2) || "0"]);
                       downloadCSV(`service-wise-${ct?.name}-${startDate}-${endDate}.csv`, [headers, ...rows]);
                     } else if (activeTab === "resource") {
-                      const headers = ["Resource ID", "Service", "Region", "Cost (USD)"];
-                      const rows = (tabData as any[]).map((r: any) => [r.resource_id || "-", r.service || "-", r.region || "-", r.cost?.toFixed(2) || "0"]);
+                      const headers = ["Resource ID", "Service", "Region", "Usage Cost (USD)", "Actual Cost (USD)"];
+                      const rows = (tabData as any[]).map((r: any) => [r.resource_id || "-", r.service || "-", r.region || "-", r.usage_cost?.toFixed(2) || "0", r.actual_cost?.toFixed(2) || "0"]);
                       downloadCSV(`resource-wise-${ct?.name}-${startDate}-${endDate}.csv`, [headers, ...rows]);
                     } else {
-                      const headers = ["Tag Key", "Tag Value", "Cost (USD)"];
-                      const rows = (tabData as any[]).map((r: any) => [r.tag_key || "-", r.tag_value || "(untagged)", r.cost?.toFixed(2) || "0"]);
+                      const headers = ["Tag Key", "Tag Value", "Usage Cost (USD)", "Actual Cost (USD)"];
+                      const rows = (tabData as any[]).map((r: any) => [r.tag_key || "-", r.tag_value || "(untagged)", r.usage_cost?.toFixed(2) || "0", r.actual_cost?.toFixed(2) || "0"]);
                       downloadCSV(`tag-wise-${ct?.name}-${startDate}-${endDate}.csv`, [headers, ...rows]);
                     }
                   }}
@@ -898,7 +838,8 @@ export default function CTDetailPage() {
                             <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Tag Value</th>
                           </>
                         )}
-                        <th className="text-right text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Cost (USD)</th>
+                        <th className="text-right text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Usage Cost</th>
+                        <th className="text-right text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Actual Cost</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -920,8 +861,14 @@ export default function CTDetailPage() {
                               <td className="px-4 py-2.5 text-sm text-black">{row.tag_value || "(untagged)"}</td>
                             </>
                           )}
-                          <td className="px-4 py-2.5 text-right text-sm font-bold font-mono text-blue-900">
-                            {fmt(row.cost)}
+                          <td className="px-4 py-2.5 text-right text-sm font-mono text-gray-500">
+                            {fmt(row.usage_cost ?? row.cost)}
+                          </td>
+                          <td className={`px-4 py-2.5 text-right text-sm font-bold font-mono ${
+                            row.has_sp ? "text-orange-700 bg-orange-50" : "text-blue-900"
+                          }`}>
+                            {fmt(row.actual_cost ?? row.cost)}
+                            {row.has_sp && <div className="text-[10px] font-normal text-orange-500">incl. SP</div>}
                           </td>
                         </tr>
                       ))}

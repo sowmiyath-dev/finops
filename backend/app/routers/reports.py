@@ -212,7 +212,7 @@ async def service_wise(f: ReportFilter, db: AsyncSession = Depends(get_db), user
     ct_ids = await _get_user_ct_ids(db, user)
     if not ct_ids:
         return []
-    metric_col = METRIC_MAP.get(f.metric, CostRecord.unblended_cost)
+    from sqlalchemy import case, literal
     conditions = _build_filters(f, ct_ids)
 
     group_cols = [CostRecord.service]
@@ -221,18 +221,43 @@ async def service_wise(f: ReportFilter, db: AsyncSession = Depends(get_db), user
     if f.granularity == "daily":
         group_cols.append(CostRecord.date)
 
+    # usage_cost = unblended for Usage/DiscountedUsage/RIFee rows
+    usage_cost_expr = func.sum(
+        case(
+            (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
+            else_=literal(0),
+        )
+    ).label("usage_cost")
+
+    # actual_cost = usage + SP amortized (true cost)
+    actual_cost_expr = func.sum(
+        case(
+            (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.amortized_cost),
+            (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
+            else_=literal(0),
+        )
+    ).label("actual_cost")
+
     stmt = (
-        select(*group_cols, func.sum(metric_col).label("cost"))
+        select(*group_cols, usage_cost_expr, actual_cost_expr)
         .where(and_(*conditions))
         .group_by(*group_cols)
-        .order_by(func.sum(metric_col).desc())
+        .order_by(actual_cost_expr.desc())
     )
     result = await db.execute(stmt)
     rows = result.all()
 
     data = []
     for row in rows:
-        item = {"service": row.service, "cost": float(row.cost or 0)}
+        usage = float(row.usage_cost or 0)
+        actual = float(row.actual_cost or 0)
+        item = {
+            "service": row.service,
+            "cost": actual,  # keep for backward compat
+            "usage_cost": round(usage, 4),
+            "actual_cost": round(actual, 4),
+            "has_sp": actual != usage,
+        }
         if f.account_ids:
             item["aws_account_id"] = row.aws_account_id
         if f.granularity == "daily":
@@ -248,13 +273,26 @@ async def resource_wise(f: ReportFilter, db: AsyncSession = Depends(get_db), use
     ct_ids = await _get_user_ct_ids(db, user)
     if not ct_ids:
         return []
-    metric_col = METRIC_MAP.get(f.metric, CostRecord.unblended_cost)
+    from sqlalchemy import case, literal
     conditions = _build_filters(f, ct_ids)
     conditions.append(CostRecord.resource_id.isnot(None))
     conditions.append(CostRecord.resource_id != "")
 
-    # Always group by resource_id + service + account only
-    # Sum all usage types and all days into one total per resource
+    usage_cost_expr = func.sum(
+        case(
+            (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
+            else_=literal(0),
+        )
+    ).label("usage_cost")
+
+    actual_cost_expr = func.sum(
+        case(
+            (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.amortized_cost),
+            (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
+            else_=literal(0),
+        )
+    ).label("actual_cost")
+
     stmt = (
         select(
             CostRecord.resource_id,
@@ -262,17 +300,15 @@ async def resource_wise(f: ReportFilter, db: AsyncSession = Depends(get_db), use
             CostRecord.aws_account_id,
             CostRecord.account_name,
             CostRecord.region,
-            func.sum(metric_col).label("cost"),
+            usage_cost_expr,
+            actual_cost_expr,
         )
         .where(and_(*conditions))
         .group_by(
-            CostRecord.resource_id,
-            CostRecord.service,
-            CostRecord.aws_account_id,
-            CostRecord.account_name,
-            CostRecord.region,
+            CostRecord.resource_id, CostRecord.service,
+            CostRecord.aws_account_id, CostRecord.account_name, CostRecord.region,
         )
-        .order_by(func.sum(metric_col).desc())
+        .order_by(actual_cost_expr.desc())
         .limit(500)
     )
     result = await db.execute(stmt)
@@ -285,7 +321,10 @@ async def resource_wise(f: ReportFilter, db: AsyncSession = Depends(get_db), use
             "aws_account_id": row.aws_account_id,
             "account_name": row.account_name or "",
             "region": row.region or "",
-            "cost": float(row.cost or 0),
+            "cost": float(row.actual_cost or 0),  # backward compat
+            "usage_cost": round(float(row.usage_cost or 0), 4),
+            "actual_cost": round(float(row.actual_cost or 0), 4),
+            "has_sp": round(float(row.actual_cost or 0), 4) != round(float(row.usage_cost or 0), 4),
         }
         for row in rows
     ]
@@ -298,15 +337,30 @@ async def tag_wise(f: ReportFilter, db: AsyncSession = Depends(get_db), user: Us
     ct_ids = await _get_user_ct_ids(db, user)
     if not ct_ids:
         return []
-    metric_col = METRIC_MAP.get(f.metric, CostRecord.unblended_cost)
+    from sqlalchemy import case, literal
     conditions = _build_filters(f, ct_ids)
     conditions.append(CostRecord.tags.isnot(None))
 
+    usage_cost_expr = func.sum(
+        case(
+            (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
+            else_=literal(0),
+        )
+    ).label("usage_cost")
+
+    actual_cost_expr = func.sum(
+        case(
+            (CostRecord.line_item_type == "SavingsPlanCoveredUsage", CostRecord.amortized_cost),
+            (CostRecord.line_item_type.in_(["Usage", "DiscountedUsage", "RIFee"]), CostRecord.unblended_cost),
+            else_=literal(0),
+        )
+    ).label("actual_cost")
+
     stmt = (
-        select(CostRecord.tags, CostRecord.aws_account_id, func.sum(metric_col).label("cost"))
+        select(CostRecord.tags, CostRecord.aws_account_id, usage_cost_expr, actual_cost_expr)
         .where(and_(*conditions))
         .group_by(CostRecord.tags, CostRecord.aws_account_id)
-        .order_by(func.sum(metric_col).desc())
+        .order_by(actual_cost_expr.desc())
     )
     result = await db.execute(stmt)
     rows = result.all()
@@ -318,11 +372,16 @@ async def tag_wise(f: ReportFilter, db: AsyncSession = Depends(get_db), user: Us
         except Exception:
             tags_dict = {}
         tag_val = tags_dict.get(f.tag_key, "") if f.tag_key else str(tags_dict)
+        usage = float(row.usage_cost or 0)
+        actual = float(row.actual_cost or 0)
         data.append({
             "tag_key": f.tag_key or "all",
             "tag_value": tag_val,
             "aws_account_id": row.aws_account_id,
-            "cost": float(row.cost or 0),
+            "cost": actual,  # backward compat
+            "usage_cost": round(usage, 4),
+            "actual_cost": round(actual, 4),
+            "has_sp": actual != usage,
         })
     return data
 
