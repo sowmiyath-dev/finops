@@ -380,10 +380,11 @@ export default function CTDetailPage() {
                       const xlsParams: any = { ct_id: ctId, start_date: startDate, end_date: endDate, limit: 2000 };
                       if (selectedAccounts.length > 0) xlsParams.account_ids = selectedAccounts.join(",");
                       const data = allSpResources.length > 0 ? allSpResources : await api.get("/reports/savings/resources", { params: xlsParams }).then((r: any) => r.data);
-                      const headers = ["Service", "Resource ID", "Account", "Account ID", "Region", "On-Demand Equiv", "SP Allocated", "Uncovered Hours", "True Cost", "Savings", "Savings %"];
+                      const headers = ["Service", "Resource ID", "Account", "Account ID", "Region", "Used Hours", "On-Demand Equiv", "SP Allocated", "Uncovered Hours", "True Cost", "Savings", "Savings %"];
                       const rows = (data as any[]).map((r: any) => [
                         r.service || "-", r.resource_id || "-", r.account_name || "-", r.aws_account_id || "-",
-                        r.region || "-", r.on_demand_cost?.toFixed(2) || "0",
+                        r.region || "-", r.total_hours?.toFixed(2) || "0",
+                        r.on_demand_cost?.toFixed(2) || "0",
                         r.sp_allocated_cost?.toFixed(2) || "0",
                         r.uncovered_cost?.toFixed(2) || "0",
                         r.true_cost?.toFixed(2) || "0",
@@ -581,7 +582,7 @@ export default function CTDetailPage() {
                       <table className="w-full">
                         <thead>
                           <tr className="bg-gray-50 border-b border-gray-200">
-                            {["Resource ID", "Account", "Region", "On-Demand Equiv", "SP Allocated", "Uncovered Hours", "True Cost", "Savings", "Savings %"].map((h) => (
+                            {["Resource ID", "Account", "Region", "Used Hours", "On-Demand Equiv", "SP Allocated", "Uncovered Hours", "True Cost", "Savings", "Savings %"].map((h) => (
                               <th key={h} className="text-left text-xs font-bold uppercase tracking-wider text-black px-4 py-3">{h}</th>
                             ))}
                           </tr>
@@ -590,7 +591,7 @@ export default function CTDetailPage() {
                           {serviceKeys.map((svc) => (
                             <Fragment key={svc}>
                               <tr className="bg-blue-900">
-                                <td colSpan={9} className="px-4 py-2 text-xs font-bold text-white tracking-wider">
+                                <td colSpan={10} className="px-4 py-2 text-xs font-bold text-white tracking-wider">
                                   {svc} <span className="font-normal opacity-75">({byService[svc].length} resources - {fmt(byService[svc].reduce((s: number, r: any) => s + (r.true_cost || 0), 0))} true cost)</span>
                                 </td>
                               </tr>
@@ -602,6 +603,7 @@ export default function CTDetailPage() {
                                     <div className="text-[10px] font-mono text-gray-500">{r.aws_account_id}</div>
                                   </td>
                                   <td className="px-4 py-2.5 text-xs text-black">{r.region || "-"}</td>
+                                  <td className="px-4 py-2.5 text-xs font-mono text-gray-600">{r.total_hours != null ? r.total_hours.toFixed(1) + " hrs" : "-"}</td>
                                   <td className="px-4 py-2.5 text-xs font-mono text-gray-500">{fmt(r.on_demand_cost)}</td>
                                   <td className="px-4 py-2.5 text-xs font-bold font-mono text-orange-700">{fmt(r.sp_allocated_cost)}</td>
                                   <td className="px-4 py-2.5 text-xs font-mono text-red-600">
@@ -621,6 +623,7 @@ export default function CTDetailPage() {
                               ))}
                               <tr className="bg-gray-50 border-b-2 border-gray-300">
                                 <td className="px-4 py-2 text-xs font-bold text-black" colSpan={3}>Subtotal - {svc}</td>
+                                <td className="px-4 py-2 text-xs font-bold font-mono text-gray-600">{byService[svc].reduce((s: number, r: any) => s + (r.total_hours || 0), 0).toFixed(1)} hrs</td>
                                 <td className="px-4 py-2 text-xs font-bold font-mono text-gray-500">{fmt(byService[svc].reduce((s: number, r: any) => s + (r.on_demand_cost || 0), 0))}</td>
                                 <td className="px-4 py-2 text-xs font-bold font-mono text-orange-700">{fmt(byService[svc].reduce((s: number, r: any) => s + (r.sp_allocated_cost || 0), 0))}</td>
                                 <td className="px-4 py-2 text-xs font-bold font-mono text-red-600">{fmt(byService[svc].reduce((s: number, r: any) => s + (r.uncovered_cost || 0), 0))}</td>

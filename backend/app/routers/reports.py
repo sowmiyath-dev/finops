@@ -924,6 +924,7 @@ async def savings_resources(
             CostRecord.region,
             func.sum(CostRecord.unblended_cost).label("sp_on_demand_cost"),
             func.sum(CostRecord.amortized_cost).label("sp_allocated_cost"),
+            func.sum(CostRecord.usage_quantity).label("sp_hours"),
         )
         .where(and_(*base, CostRecord.line_item_type == "SavingsPlanCoveredUsage"))
         .group_by(
@@ -945,6 +946,7 @@ async def savings_resources(
             CostRecord.resource_id,
             CostRecord.aws_account_id,
             func.sum(CostRecord.unblended_cost).label("uncovered_cost"),
+            func.sum(CostRecord.usage_quantity).label("usage_hours"),
         )
         .where(and_(
             *base,
@@ -954,9 +956,12 @@ async def savings_resources(
         .group_by(CostRecord.resource_id, CostRecord.aws_account_id)
     )).all()
 
-    # Build lookup: (resource_id, account_id) -> uncovered_cost
+    # Build lookup: (resource_id, account_id) -> (uncovered_cost, usage_hours)
     usage_map = {
-        (r.resource_id, r.aws_account_id): float(r.uncovered_cost or 0)
+        (r.resource_id, r.aws_account_id): (
+            float(r.uncovered_cost or 0),
+            float(r.usage_hours or 0),
+        )
         for r in usage_rows
     }
 
@@ -964,7 +969,8 @@ async def savings_resources(
     for r in sp_rows:
         sp_on_demand  = float(r.sp_on_demand_cost or 0)
         sp_allocated  = float(r.sp_allocated_cost or 0)
-        uncovered     = usage_map.get((r.resource_id, r.aws_account_id), 0.0)
+        uncovered, usage_hrs = usage_map.get((r.resource_id, r.aws_account_id), (0.0, 0.0))
+        total_hours   = float(r.sp_hours or 0) + usage_hrs
         true_cost     = sp_allocated + uncovered
         savings       = sp_on_demand - sp_allocated  # savings only on SP-covered portion
         on_demand_total = sp_on_demand + uncovered   # full on-demand equivalent
@@ -978,6 +984,7 @@ async def savings_resources(
             "sp_on_demand_cost": round(sp_on_demand, 4),   # what SP hours would cost on-demand
             "sp_allocated_cost": round(sp_allocated, 4),   # actual SP cost (amortized)
             "uncovered_cost":    round(uncovered, 4),       # hours beyond SP at on-demand rate
+            "total_hours":       round(total_hours, 2),      # total usage hours (SP + uncovered)
             "true_cost":         round(true_cost, 4),       # sp_allocated + uncovered
             "on_demand_cost":    round(on_demand_total, 4), # full on-demand equivalent (for savings %)
             "savings":           round(savings, 4),
