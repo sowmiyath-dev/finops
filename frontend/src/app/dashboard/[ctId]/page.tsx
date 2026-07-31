@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, Fragment } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/authStore";
@@ -614,15 +614,15 @@ export default function CTDetailPage() {
                           </thead>
                           <tbody>
                             {services.map((svc) => (
-                              <>
+                              <Fragment key={svc}>
                                 {/* Service category header row */}
-                                <tr key={`svc-${svc}`} className="bg-blue-900">
+                                <tr className="bg-blue-900">
                                   <td colSpan={8} className="px-4 py-2 text-xs font-bold text-white tracking-wider">
                                     {svc} <span className="font-normal opacity-75">({byService[svc].length} resources · {fmt(byService[svc].reduce((s: number, r: any) => s + (r.sp_allocated_cost || 0), 0))} true cost)</span>
                                   </td>
                                 </tr>
                                 {byService[svc].map((r: any, i: number) => (
-                                  <tr key={`${svc}-${i}`} className="border-b border-gray-200 hover:bg-blue-50 transition">
+                                  <tr key={i} className="border-b border-gray-200 hover:bg-blue-50 transition">
                                     <td className="px-4 py-2.5 text-xs font-mono font-semibold text-black max-w-[200px] truncate">{r.resource_id}</td>
                                     <td className="px-4 py-2.5">
                                       <div className="text-xs font-semibold text-black">{r.account_name}</div>
@@ -645,7 +645,7 @@ export default function CTDetailPage() {
                                   </tr>
                                 ))}
                                 {/* Service subtotal */}
-                                <tr key={`sub-${svc}`} className="bg-gray-50 border-b-2 border-gray-300">
+                                <tr className="bg-gray-50 border-b-2 border-gray-300">
                                   <td className="px-4 py-2 text-xs font-bold text-black" colSpan={3}>Subtotal — {svc}</td>
                                   <td className="px-4 py-2 text-xs font-bold font-mono text-gray-500">{fmt(byService[svc].reduce((s: number, r: any) => s + (r.on_demand_cost || 0), 0))}</td>
                                   <td className="px-4 py-2 text-xs font-bold font-mono text-orange-700">{fmt(byService[svc].reduce((s: number, r: any) => s + (r.sp_allocated_cost || 0), 0))}</td>
@@ -653,7 +653,7 @@ export default function CTDetailPage() {
                                   <td className="px-4 py-2 text-xs font-bold font-mono text-green-700">{fmt(byService[svc].reduce((s: number, r: any) => s + (r.savings || 0), 0))}</td>
                                   <td className="px-4 py-2" />
                                 </tr>
-                              </>
+                              </Fragment>
                             ))}
                             {/* Grand total */}
                             <tr className="bg-blue-50 border-t-2 border-blue-900">
