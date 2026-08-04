@@ -170,11 +170,8 @@ export default function CTDetailPage() {
   const ct = towers.find((t: any) => t.id === ctId);
   const subAccounts: any[] = ct?.sub_accounts || [];
 
-  useEffect(() => {
-    if (trueCostView === "resource" && showTrueCost && allSpResources.length === 0) {
-      loadAllSpResources();
-    }
-  }, [trueCostView, showTrueCost, allSpResources.length]);
+  // Removed auto-trigger — resource view loads only on explicit user click
+  useEffect(() => { setAllSpResources([]); }, [startDate, endDate, selectedAccounts]);
 
   const filter = {
     control_tower_ids: [ctId],
@@ -187,25 +184,28 @@ export default function CTDetailPage() {
     group_by: "account",
   };
 
-  const { data: summary, isLoading: summaryLoading } = useQuery({
-    queryKey: ["ct-summary", ctId, startDate, endDate, granularity, selectedAccounts, selectedChargeTypes],
-    queryFn: () => api.post("/reports/summary", filter).then((r) => r.data),
+  // Merge summary + spDist into one parallel fetch — halves initial API round-trips
+  const { data: primaryData, isLoading: summaryLoading } = useQuery({
+    queryKey: ["ct-primary", ctId, startDate, endDate, granularity, selectedAccounts, selectedChargeTypes],
+    queryFn: async () => {
+      const [summaryRes, spDistRes] = await Promise.all([
+        api.post("/reports/summary", filter),
+        api.get("/reports/savings/ct-distribution", {
+          params: { ct_id: ctId, start_date: startDate, end_date: endDate },
+        }).catch(() => ({ data: null })),
+      ]);
+      return { summary: summaryRes.data, spDist: spDistRes.data };
+    },
     enabled: !!token && !!ctId,
     staleTime: 2 * 60 * 1000,
   });
 
-  const { data: spDist, isLoading: spLoading } = useQuery({
-    queryKey: ["ct-sp-dist", ctId, startDate, endDate],
-    queryFn: () => api.get(`/reports/savings/ct-distribution`, {
-      params: { ct_id: ctId, start_date: startDate, end_date: endDate }
-    }).then((r) => r.data),
-    enabled: !!token && !!ctId,
-    staleTime: 5 * 60 * 1000,
-  });
-
+  const summary = primaryData?.summary;
+  const spDist = primaryData?.spDist;
   const trueCostData: any[] = spDist?.sub_accounts || [];
-  const trueCostLoading = spLoading;
+  const trueCostLoading = summaryLoading;
 
+  // Tab query deferred until primary data is ready — avoids 3 simultaneous heavy queries on load
   const tabEndpoint = activeTab === "service" ? "/reports/service-wise"
     : activeTab === "resource" ? "/reports/resource-wise"
     : "/reports/tag-wise";
@@ -215,7 +215,7 @@ export default function CTDetailPage() {
   const { data: tabData = [], isLoading: tabLoading } = useQuery({
     queryKey: ["ct-tab", ctId, activeTab, startDate, endDate, selectedAccounts, selectedChargeTypes],
     queryFn: () => api.post(tabEndpoint, tabFilter).then((r) => r.data),
-    enabled: !!token && !!ctId,
+    enabled: !!token && !!ctId && !summaryLoading,
     staleTime: 2 * 60 * 1000,
   });
 
@@ -350,7 +350,7 @@ export default function CTDetailPage() {
                     Account Wise
                   </button>
                   <button
-                    onClick={() => { setAllSpResources([]); setTrueCostView("resource"); }}
+                    onClick={() => { setAllSpResources([]); setTrueCostView("resource"); loadAllSpResources(); }}
                     className={`px-3 py-1 text-xs font-bold border-l border-gray-300 transition ${
                       trueCostView === "resource" ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-gray-50"
                     }`}>
@@ -558,7 +558,13 @@ export default function CTDetailPage() {
                         <RefreshCw className="w-5 h-5 animate-spin text-blue-900" />
                       </div>
                     ) : allSpResources.length === 0 ? (
-                      <div className="p-10 text-center text-sm text-black">No SP covered resources found for this period.</div>
+                      <div className="p-10 text-center">
+                        <p className="text-sm text-black mb-3">Click to load SP covered resources for this period.</p>
+                        <button onClick={loadAllSpResources}
+                          className="px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold rounded-md transition">
+                          Load Resources
+                        </button>
+                      </div>
                     ) : (
                       <table className="w-full">
                         <thead>
