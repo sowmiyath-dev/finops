@@ -50,6 +50,10 @@ async def _upsert_sub_accounts(db: AsyncSession, ct_id: str, accounts: list[dict
 
 
 async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Optional[str] = None, force_end: Optional[str] = None):
+    # Guard: skip if a sync is already running for this CT
+    if _sync_progress.get(ct_id, {}).get("status") == "running":
+        logger.warning(f"Sync already running for CT {ct_id} — skipping duplicate trigger")
+        return
     async with _sync_semaphore:
         _sync_progress[ct_id] = {"percent": 0, "status": "running", "message": "Initializing"}
         sync_log_id = None
@@ -550,6 +554,16 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
                 )
                 await db.commit()
         _sync_progress[ct_id] = {"percent": 0, "status": "failed", "message": str(e)}
+
+@router.get("/sync-active")
+async def list_active_syncs(user: User = Depends(get_current_user)):
+    """Returns all CTs that currently have a running sync."""
+    return {
+        ct_id: progress
+        for ct_id, progress in _sync_progress.items()
+        if progress.get("status") == "running"
+    }
+
 
 @router.get("/generate-external-id")
 async def generate_external_id(user: User = Depends(get_current_user)):

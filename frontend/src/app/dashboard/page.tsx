@@ -147,8 +147,26 @@ export default function DashboardPage() {
   });
 
   const [syncModalCt, setSyncModalCt] = useState<any>(null);
+  const [syncStatuses, setSyncStatuses] = useState<Record<string, { status: string }>>({});
+
+  // Poll active syncs every 10s to keep button state accurate
+  useEffect(() => {
+    const poll = async () => {
+      const active = await api.get("/towers/sync-active").then((r) => r.data).catch(() => ({}));
+      setSyncStatuses(active);
+    };
+    poll();
+    const iv = setInterval(poll, 10000);
+    return () => clearInterval(iv);
+  }, []);
 
   const handleSync = async (id: string, start?: string, end?: string) => {
+    // Check if sync already running for this CT
+    const active = await api.get("/towers/sync-active").then((r) => r.data).catch(() => ({}));
+    if (active[id]) {
+      toast.error("Sync already in progress for this Control Tower");
+      return;
+    }
     const params = start && end ? `?start_date=${start}&end_date=${end}` : "";
     await api.post(`/towers/${id}/sync${params}`);
     toast.success("Sync started");
@@ -301,8 +319,9 @@ export default function DashboardPage() {
                 {(user?.role === "owner" || user?.role === "editor") && (
                   <>
                     <button onClick={() => setSyncModalCt(ct)}
-                      className="p-1.5 rounded hover:bg-blue-100 text-black hover:text-blue-900 transition" title="Sync">
-                      <RefreshCw className="w-3.5 h-3.5" />
+                      disabled={syncStatuses[ct.id]?.status === "running"}
+                      className="p-1.5 rounded hover:bg-blue-100 text-black hover:text-blue-900 transition disabled:opacity-40 disabled:cursor-not-allowed" title={syncStatuses[ct.id]?.status === "running" ? "Sync in progress" : "Sync"}>
+                      <RefreshCw className={`w-3.5 h-3.5 ${syncStatuses[ct.id]?.status === "running" ? "animate-spin text-blue-900" : ""}`} />
                     </button>
                     <button onClick={() => { if (confirm("Remove?")) deleteMutation.mutate(ct.id); }}
                       className="p-1.5 rounded hover:bg-red-100 text-black hover:text-red-700 transition" title="Delete">
