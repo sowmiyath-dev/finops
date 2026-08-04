@@ -1,6 +1,7 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import api from "@/lib/api";
 import { RefreshCw, ArrowLeft, Clock, List, TrendingDown } from "lucide-react";
 import Link from "next/link";
@@ -34,15 +35,7 @@ export default function AzureTenantDetail() {
   const [endDate, setEndDate] = useState(lm.end);
   const [activePreset, setActivePreset] = useState("Last Month");
   const [tab, setTab] = useState<Tab>("subscriptions");
-  const [rows, setRows] = useState<CostRow[]>([]);
-  const [summary, setSummary] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
-  const [tagKey, setTagKey] = useState("");
-  const [tagKeys, setTagKeys] = useState<string[]>([]);
-  const [tenantName, setTenantName] = useState("Azure Tenant");
   const [showLogs, setShowLogs] = useState(false);
-  const [logs, setLogs] = useState<SyncLog[]>([]);
-  const [logsLoading, setLogsLoading] = useState(false);
   const [spResources, setSpResources] = useState<any[]>([]);
   const [spLoading, setSpLoading] = useState(false);
   const [showSpModal, setShowSpModal] = useState(false);
@@ -50,73 +43,88 @@ export default function AzureTenantDetail() {
   const [syncMonth, setSyncMonth] = useState(() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}`; });
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState("");
+  const [tagKey, setTagKey] = useState("");
+
+  // Fetch tenant name + tag keys in parallel, cached
+  const { data: meta } = useQuery({
+    queryKey: ["azure-tenant-meta", id],
+    queryFn: async () => {
+      const [towersRes, tagKeysRes] = await Promise.all([
+        api.get("/towers/"),
+        api.get("/azure-costs/tag-keys").catch(() => ({ data: [] })),
+      ]);
+      const t = (towersRes.data as any[]).find((t: any) => t.id === id);
+      const keys: string[] = tagKeysRes.data;
+      return { tenantName: t?.name || "Azure Tenant", tagKeys: keys, firstTagKey: keys[0] || "" };
+    },
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const tenantName = meta?.tenantName ?? "Azure Tenant";
+  const tagKeys = meta?.tagKeys ?? [];
 
   useEffect(() => {
-    api.get("/towers/").then((r) => {
-      const t = (r.data as any[]).find((t) => t.id === id);
-      if (t) setTenantName(t.name);
-    }).catch(() => {});
-    api.get("/azure-costs/tag-keys").then((r) => {
-      setTagKeys(r.data);
-      if (r.data.length > 0) setTagKey(r.data[0]);
-    }).catch(() => {});
-  }, [id]);
+    if (meta?.firstTagKey && !tagKey) setTagKey(meta.firstTagKey);
+  }, [meta?.firstTagKey]);
 
-  const loadData = async (t: Tab = tab, start = startDate, end = endDate) => {
-    setLoading(true); setRows([]);
-    try {
-      if (t === "subscriptions") {
-        // Use combined overview endpoint for fast initial load
-        const res = await api.get("/azure-costs/overview", { params: { start_date: start, end_date: end } });
-        setSummary(res.data.summary);
-        setRows(res.data.subscriptions.map((r: any) => ({
-          label: r.subscription_name, sublabel: r.subscription_id,
-          subscription_id: r.subscription_id,
-          actual_cost: r.actual_cost, amortized_cost: r.amortized_cost,
-          sp_allocated: r.sp_allocated || r.amortized_cost || 0,
-          savings: r.savings, true_cost: r.true_cost,
-        })));
-      } else {
-        const [sumRes, tabRes] = await Promise.all([
-          api.get("/azure-costs/summary", { params: { start_date: start, end_date: end } }),
-          api.get(
-            t === "resource-groups" ? "/azure-costs/resource-groups"
-            : t === "services" ? "/azure-costs/services"
-            : "/azure-costs/tags",
-            { params: { start_date: start, end_date: end, ...(t === "tags" ? { tag_key: tagKey || "Environment" } : {}) } }
-          ),
-        ]);
-        setSummary(sumRes.data);
-        setRows((tabRes.data as any[]).map((r: any) => ({
+  // Cost data query — keyed by tab + date range, cached per combination
+  const { data: costData, isLoading: loading, refetch: refetchCost } = useQuery({
+    queryKey: ["azure-cost", id, tab, startDate, endDate, tab === "tags" ? tagKey : null],
+    queryFn: async () => {
+      if (tab === "subscriptions") {
+        const res = await api.get("/azure-costs/overview", { params: { start_date: startDate, end_date: endDate } });
+        return {
+          summary: res.data.summary,
+          rows: res.data.subscriptions.map((r: any) => ({
+            label: r.subscription_name, sublabel: r.subscription_id,
+            subscription_id: r.subscription_id,
+            actual_cost: r.actual_cost, amortized_cost: r.amortized_cost,
+            sp_allocated: r.sp_allocated || r.amortized_cost || 0,
+            savings: r.savings, true_cost: r.true_cost,
+          })) as CostRow[],
+        };
+      }
+      const [sumRes, tabRes] = await Promise.all([
+        api.get("/azure-costs/summary", { params: { start_date: startDate, end_date: endDate } }),
+        api.get(
+          tab === "resource-groups" ? "/azure-costs/resource-groups"
+          : tab === "services" ? "/azure-costs/services"
+          : "/azure-costs/tags",
+          { params: { start_date: startDate, end_date: endDate, ...(tab === "tags" ? { tag_key: tagKey || "Environment" } : {}) } }
+        ),
+      ]);
+      return {
+        summary: sumRes.data,
+        rows: (tabRes.data as any[]).map((r: any) => ({
           label: r.resource_group || r.service || r.tag_value || "—",
           sublabel: r.subscription_name || r.tag_key,
           actual_cost: r.actual_cost || 0, amortized_cost: r.amortized_cost || 0,
           sp_allocated: r.sp_allocated || r.amortized_cost || 0,
           savings: r.savings || 0, true_cost: r.true_cost || 0,
-        })));
-      }
-    } catch (e) { console.error(e); }
-    finally { setLoading(false); }
-  };
+        })) as CostRow[],
+      };
+    },
+    staleTime: 5 * 60 * 1000,
+    enabled: tab !== "tags" || !!tagKey,
+  });
 
-  useEffect(() => { loadData(); }, []); // eslint-disable-line
+  const rows = costData?.rows ?? [];
+  const summary = costData?.summary ?? null;
 
-  const applyPreset = (p: typeof PRESETS[0]) => {
+  // Logs query — only fetched when drawer opens
+  const { data: allLogs = [], isLoading: logsLoading } = useQuery({
+    queryKey: ["azure-sync-logs"],
+    queryFn: () => api.get("/reports/sync-logs?limit=50").then((r) => r.data),
+    enabled: showLogs,
+    staleTime: 60 * 1000,
+  });
+  const logs = (allLogs as SyncLog[]).filter((l: any) => l.control_tower_id === id);
+
+  const applyPreset = useCallback((p: typeof PRESETS[0]) => {
     const r = p.fn(); setStartDate(r.start); setEndDate(r.end); setActivePreset(p.label);
-    loadData(tab, r.start, r.end);
-  };
+  }, []);
 
-  const switchTab = (t: Tab) => { setTab(t); loadData(t); };
-
-  const loadLogs = async () => {
-    setLogsLoading(true);
-    try {
-      const res = await api.get("/reports/sync-logs?limit=50");
-      setLogs((res.data as any[]).filter((l) => l.control_tower_id === id));
-    } catch {} finally { setLogsLoading(false); }
-  };
-
-  const openLogs = () => { setShowLogs(true); loadLogs(); };
+  const switchTab = useCallback((t: Tab) => { setTab(t); }, []);
 
   const triggerMonthSync = async () => {
     setSyncing(true); setSyncResult("");
@@ -189,11 +197,11 @@ export default function AzureTenantDetail() {
             className="flex items-center gap-1.5 px-3 py-2 bg-[#0078D4] hover:bg-[#006CBF] text-white text-xs font-bold rounded-md transition">
             <RefreshCw className="w-3.5 h-3.5" /> Sync Month
           </button>
-          <button onClick={openLogs}
+          <button onClick={() => setShowLogs(true)}
             className="flex items-center gap-1.5 px-3 py-2 border border-gray-300 rounded-md text-xs font-bold text-black hover:bg-gray-50 transition">
             <List className="w-3.5 h-3.5" /> Sync Logs
           </button>
-          <button onClick={() => loadData()}
+          <button onClick={() => refetchCost()}
             className="p-2 border border-gray-300 rounded-md hover:bg-gray-50 transition">
             <RefreshCw className={`w-4 h-4 text-black ${loading ? "animate-spin" : ""}`} />
           </button>
@@ -240,7 +248,7 @@ export default function AzureTenantDetail() {
         {tab === "tags" && tagKeys.length > 0 && (
           <div className="ml-4 flex items-center gap-2 flex-wrap">
             {tagKeys.map((k) => (
-              <button key={k} onClick={() => { setTagKey(k); loadData("tags", startDate, endDate); }}
+              <button key={k} onClick={() => { setTagKey(k); }}
                 className={`px-3 py-1 text-xs font-bold rounded-full border transition ${
                   tagKey === k ? "bg-blue-900 text-white border-blue-900" : "border-gray-300 text-black hover:border-blue-600"
                 }`}>{k}</button>

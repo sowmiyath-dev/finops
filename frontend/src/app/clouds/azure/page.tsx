@@ -1,9 +1,10 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
-import { Globe, Plus, RefreshCw, Trash2, Clock, CheckCircle, XCircle, Edit2, X, Info, TrendingUp, DollarSign } from "lucide-react";
+import { Globe, Plus, RefreshCw, Trash2, Clock, CheckCircle, XCircle, Edit2, X, Info, TrendingUp } from "lucide-react";
 
 interface AzureTenant {
   id: string; name: string; azure_tenant_id: string;
@@ -27,10 +28,8 @@ function getLastMonthRange() {
 
 export default function AzurePage() {
   const router = useRouter();
-  const [tenants, setTenants] = useState<AzureTenant[]>([]);
+  const qc = useQueryClient();
   const [syncStatuses, setSyncStatuses] = useState<Record<string, SyncStatus>>({});
-  const [tenantCosts, setTenantCosts] = useState<Record<string, TenantCost>>({});
-  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [editTenant, setEditTenant] = useState<AzureTenant | null>(null);
@@ -40,26 +39,28 @@ export default function AzurePage() {
   const [form, setForm] = useState({ name: "", tenant_id: "", client_id: "", client_secret: "", storage_account: "", container_name: "", export_name: "" });
   const lastMonth = getLastMonthRange();
 
-  const loadTenants = async () => {
-    try {
+  // Single query fetches tenants + cost in parallel — cached for 5 min
+  const { data, isLoading: loading, refetch } = useQuery({
+    queryKey: ["azure-tenants", lastMonth.start, lastMonth.end],
+    queryFn: async () => {
       const res = await api.get("/towers/");
-      const azure = (res.data as any[]).filter((t) => t.cloud_provider === "azure");
-      setTenants(azure);
-      // Load last month cost for each tenant
+      const azure = (res.data as any[]).filter((t: any) => t.cloud_provider === "azure") as AzureTenant[];
+      const [costRes] = await Promise.all([
+        api.get("/azure-costs/summary", {
+          params: { start_date: lastMonth.start, end_date: lastMonth.end },
+        }).then((r) => r.data as TenantCost).catch(() => ({ actual_cost: 0, sp_allocated: 0, savings: 0, true_cost: 0 } as TenantCost)),
+      ]);
+      // Cost summary is org-wide; map same value to all tenants for display
       const costs: Record<string, TenantCost> = {};
-      await Promise.all(azure.map(async (t) => {
-        try {
-          const r = await api.get("/azure-costs/summary", {
-            params: { start_date: lastMonth.start, end_date: lastMonth.end },
-          });
-          costs[t.id] = r.data;
-        } catch { costs[t.id] = { actual_cost: 0, sp_allocated: 0, savings: 0, true_cost: 0 }; }
-      }));
-      setTenantCosts(costs);
-    } catch (e) { console.error(e); } finally { setLoading(false); }
-  };
+      azure.forEach((t) => { costs[t.id] = costRes; });
+      return { tenants: azure, costs };
+    },
+    staleTime: 5 * 60 * 1000,
+  });
 
-  useEffect(() => { loadTenants(); }, []);
+  const tenants = data?.tenants ?? [];
+  const tenantCosts = data?.costs ?? {};
+  const loadTenants = useCallback(() => { refetch(); }, [refetch]);
 
   useEffect(() => {
     if (tenants.length === 0) return;
@@ -87,7 +88,7 @@ export default function AzurePage() {
       toast.success("Azure tenant connected! Sync started.");
       setShowForm(false);
       setForm({ name: "", tenant_id: "", client_id: "", client_secret: "", storage_account: "", container_name: "", export_name: "" });
-      await loadTenants();
+      qc.invalidateQueries({ queryKey: ["azure-tenants"] });
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Onboarding failed");
     } finally { setSubmitting(false); }
@@ -108,7 +109,7 @@ export default function AzurePage() {
   const deleteTenant = async (e: React.MouseEvent, id: string, name: string) => {
     e.stopPropagation();
     if (!confirm(`Remove Azure tenant "${name}"?`)) return;
-    try { await api.delete(`/towers/${id}`); toast.success("Tenant removed"); await loadTenants(); }
+    try { await api.delete(`/towers/${id}`); toast.success("Tenant removed"); qc.invalidateQueries({ queryKey: ["azure-tenants"] }); }
     catch { toast.error("Failed to remove"); }
   };
 
@@ -117,9 +118,9 @@ export default function AzurePage() {
     setSavingName(true);
     try {
       await api.patch(`/towers/${editTenant.id}/name`, { name: editName.trim() });
-      toast.success("Name updated"); setEditTenant(null); await loadTenants();
+      toast.success("Name updated"); setEditTenant(null);
+      qc.invalidateQueries({ queryKey: ["azure-tenants"] });
     } catch {
-      setTenants((prev) => prev.map((t) => t.id === editTenant.id ? { ...t, name: editName.trim() } : t));
       setEditTenant(null); toast.success("Name updated");
     } finally { setSavingName(false); }
   };
