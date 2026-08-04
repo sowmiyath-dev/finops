@@ -50,12 +50,14 @@ async def _upsert_sub_accounts(db: AsyncSession, ct_id: str, accounts: list[dict
 
 
 async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Optional[str] = None, force_end: Optional[str] = None):
-    # Guard: skip if a sync is already running for this CT
-    if _sync_progress.get(ct_id, {}).get("status") == "running":
+    # Guard: skip only if actively running right now (not failed/done)
+    current = _sync_progress.get(ct_id, {})
+    if current.get("status") == "running":
         logger.warning(f"Sync already running for CT {ct_id} — skipping duplicate trigger")
         return
+    # Clear any stale failed/done state before starting
+    _sync_progress[ct_id] = {"percent": 0, "status": "running", "message": "Initializing"}
     async with _sync_semaphore:
-        _sync_progress[ct_id] = {"percent": 0, "status": "running", "message": "Initializing"}
         sync_log_id = None
 
         try:
