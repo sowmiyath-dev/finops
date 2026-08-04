@@ -9,6 +9,10 @@ from app.services.azure_cost_service import stream_azure_cost_batches, find_azur
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+# Silence noisy Azure SDK HTTP transport logs
+for _noisy in ("azure.core.pipeline.policies.http_logging_policy", "azure.storage", "urllib3"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+
 CT_ID = "051dd3a4-9b33-42b4-ad09-e4606264fd11"
 START_DATE = "2026-07-01"
 END_DATE = "2026-07-30"

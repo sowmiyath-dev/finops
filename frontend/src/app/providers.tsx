@@ -5,10 +5,22 @@ import { useState, useEffect } from "react";
 import AppShell from "@/components/AppShell";
 
 export default function Providers({ children }: { children: React.ReactNode }) {
-  const [queryClient] = useState(() => new QueryClient());
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 5 * 60 * 1000,   // 5 min — no refetch on every navigation
+            gcTime: 10 * 60 * 1000,     // 10 min cache retention
+            retry: 1,
+            refetchOnWindowFocus: false, // don't refetch when tab regains focus
+          },
+        },
+      })
+  );
 
   useEffect(() => {
-    const token = sessionStorage.getItem("token");
+    const token = localStorage.getItem("token");
     if (token) {
       import("@/store/authStore").then(({ useAuthStore }) => {
         useAuthStore.getState().fetchMe();

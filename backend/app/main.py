@@ -1,25 +1,34 @@
 import logging
 import asyncio
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from app.models.database import init_db
 from app.routers import auth, towers, reports, admin, tags, verticals
 from app.routers import azure_costs
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # Silence noisy Azure SDK HTTP logs
 logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
 logging.getLogger("azure.identity").setLevel(logging.WARNING)
 logging.getLogger("azure.storage").setLevel(logging.WARNING)
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 app = FastAPI(title="Finoptix", version="2.0.0")
 
-# Gzip compression — reduces response size significantly for large report data
-app.add_middleware(GZipMiddleware, minimum_size=1000)
+# Cache-control headers for GET API responses
+class CacheHeaderMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        if request.method == "GET" and response.status_code == 200:
+            response.headers["Cache-Control"] = "private, max-age=60"
+        return response
 
+app.add_middleware(CacheHeaderMiddleware)
+app.add_middleware(GZipMiddleware, minimum_size=512)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

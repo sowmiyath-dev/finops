@@ -281,12 +281,10 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Option
 async def _refresh_azure_monthly_summary(ct_id: str):
     """Pre-aggregate Azure cost by subscription per month into azure_monthly_summary."""
     from app.models.db_models import AzureMonthlySummary
+    from sqlalchemy import text
     async with AsyncSessionLocal() as db:
-        # Delete existing summary for this CT
-        await db.execute(delete(AzureMonthlySummary).where(AzureMonthlySummary.control_tower_id == ct_id))
-
-        # Aggregate actual cost by month+subscription
-        from sqlalchemy import text
+        # Full refresh — truncate all and re-aggregate from scratch
+        await db.execute(text("TRUNCATE azure_monthly_summary"))
         await db.execute(text("""
             INSERT INTO azure_monthly_summary (id, control_tower_id, month, subscription_id, subscription_name, actual_cost, amortized_cost, refreshed_at)
             SELECT gen_random_uuid(), a.control_tower_id, a.month, a.subscription_id, a.subscription_name,
@@ -296,19 +294,19 @@ async def _refresh_azure_monthly_summary(ct_id: str):
                        subscription_id, MAX(subscription_name) as subscription_name,
                        SUM(actual_cost) as actual_cost
                 FROM azure_cost_records
-                WHERE control_tower_id = :ct_id AND cost_type = 'actual'
+                WHERE cost_type = 'actual'
                 GROUP BY control_tower_id, TO_CHAR(date, 'YYYY-MM'), subscription_id
             ) a
             LEFT JOIN (
                 SELECT TO_CHAR(date, 'YYYY-MM') as month, subscription_id,
                        SUM(amortized_cost) as amortized_cost
                 FROM azure_cost_records
-                WHERE control_tower_id = :ct_id AND cost_type = 'amortized'
+                WHERE cost_type = 'amortized'
                 GROUP BY TO_CHAR(date, 'YYYY-MM'), subscription_id
             ) m ON a.month = m.month AND a.subscription_id = m.subscription_id
-        """), {"ct_id": ct_id})
+        """))
         await db.commit()
-        logger.info(f"Azure monthly summary refreshed for CT {ct_id}")
+        logger.info(f"Azure monthly summary fully refreshed")
 
 
 async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: Optional[str] = None, force_end: Optional[str] = None):

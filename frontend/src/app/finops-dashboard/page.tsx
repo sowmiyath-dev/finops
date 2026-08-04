@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import api from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import { RefreshCw, ChevronDown, ChevronRight, Calendar, Download } from "lucide-react";
@@ -26,6 +26,10 @@ function getMonthOptions() {
 interface Business { id: string; name: string; cost_type?: string; owner_name?: string; }
 interface Vertical { id: string; name: string; color: string; businesses: Business[]; }
 interface CostRow { aws: number; azure_actual: number; azure_savings: number; azure_true: number; total: number; }
+interface CacheEntry { verticals: Vertical[]; costs: Record<string, CostRow>; }
+
+// Module-level cache — survives navigation, cleared on refresh
+const dataCache = new Map<string, CacheEntry>();
 
 export default function FinOpsDashboard() {
   const { token } = useAuthStore();
@@ -47,20 +51,20 @@ export default function FinOpsDashboard() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const loadData = async (start: string, end: string) => {
+  const loadData = useCallback(async (start: string, end: string, force = false) => {
+    const cacheKey = `${start}__${end}`;
+    if (!force && dataCache.has(cacheKey)) {
+      const cached = dataCache.get(cacheKey)!;
+      setVerticals(cached.verticals);
+      setCosts(cached.costs);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setCosts({});
     try {
-      const vertsRes = await api.get(`/verticals/`);
-      const vertList = vertsRes.data as { id: string; name: string; color: string }[];
-
-      const [bizResults, awsCostRes, azureCostRes] = await Promise.all([
-        Promise.all(
-          vertList.map((v) =>
-            api.get(`/verticals/${v.id}/businesses`)
-              .then((r) => ({ verticalId: v.id, businesses: r.data as Business[] }))
-          )
-        ),
+      const [vertsRes, awsCostRes, azureCostRes] = await Promise.all([
+        api.get(`/verticals/`),
         api.get(`/verticals/all-businesses-cost`, {
           params: { granularity: "monthly", start_date: start, end_date: end },
         }).then((r) => r.data as Record<string, number>).catch(() => ({} as Record<string, number>)),
@@ -69,11 +73,19 @@ export default function FinOpsDashboard() {
         }).then((r) => r.data as Record<string, { actual_cost: number; savings: number; true_cost: number }>).catch(() => ({} as Record<string, any>)),
       ]);
 
+      const vertList = vertsRes.data as { id: string; name: string; color: string }[];
+
+      const bizResults = await Promise.all(
+        vertList.map((v) =>
+          api.get(`/verticals/${v.id}/businesses`)
+            .then((r) => ({ verticalId: v.id, businesses: r.data as Business[] }))
+        )
+      );
+
       const fullVerticals: Vertical[] = vertList.map((v) => ({
         ...v,
         businesses: bizResults.find((b) => b.verticalId === v.id)?.businesses || [],
       }));
-      setVerticals(fullVerticals);
 
       const costMap: Record<string, CostRow> = {};
       for (const [bizId, awsCost] of Object.entries(awsCostRes)) {
@@ -86,13 +98,16 @@ export default function FinOpsDashboard() {
         costMap[bizId].azure_true = az.true_cost || 0;
         costMap[bizId].total = costMap[bizId].aws + (az.true_cost || 0);
       }
+
+      dataCache.set(cacheKey, { verticals: fullVerticals, costs: costMap });
+      setVerticals(fullVerticals);
       setCosts(costMap);
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (token) loadData(selectedMonth.start, selectedMonth.end);
@@ -202,7 +217,7 @@ export default function FinOpsDashboard() {
             )}
           </div>
 
-          <button onClick={() => loadData(selectedMonth.start, selectedMonth.end)}
+          <button onClick={() => loadData(selectedMonth.start, selectedMonth.end, true)}
             className="p-2 border border-gray-300 rounded-md hover:bg-gray-50 transition">
             <RefreshCw className={`w-4 h-4 text-black ${loading ? "animate-spin" : ""}`} />
           </button>

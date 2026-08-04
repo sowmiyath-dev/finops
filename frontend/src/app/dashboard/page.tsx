@@ -133,7 +133,7 @@ export default function DashboardPage() {
 
   const { data: towers = [], isLoading } = useQuery({
     queryKey: ["towers"],
-    queryFn: () => api.get("/towers/").then((r) => r.data.filter((t: any) => t.cloud_provider !== "azure")),
+    queryFn: () => api.get("/towers/").then((r) => r.data.filter((t: any) => t.cloud_provider === "aws")),
     enabled: !!token,
     staleTime: 5 * 60 * 1000,   // consider fresh for 5 minutes
     refetchInterval: 5 * 60 * 1000, // refetch every 5 minutes

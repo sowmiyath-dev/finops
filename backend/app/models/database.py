@@ -6,14 +6,19 @@ from app.models.db_models import Base
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,
-    pool_size=10,
-    max_overflow=10,
+    pool_size=20,
+    max_overflow=20,
     pool_pre_ping=True,
-    pool_recycle=1800,
-    pool_timeout=30,
+    pool_recycle=900,
+    pool_timeout=10,
     connect_args={
-        "server_settings": {"timezone": "UTC", "statement_timeout": "30000"},
-        "command_timeout": 30,
+        "server_settings": {
+            "timezone": "UTC",
+            "statement_timeout": "15000",
+            "idle_in_transaction_session_timeout": "30000",
+            "work_mem": "64MB",
+        },
+        "command_timeout": 15,
     },
 )
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

@@ -1,11 +1,10 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import axios from "axios";
+import { useQuery } from "@tanstack/react-query";
+import api from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import { Layers, ChevronRight, Plus, RefreshCw, BarChart2 } from "lucide-react";
-
-const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api").replace(/\/api$/, "");
 
 const GRANULARITY_OPTIONS = [
   { label: "Daily",   value: "daily" },
@@ -27,46 +26,23 @@ function fmt(n: number) {
 }
 
 export default function VerticalsPage() {
-  const { token } = useAuthStore();
-  const tokenRef = useRef(token);
-  tokenRef.current = token;
-
+  const token = useAuthStore((s) => s.token);
   const router = useRouter();
-  const [verticals, setVerticals] = useState<VerticalSummary[]>([]);
   const [granularity, setGranularity] = useState("monthly");
-  const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
 
-  const getHeaders = () => ({ Authorization: `Bearer ${tokenRef.current}` });
-
-  const load = async (gran?: string) => {
-    const g = gran ?? granularity;
-    setLoading(true);
-    try {
-      const res = await axios.get(`${BASE}/api/verticals/summary`, {
-        headers: getHeaders(),
-        params: { granularity: g },
-      });
-      setVerticals(res.data);
-    } catch (err) {
-      console.error("Failed to load verticals", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!token) return; // wait for token to be available
-    load();
-  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleGranularity = (g: string) => { setGranularity(g); load(g); };
+  const { data: verticals = [], isLoading, refetch } = useQuery<VerticalSummary[]>({
+    queryKey: ["verticals-summary", granularity],
+    queryFn: () => api.get("/verticals/summary", { params: { granularity } }).then((r) => r.data),
+    enabled: !!token,
+    staleTime: 5 * 60 * 1000,
+  });
 
   const seed = async () => {
     setSeeding(true);
     try {
-      await axios.post(`${BASE}/api/verticals/seed`, {}, { headers: getHeaders() });
-      await load(granularity);
+      await api.post("/verticals/seed");
+      await refetch();
     } catch (err: any) {
       alert(err?.response?.data?.detail || "Seed failed — check backend logs");
     } finally {
@@ -87,7 +63,7 @@ export default function VerticalsPage() {
         <div className="flex items-center gap-3">
           <div className="flex border border-gray-300 rounded-md overflow-hidden">
             {GRANULARITY_OPTIONS.map((g) => (
-              <button key={g.value} onClick={() => handleGranularity(g.value)}
+              <button key={g.value} onClick={() => setGranularity(g.value)}
                 className={`px-4 py-2 text-xs font-bold transition ${
                   granularity === g.value ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-gray-50"
                 }`}>
@@ -96,7 +72,7 @@ export default function VerticalsPage() {
             ))}
           </div>
 
-          {!loading && verticals.length === 0 && (
+          {!isLoading && verticals.length === 0 && (
             <button onClick={seed} disabled={seeding}
               className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-md transition disabled:opacity-60">
               <Plus className="w-3.5 h-3.5" />
@@ -104,9 +80,9 @@ export default function VerticalsPage() {
             </button>
           )}
 
-          <button onClick={() => load()} title="Refresh"
+          <button onClick={() => refetch()} title="Refresh"
             className="p-2 border border-gray-300 rounded-md hover:bg-gray-50 transition">
-            <RefreshCw className={`w-4 h-4 text-black ${loading ? "animate-spin" : ""}`} />
+            <RefreshCw className={`w-4 h-4 text-black ${isLoading ? "animate-spin" : ""}`} />
           </button>
           <button onClick={() => router.push("/verticals/report")}
             className="flex items-center gap-2 px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold rounded-md transition">
@@ -115,7 +91,7 @@ export default function VerticalsPage() {
         </div>
       </div>
 
-      {loading ? (
+      {isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {[1, 2, 3, 4].map((i) => (
             <div key={i} className="bg-white rounded-lg border border-gray-300 shadow-sm animate-pulse">

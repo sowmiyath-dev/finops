@@ -17,7 +17,7 @@ router = APIRouter(prefix="/azure-costs", tags=["azure-costs"])
 
 # Simple in-memory cache
 _cache: dict = {}
-_CACHE_TTL = 1800  # 30 min
+_CACHE_TTL = 3600  # 1 hour
 _CT_IDS_TTL = 300  # 5 min for user CT ids
 
 def _cache_get(key: str, ttl: int = _CACHE_TTL):
@@ -210,6 +210,9 @@ async def cost_by_subscription(
     user: User = Depends(get_current_user),
 ):
     start, end = _parse_dates(start_date, end_date)
+    cache_key = f"az_subs_{start}_{end}"
+    if (cached := _cache_get(cache_key)) is not None:
+        return cached
     ca = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "actual"]
     cm = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "amortized"]
 
@@ -231,6 +234,7 @@ async def cost_by_subscription(
             "actual_cost": actual, "amortized_cost": amortized,
             "savings": savings, "true_cost": true_cost,
         })
+    _cache_set(cache_key, result)
     return result
 
 
@@ -425,6 +429,9 @@ async def daily_trend(
     user: User = Depends(get_current_user),
 ):
     start, end = _parse_dates(start_date, end_date)
+    cache_key = f"az_trend_{start}_{end}_{subscription_id}_{resource_group}"
+    if (cached := _cache_get(cache_key)) is not None:
+        return cached
     ca = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "actual"]
     cm = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "amortized"]
     if subscription_id:
@@ -444,7 +451,7 @@ async def daily_trend(
         .where(*cm).group_by(AzureCostRecord.date)
     )).all()}
 
-    return [
+    result = [
         {
             "date": str(r.date),
             "actual_cost": float(r.actual_cost or 0),
@@ -453,6 +460,8 @@ async def daily_trend(
         }
         for r in actual_rows
     ]
+    _cache_set(cache_key, result)
+    return result
 
 
 # ── RI/SP savings resources ───────────────────────────────────────────────────
@@ -563,13 +572,18 @@ async def list_subscriptions(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    from app.models.db_models import AzureMonthlySummary
+    cache_key = "az_meta_subs"
+    if (cached := _cache_get(cache_key)) is not None:
+        return cached
     rows = (await db.execute(
-        select(AzureCostRecord.subscription_id, AzureCostRecord.subscription_name)
-        .where(AzureCostRecord.cost_type == "actual")
-        .group_by(AzureCostRecord.subscription_id, AzureCostRecord.subscription_name)
-        .order_by(AzureCostRecord.subscription_name)
+        select(AzureMonthlySummary.subscription_id, AzureMonthlySummary.subscription_name)
+        .group_by(AzureMonthlySummary.subscription_id, AzureMonthlySummary.subscription_name)
+        .order_by(AzureMonthlySummary.subscription_name)
     )).all()
-    return [{"subscription_id": r.subscription_id, "subscription_name": r.subscription_name or r.subscription_id} for r in rows]
+    result = [{"subscription_id": r.subscription_id, "subscription_name": r.subscription_name or r.subscription_id} for r in rows]
+    _cache_set(cache_key, result)
+    return result
 
 
 @router.get("/meta/resource-groups")
@@ -739,21 +753,24 @@ async def browse_subscriptions(
     """List all subscriptions with their last month actual cost."""
     from app.models.db_models import AzureMonthlySummary
     from datetime import date as dt
+    cache_key = "az_browse_subs"
+    if (cached := _cache_get(cache_key)) is not None:
+        return cached
+
     n = dt.today()
     last_month = f"{n.year}-{(n.month-1):02d}" if n.month > 1 else f"{n.year-1}-12"
 
+    # Use summary table only — fast, no raw scan
     rows = (await db.execute(
         select(
-            AzureCostRecord.subscription_id,
-            AzureCostRecord.subscription_name,
-            func.count(func.distinct(AzureCostRecord.resource_id)).label("resource_count"),
+            AzureMonthlySummary.subscription_id,
+            AzureMonthlySummary.subscription_name,
+            func.sum(AzureMonthlySummary.actual_cost).label("total_cost"),
         )
-        .where(AzureCostRecord.cost_type == "actual")
-        .group_by(AzureCostRecord.subscription_id, AzureCostRecord.subscription_name)
-        .order_by(AzureCostRecord.subscription_name)
+        .group_by(AzureMonthlySummary.subscription_id, AzureMonthlySummary.subscription_name)
+        .order_by(AzureMonthlySummary.subscription_name)
     )).all()
 
-    # Get last month costs from summary
     cost_rows = (await db.execute(
         select(AzureMonthlySummary.subscription_id, func.sum(AzureMonthlySummary.actual_cost).label("cost"))
         .where(AzureMonthlySummary.month == last_month)
@@ -762,12 +779,14 @@ async def browse_subscriptions(
     cost_map = {r.subscription_id: float(r.cost or 0) for r in cost_rows}
 
     if rows:
-        return [{
+        result = [{
             "subscription_id": r.subscription_id,
             "subscription_name": r.subscription_name or r.subscription_id,
-            "resource_count": r.resource_count,
+            "resource_count": 0,
             "last_month_cost": cost_map.get(r.subscription_id, 0),
         } for r in rows]
+        _cache_set(cache_key, result)
+        return result
 
     # Fallback: use ControlTower records with cloud_provider=azure
     ct_rows = (await db.execute(
@@ -775,12 +794,14 @@ async def browse_subscriptions(
         .where(ControlTower.cloud_provider == "azure")
         .order_by(ControlTower.name)
     )).all()
-    return [{
+    result = [{
         "subscription_id": str(r.id),
         "subscription_name": r.name,
         "resource_count": 0,
         "last_month_cost": 0,
     } for r in ct_rows]
+    _cache_set(cache_key, result)
+    return result
 
 
 @router.get("/browse/resource-groups")

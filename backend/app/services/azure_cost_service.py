@@ -237,49 +237,51 @@ def get_azure_billing_periods(start_date: str, end_date: str) -> list[str]:
 
 
 def find_azure_export_blobs(ct: ControlTower, start_date: str, end_date: str, is_first_sync: bool = False) -> list[str]:
-    """Find Azure cost export blobs — uses export_name from CT config, not hardcoded names."""
-    _sync_clock()  # Ensure clock is in sync before Azure Storage auth
+    """Find Azure cost export blobs — only looks in the folder matching the sync date range."""
+    _sync_clock()
     blob_client = get_blob_service_client(ct)
     container = blob_client.get_container_client(ct.azure_container_name)
     csv_blobs: list[str] = []
 
-    export_name = ct.azure_export_name or ""
+    export_name = ct.azure_export_name or "finoptix"
 
-    # Build prefixes from the actual export name configured on the CT
-    # Azure exports land at: <export_name>/<export_name>/YYYYMMDD-YYYYMMDD/<file>.csv
-    # Daily exports land at:  <export_name>-daily-actualcost/ etc. OR same path with daily flag
-    # We scan all top-level prefixes derived from the export name to be resilient
-    candidate_prefixes = []
-    if export_name:
-        candidate_prefixes += [
-            f"{export_name}/",
-            f"{export_name}-actualcost/",
-            f"{export_name}-amortizedcost/",
-            f"{export_name}-daily-actualcost/",
-            f"{export_name}-daily-amortizedcost/",
+    # Build the month folder for the date range e.g. 20260701-20260731
+    start = date.fromisoformat(start_date)
+    end = date.fromisoformat(end_date)
+
+    # Collect all month folders that overlap with the date range
+    month_folders: list[str] = []
+    cur = start.replace(day=1)
+    while cur <= end:
+        if cur.month == 12:
+            next_month = cur.replace(year=cur.year + 1, month=1, day=1)
+        else:
+            next_month = cur.replace(month=cur.month + 1, day=1)
+        folder = f"{cur.strftime('%Y%m%d')}-{next_month.strftime('%Y%m%d')}"
+        month_folders.append(folder)
+        cur = next_month
+
+    # Prefixes to search — only daily export paths for the relevant month folders
+    prefixes = []
+    for folder in month_folders:
+        prefixes += [
+            f"{export_name}-daily-actualcost/all-subs-daily-actualcost/{folder}/",
+            f"{export_name}-daily-amortizedcost/all-subs-daily-amortizedcost/{folder}/",
+            f"{export_name}-actualcost/{export_name}-actualcost/{folder}/",
+            f"{export_name}-amortizedcost/{export_name}-amortizedcost/{folder}/",
+            f"{export_name}/{export_name}/{folder}/",
         ]
-    # Always include legacy hardcoded names as fallback
-    candidate_prefixes += [
-        "finoptix-actualcost/",
-        "finoptix-amortizedcost/",
-        "finoptix-daily-actualcost/",
-        "finoptix-daily-amortizedcost/",
-    ]
-    # Deduplicate while preserving order
-    seen: set = set()
-    prefixes: list = []
-    for p in candidate_prefixes:
-        if p not in seen:
-            seen.add(p)
-            prefixes.append(p)
 
     for prefix in prefixes:
-        blobs = list(container.list_blobs(name_starts_with=prefix))
-        found = [b.name for b in blobs if b.name.endswith(".csv") or b.name.endswith(".csv.gz")]
-        if found:
-            csv_blobs += found
-            logger.info(f"Prefix '{prefix}': found {len(found)} CSVs")
+        try:
+            blobs = list(container.list_blobs(name_starts_with=prefix))
+            found = [b.name for b in blobs if b.name.endswith(".csv") or b.name.endswith(".csv.gz")]
+            if found:
+                csv_blobs += found
+                logger.info(f"Prefix '{prefix}': found {len(found)} blob(s)")
+        except Exception as e:
+            logger.warning(f"Prefix '{prefix}' scan failed: {e}")
 
     csv_blobs = list(set(csv_blobs))
-    logger.info(f"Total Azure CSV blobs for {ct.name} ({'full' if is_first_sync else 'daily'} sync): {len(csv_blobs)}")
+    logger.info(f"Total blobs found for {start_date} to {end_date}: {len(csv_blobs)}")
     return csv_blobs
