@@ -79,12 +79,10 @@ function SyncModal({ ct, onClose, onSync }: { ct: any; onClose: () => void; onSy
   );
 }
 
-function SyncProgressBar({ ctId }: { ctId: string }) {
+function SyncProgressBar({ ctId, onSyncComplete }: { ctId: string; onSyncComplete?: () => void }) {
   const [progress, setProgress] = useState<{ percent: number; status: string; message: string } | null>(null);
-  const [polling, setPolling] = useState(false); // start false — only poll after first check shows active sync
 
   useEffect(() => {
-    // Single initial check — only start interval if sync is actually running
     let iv: ReturnType<typeof setInterval> | null = null;
     const check = async () => {
       try {
@@ -92,13 +90,15 @@ function SyncProgressBar({ ctId }: { ctId: string }) {
         const d = res.data;
         if (d.status === "running") {
           setProgress(d);
-          setPolling(true);
           iv = setInterval(async () => {
             try {
               const r2 = await api.get(`/towers/${ctId}/sync-status`);
               setProgress(r2.data);
-              if (r2.data.status !== "running") { clearInterval(iv!); setPolling(false); }
-            } catch { clearInterval(iv!); setPolling(false); }
+              if (r2.data.status !== "running") {
+                clearInterval(iv!);
+                if (r2.data.status === "done") onSyncComplete?.();
+              }
+            } catch { clearInterval(iv!); }
           }, 10000);
         }
       } catch {}
@@ -153,6 +153,14 @@ export default function DashboardPage() {
     await api.post(`/towers/${id}/sync${params}`);
     toast.success("Sync started");
     qc.invalidateQueries({ queryKey: ["towers"] });
+  };
+
+  const invalidateAfterSync = (ctId: string) => {
+    qc.invalidateQueries({ queryKey: ["towers"] });
+    qc.invalidateQueries({ queryKey: ["ct-primary", ctId] });
+    qc.invalidateQueries({ queryKey: ["ct-tab", ctId] });
+    qc.invalidateQueries({ queryKey: ["boundary"] });
+    toast.success("Sync complete — data refreshed");
   };
 
   const syncMutation = useMutation({
@@ -306,7 +314,7 @@ export default function DashboardPage() {
               </div>
 
               <div className="col-span-12">
-                <SyncProgressBar ctId={ct.id} />
+                <SyncProgressBar ctId={ct.id} onSyncComplete={() => invalidateAfterSync(ct.id)} />
               </div>
             </div>
           ))}

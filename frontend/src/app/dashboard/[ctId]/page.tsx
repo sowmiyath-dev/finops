@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, Fragment } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
 import Link from "next/link";
@@ -107,6 +107,12 @@ export default function CTDetailPage() {
   const { ctId } = useParams<{ ctId: string }>();
   const { token } = useAuthStore();
   const router = useRouter();
+  const qc = useQueryClient();
+
+  const refreshAll = () => {
+    qc.invalidateQueries({ queryKey: ["ct-primary", ctId] });
+    qc.invalidateQueries({ queryKey: ["ct-tab", ctId] });
+  };
 
   const lastMonth = getLastMonth();
 
@@ -285,6 +291,10 @@ export default function CTDetailPage() {
               </button>
             ))}
           </div>
+          <button onClick={refreshAll} title="Refresh data"
+            className="p-2 border border-gray-300 rounded-md hover:bg-gray-50 transition">
+            <RefreshCw className={`w-4 h-4 text-black ${summaryLoading ? "animate-spin" : ""}`} />
+          </button>
         </div>
       </div>
 
