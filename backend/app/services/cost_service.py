@@ -234,6 +234,10 @@ def stream_cur_file_batches(ct: ControlTower, report_key: str, start_date: str, 
     s3 = _get_s3_client(ct)
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
+    # Expand fetch window by 1 day on each side to catch UTC rows that shift
+    # into adjacent IST dates (e.g. Jul-31 20:00 UTC = Aug-01 01:30 IST)
+    fetch_start = start - timedelta(days=1)
+    fetch_end = end + timedelta(days=1)
     batch = []
 
     try:
@@ -243,8 +247,9 @@ def stream_cur_file_batches(ct: ControlTower, report_key: str, start_date: str, 
         with gzip.open(obj["Body"], mode="rt", encoding="utf-8") as f:
             for row in csv.DictReader(f):
                 try:
-                    parsed = _parse_row(row, start, end)
-                    if parsed:
+                    # Fetch with expanded window, then filter to exact IST range after conversion
+                    parsed = _parse_row(row, fetch_start, fetch_end)
+                    if parsed and start <= parsed["date"] <= end:
                         batch.append(parsed)
                         if len(batch) >= batch_size:
                             yield batch
