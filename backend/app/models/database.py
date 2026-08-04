@@ -14,11 +14,11 @@ engine = create_async_engine(
     connect_args={
         "server_settings": {
             "timezone": "UTC",
-            "statement_timeout": "15000",
+            "statement_timeout": "120000",
             "idle_in_transaction_session_timeout": "30000",
             "work_mem": "64MB",
         },
-        "command_timeout": 15,
+        "command_timeout": 120,
     },
 )
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
