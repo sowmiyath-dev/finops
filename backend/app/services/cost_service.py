@@ -3,8 +3,10 @@ import gzip
 import json
 import csv
 import logging
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime, timezone, time
 from typing import Optional
+
+_IST = timezone(timedelta(hours=5, minutes=30))
 from app.services.aws_session import get_boto3_session
 from app.models.db_models import ControlTower
 
@@ -107,7 +109,12 @@ def _parse_row(row: dict, start: date, end: date) -> Optional[dict]:
     usage_start = row.get("lineItem/UsageStartDate", "")
     if not usage_start:
         return None
-    row_date = date.fromisoformat(usage_start[:10])
+    # CUR timestamps are UTC — convert to IST to match AWS portal date grouping
+    try:
+        dt_utc = datetime.fromisoformat(usage_start.replace("Z", "+00:00"))
+        row_date = dt_utc.astimezone(_IST).date()
+    except ValueError:
+        row_date = date.fromisoformat(usage_start[:10])
     if row_date < start or row_date > end:
         return None
 
