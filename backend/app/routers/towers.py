@@ -101,10 +101,13 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Option
             async with AsyncSessionLocal() as db:
                 result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
                 ct = result.scalar_one_or_none()
-                count_result = await db.execute(
-                    select(func.count()).where(CostRecord.control_tower_id == ct_id)
+                from sqlalchemy import text as _sa_text
+                import uuid as _uuid
+                _exists = await db.execute(
+                    _sa_text("SELECT EXISTS(SELECT 1 FROM cost_records WHERE control_tower_id = :ct_id LIMIT 1)")
+                    .bindparams(ct_id=_uuid.UUID(ct_id))
                 )
-                existing_count = count_result.scalar() or 0
+                existing_count = 1 if _exists.scalar() else 0
 
             if force_start and force_end:
                 start_date, end_date = force_start, force_end
