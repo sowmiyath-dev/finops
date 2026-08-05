@@ -440,15 +440,23 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
         start_dt = dt_date.fromisoformat(start_date)
         end_dt = dt_date.fromisoformat(end_date)
 
-        # Delete existing records for the date range before re-inserting
-        # azure_cost_records has no unique constraint -- delete-then-insert avoids duplicates
-        logger.info(f"Azure sync -- deleting {start_dt} to {end_dt} before re-insert")
+        # Expand delete range to cover full months of all blobs found.
+        # Blobs are per-month folders (e.g. 20250701-20250801), so a 3-day incremental
+        # sync would find the full July blob but only delete 3 days — causing duplicates
+        # for the rest of the month. Delete the entire month span of the blobs instead.
+        blob_months_start = start_dt.replace(day=1)
+        if end_dt.month == 12:
+            blob_months_end = end_dt.replace(year=end_dt.year + 1, month=1, day=1) - timedelta(days=1)
+        else:
+            blob_months_end = end_dt.replace(month=end_dt.month + 1, day=1) - timedelta(days=1)
+
+        logger.info(f"Azure sync -- deleting {blob_months_start} to {blob_months_end} (full month range) before re-insert")
         async with SyncSessionLocal() as db:
             await db.execute(
                 delete(AzureCostRecord).where(
                     AzureCostRecord.control_tower_id == ct_id,
-                    AzureCostRecord.date >= start_dt,
-                    AzureCostRecord.date <= end_dt,
+                    AzureCostRecord.date >= blob_months_start,
+                    AzureCostRecord.date <= blob_months_end,
                 )
             )
             await db.commit()
