@@ -191,7 +191,7 @@ export default function AzureTenantDetail() {
           <span className="text-xs text-black">to</span>
           <input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setActivePreset(""); }}
             className="border border-gray-400 rounded-md px-3 py-2 text-xs text-black focus:border-blue-900 outline-none" />
-          <button onClick={() => loadData(tab, startDate, endDate)}
+          <button onClick={() => refetchCost()}
             className="px-3 py-2 bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold rounded-md transition">Apply</button>
           <button onClick={() => { setShowSyncModal(true); setSyncResult(""); }}
             className="flex items-center gap-1.5 px-3 py-2 bg-[#0078D4] hover:bg-[#006CBF] text-white text-xs font-bold rounded-md transition">
