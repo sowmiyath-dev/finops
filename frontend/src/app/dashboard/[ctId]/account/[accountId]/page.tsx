@@ -7,7 +7,6 @@ import api from "@/lib/api";
 import DateRangePicker, { DateRange, getLast30 } from "@/components/DateRangePicker";
 import Link from "next/link";
 import { ChevronRight, Download, Search, BarChart2 } from "lucide-react";
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import toast from "react-hot-toast";
 
 const COLORS = ["#0f2d5e","#1a6fa8","#ec7211","#1d8348","#c0392b","#8e44ad","#2980b9","#27ae60"];
@@ -93,7 +92,7 @@ export default function AccountDetailPage() {
 
   const { data: serviceData = [], isLoading: svcLoading } = useQuery({
     queryKey: ["svc", accountId, dateRange?.start, dateRange?.end],
-    queryFn: () => api.post("/reports/service-wise", { ...baseFilter, group_by: "service", granularity: "monthly" }).then((r) => r.data),
+    queryFn: () => api.post("/reports/service-wise", { ...baseFilter, group_by: "service", granularity: "daily" }).then((r) => r.data),
     enabled: canQuery,
     staleTime: 2 * 60 * 1000,
   });
@@ -119,7 +118,40 @@ export default function AccountDetailPage() {
     staleTime: 2 * 60 * 1000,
   });
 
-  const totalCost = serviceData.reduce((s: number, r: any) => s + r.cost, 0);
+  // Build pivot: { service -> { date -> cost } } for AWS-portal-style table
+  const allDates: string[] = Array.from(
+    new Set(serviceData.map((r: any) => r.date as string))
+  ).sort() as string[];
+
+  const pivotMap: Record<string, Record<string, number>> = {};
+  for (const r of serviceData) {
+    if (!pivotMap[r.service]) pivotMap[r.service] = {};
+    pivotMap[r.service][r.date] = (pivotMap[r.service][r.date] || 0) + r.cost;
+  }
+
+  const serviceRows = Object.entries(pivotMap)
+    .map(([service, byDate]) => ({
+      service,
+      total: Object.values(byDate).reduce((s, v) => s + v, 0),
+      byDate,
+    }))
+    .sort((a, b) => b.total - a.total);
+
+  const grandTotal = serviceRows.reduce((s, r) => s + r.total, 0);
+  const colTotals: Record<string, number> = {};
+  for (const d of allDates) {
+    colTotals[d] = serviceRows.reduce((s, r) => s + (r.byDate[d] || 0), 0);
+  }
+
+  const totalCost = grandTotal;
+
+  const fmtDate = (d: string) => {
+    const dt = new Date(d + "T00:00:00");
+    return dt.toLocaleDateString("en-US", { month: "short", day: "2-digit" });
+  };
+
+  const fmtUSD = (v: number) =>
+    v === 0 ? "-" : `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   // Show spinner while boundary or towers are still loading
   if (!dateRange) return <Spinner />;
@@ -273,52 +305,56 @@ export default function AccountDetailPage() {
           <button onClick={() => setTab("tag")}      className={tabCls(tab === "tag")}>By Tag</button>
         </div>
 
-        {/* Service Tab */}
+        {/* Service Tab — AWS-portal-style pivot table */}
         {tab === "service" && (
           svcLoading ? <Spinner /> :
-          serviceData.length === 0 ? (
+          serviceRows.length === 0 ? (
             <div className="text-center py-16 text-sm font-semibold text-black">No cost data for this period.</div>
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-              <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5">
-                <h3 className="text-sm font-bold text-black mb-4">Service Cost Distribution</h3>
-                <ResponsiveContainer width="100%" height={280}>
-                  <PieChart>
-                    <Pie data={serviceData.slice(0, 8)} dataKey="cost" nameKey="service"
-                      cx="50%" cy="50%" outerRadius={110}
-                      label={({ name, percent }) => `${name?.slice(0, 10)} ${(percent * 100).toFixed(0)}%`}
-                      labelLine={false}>
-                      {serviceData.slice(0, 8).map((_: any, i: number) => (
-                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      formatter={(v: any) => [`$${Number(v).toFixed(2)}`, "Cost"]}
-                      contentStyle={{ background: "white", border: "2px solid #0f2d5e", borderRadius: 6 }}
-                      labelStyle={{ color: "#000000", fontWeight: 700 }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
+            <div className="bg-white rounded-lg border border-gray-300 shadow-sm overflow-hidden">
+              <div className="text-xs font-bold text-black px-4 py-2 bg-gray-50 border-b border-gray-200">
+                {serviceRows.length} services &nbsp;·&nbsp; {allDates.length} days
               </div>
-
-              <div className="bg-white rounded-lg border border-gray-300 shadow-sm overflow-hidden">
-                <div className="grid grid-cols-3 px-5 py-3 bg-gray-100 border-b-2 border-gray-300 text-xs font-bold uppercase tracking-wider text-black">
-                  <span>Service</span><span className="text-right">Cost</span><span className="text-right">%</span>
-                </div>
-                <div className="overflow-y-auto max-h-72">
-                  {serviceData.map((r: any, i: number) => (
-                    <div key={r.service} className="grid grid-cols-3 px-5 py-2.5 border-b border-gray-200 hover:bg-blue-50 transition">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: COLORS[i % COLORS.length] }} />
-                        <span className="text-sm font-semibold text-black truncate">{r.service}</span>
-                      </div>
-                      <span className="text-right text-sm font-bold font-mono text-blue-900">${r.cost.toFixed(2)}</span>
-                      <span className="text-right text-sm font-semibold text-black">
-                        {totalCost > 0 ? ((r.cost / totalCost) * 100).toFixed(1) : 0}%
-                      </span>
-                    </div>
-                  ))}
-                </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="bg-gray-100 border-b-2 border-gray-300">
+                      <th className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-black sticky left-0 bg-gray-100 min-w-[200px]">Service</th>
+                      <th className="text-right px-4 py-3 text-xs font-bold uppercase tracking-wider text-black whitespace-nowrap">Service Total</th>
+                      {allDates.map((d) => (
+                        <th key={d} className="text-right px-4 py-3 text-xs font-bold uppercase tracking-wider text-black whitespace-nowrap">
+                          {fmtDate(d)}
+                        </th>
+                      ))}
+                    </tr>
+                    {/* Grand total row */}
+                    <tr className="bg-blue-900 text-white border-b-2 border-blue-800">
+                      <td className="px-4 py-2.5 text-xs font-bold sticky left-0 bg-blue-900">Total costs</td>
+                      <td className="text-right px-4 py-2.5 text-xs font-bold font-mono">{fmtUSD(grandTotal)}</td>
+                      {allDates.map((d) => (
+                        <td key={d} className="text-right px-4 py-2.5 text-xs font-bold font-mono">{fmtUSD(colTotals[d] || 0)}</td>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {serviceRows.map((row, i) => (
+                      <tr key={row.service} className={`border-b border-gray-200 hover:bg-blue-50 transition ${i % 2 === 0 ? "bg-white" : "bg-gray-50"}`}>
+                        <td className={`px-4 py-2.5 text-xs font-semibold text-black sticky left-0 ${i % 2 === 0 ? "bg-white" : "bg-gray-50"} hover:bg-blue-50`}>
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: COLORS[i % COLORS.length] }} />
+                            <span className="truncate max-w-[180px]" title={row.service}>{row.service}</span>
+                          </div>
+                        </td>
+                        <td className="text-right px-4 py-2.5 text-xs font-bold font-mono text-blue-900 whitespace-nowrap">{fmtUSD(row.total)}</td>
+                        {allDates.map((d) => (
+                          <td key={d} className="text-right px-4 py-2.5 text-xs font-mono text-black whitespace-nowrap">
+                            {fmtUSD(row.byDate[d] || 0)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           )
