@@ -3,7 +3,7 @@ import gzip
 import json
 import csv
 import logging
-from datetime import date, timedelta, datetime, timezone, time
+from datetime import date, timedelta, timezone, time
 from typing import Optional
 
 _IST = timezone(timedelta(hours=5, minutes=30))
@@ -109,12 +109,12 @@ def _parse_row(row: dict, start: date, end: date) -> Optional[dict]:
     usage_start = row.get("lineItem/UsageStartDate", "")
     if not usage_start:
         return None
-    # CUR timestamps are UTC — convert to IST to match AWS portal date grouping
+    # Use UTC date to match AWS portal date grouping — do NOT convert to IST
+    # AWS Cost Explorer groups by UTC date; converting to IST shifts rows across day boundaries
     try:
-        dt_utc = datetime.fromisoformat(usage_start.replace("Z", "+00:00"))
-        row_date = dt_utc.astimezone(_IST).date()
-    except ValueError:
         row_date = date.fromisoformat(usage_start[:10])
+    except ValueError:
+        return None
     if row_date < start or row_date > end:
         return None
 
@@ -234,10 +234,6 @@ def stream_cur_file_batches(ct: ControlTower, report_key: str, start_date: str, 
     s3 = _get_s3_client(ct)
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
-    # Expand fetch window by 1 day on each side to catch UTC rows that shift
-    # into adjacent IST dates (e.g. Jul-31 20:00 UTC = Aug-01 01:30 IST)
-    fetch_start = start - timedelta(days=1)
-    fetch_end = end + timedelta(days=1)
     batch = []
 
     try:
@@ -247,9 +243,8 @@ def stream_cur_file_batches(ct: ControlTower, report_key: str, start_date: str, 
         with gzip.open(obj["Body"], mode="rt", encoding="utf-8") as f:
             for row in csv.DictReader(f):
                 try:
-                    # Fetch with expanded window, then filter to exact IST range after conversion
-                    parsed = _parse_row(row, fetch_start, fetch_end)
-                    if parsed and start <= parsed["date"] <= end:
+                    parsed = _parse_row(row, start, end)
+                    if parsed:
                         batch.append(parsed)
                         if len(batch) >= batch_size:
                             yield batch
