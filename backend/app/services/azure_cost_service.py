@@ -3,7 +3,7 @@ import csv
 import json
 import logging
 import subprocess
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from typing import Optional
 from app.models.db_models import ControlTower
 from app.services.azure_session import get_blob_service_client
@@ -236,43 +236,76 @@ def get_azure_billing_periods(start_date: str, end_date: str) -> list[str]:
     return periods
 
 
+def _get_month_folder_variants(month_start: date) -> list[str]:
+    """Return all possible Azure export folder name variants for a given month."""
+    if month_start.month == 12:
+        next_month = month_start.replace(year=month_start.year + 1, month=1, day=1)
+    else:
+        next_month = month_start.replace(month=month_start.month + 1, day=1)
+    month_end_inclusive = next_month - timedelta(days=1)
+    # Azure uses either YYYYMMDD-YYYYMMDD (end-inclusive) or YYYYMMDD-YYYYMMDD (next month start)
+    return [
+        f"{month_start.strftime('%Y%m%d')}-{month_end_inclusive.strftime('%Y%m%d')}",
+        f"{month_start.strftime('%Y%m%d')}-{next_month.strftime('%Y%m%d')}",
+    ]
+
+
+def get_full_month_range_for_dates(start_date: str, end_date: str) -> tuple[date, date]:
+    """Expand a date range to cover full calendar months — used for delete+reinsert."""
+    start = date.fromisoformat(start_date)
+    end = date.fromisoformat(end_date)
+    full_start = start.replace(day=1)
+    if end.month == 12:
+        full_end = end.replace(year=end.year + 1, month=1, day=1) - timedelta(days=1)
+    else:
+        full_end = end.replace(month=end.month + 1, day=1) - timedelta(days=1)
+    return full_start, full_end
+
+
 def find_azure_export_blobs(ct: ControlTower, start_date: str, end_date: str, is_first_sync: bool = False) -> list[str]:
-    """Find Azure cost export blobs — only looks in the folder matching the sync date range."""
+    """Find all Azure cost export blobs covering the months in the given date range."""
     _sync_clock()
     blob_client = get_blob_service_client(ct)
     container = blob_client.get_container_client(ct.azure_container_name)
     csv_blobs: list[str] = []
 
     export_name = ct.azure_export_name or "finoptix"
-
-    # Build the month folder for the date range e.g. 20260701-20260731
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
 
-    # Collect all month folders that overlap with the date range
-    month_folders: list[str] = []
+    # Collect all month start dates that overlap with the date range
+    month_starts: list[date] = []
     cur = start.replace(day=1)
     while cur <= end:
+        month_starts.append(cur)
         if cur.month == 12:
-            next_month = cur.replace(year=cur.year + 1, month=1, day=1)
+            cur = cur.replace(year=cur.year + 1, month=1, day=1)
         else:
-            next_month = cur.replace(month=cur.month + 1, day=1)
-        folder = f"{cur.strftime('%Y%m%d')}-{next_month.strftime('%Y%m%d')}"
-        month_folders.append(folder)
-        cur = next_month
+            cur = cur.replace(month=cur.month + 1, day=1)
 
-    # Prefixes to search — only daily export paths for the relevant month folders
+    # Build all prefix variants for every month and every known export path pattern
     prefixes = []
-    for folder in month_folders:
-        prefixes += [
-            f"{export_name}-daily-actualcost/all-subs-daily-actualcost/{folder}/",
-            f"{export_name}-daily-amortizedcost/all-subs-daily-amortizedcost/{folder}/",
-            f"{export_name}-actualcost/{export_name}-actualcost/{folder}/",
-            f"{export_name}-amortizedcost/{export_name}-amortizedcost/{folder}/",
-            f"{export_name}/{export_name}/{folder}/",
-        ]
+    for month_start in month_starts:
+        for folder in _get_month_folder_variants(month_start):
+            prefixes += [
+                # Daily export — all subscriptions
+                f"{export_name}-daily-actualcost/all-subs-daily-actualcost/{folder}/",
+                f"{export_name}-daily-amortizedcost/all-subs-daily-amortizedcost/{folder}/",
+                # Daily export — export name as subfolder
+                f"{export_name}-daily-actualcost/{export_name}-daily-actualcost/{folder}/",
+                f"{export_name}-daily-amortizedcost/{export_name}-daily-amortizedcost/{folder}/",
+                # Monthly export
+                f"{export_name}-actualcost/{export_name}-actualcost/{folder}/",
+                f"{export_name}-amortizedcost/{export_name}-amortizedcost/{folder}/",
+                # Generic single export
+                f"{export_name}/{export_name}/{folder}/",
+            ]
 
+    seen: set[str] = set()
     for prefix in prefixes:
+        if prefix in seen:
+            continue
+        seen.add(prefix)
         try:
             blobs = list(container.list_blobs(name_starts_with=prefix))
             found = [b.name for b in blobs if b.name.endswith(".csv") or b.name.endswith(".csv.gz")]
