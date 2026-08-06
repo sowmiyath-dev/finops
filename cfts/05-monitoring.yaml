@@ -1,0 +1,220 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "FinOps AI - CloudWatch Alarms, Log Groups, and SNS for monitoring"
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [dev, stg, prod]
+    Default: prod
+
+  CostChatLambdaName:
+    Type: String
+    Description: Name of the cost chat Lambda (from 03-lambda-ai stack)
+
+  ApiId:
+    Type: String
+    Description: API Gateway REST API ID (from 04-apigateway-ai stack)
+
+  AlertEmail:
+    Type: String
+    Description: Email address for alarm notifications
+    Default: ""
+
+  LambdaErrorThreshold:
+    Type: Number
+    Default: 5
+    Description: Number of Lambda errors before alarm triggers
+
+  BedrockCostBudgetUSD:
+    Type: Number
+    Default: 50
+    Description: Monthly Bedrock spend budget in USD before alert
+
+Conditions:
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
+  IsProduction: !Equals [!Ref Environment, prod]
+
+Resources:
+
+  # ==================== SNS Topic ====================
+  AIAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${AWS::StackName}-alerts"
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  AIAlertEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties:
+      TopicArn: !Ref AIAlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  # ==================== Lambda Alarms ====================
+  LambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-lambda-errors"
+      AlarmDescription: FinOps AI Lambda error rate too high
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref CostChatLambdaName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !Ref LambdaErrorThreshold
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      AlarmActions:
+        - !Ref AIAlertTopic
+      TreatMissingData: notBreaching
+
+  LambdaThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-lambda-throttles"
+      AlarmDescription: FinOps AI Lambda being throttled
+      MetricName: Throttles
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref CostChatLambdaName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      AlarmActions:
+        - !Ref AIAlertTopic
+      TreatMissingData: notBreaching
+
+  LambdaDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-lambda-duration"
+      AlarmDescription: FinOps AI Lambda taking too long (Bedrock slow response)
+      MetricName: Duration
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref CostChatLambdaName
+      Statistic: p95
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 45000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      AlarmActions:
+        - !Ref AIAlertTopic
+      TreatMissingData: notBreaching
+
+  # ==================== API Gateway Alarms ====================
+  Api5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-api-5xx"
+      AlarmDescription: FinOps AI API Gateway 5XX errors
+      MetricName: 5XXError
+      Namespace: AWS/ApiGateway
+      Dimensions:
+        - Name: ApiId
+          Value: !Ref ApiId
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      AlarmActions:
+        - !Ref AIAlertTopic
+      TreatMissingData: notBreaching
+
+  # ==================== AWS Budget for Bedrock ====================
+  BedrockBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: !Sub "${AWS::StackName}-bedrock-monthly"
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref BedrockCostBudgetUSD
+          Unit: USD
+        CostFilters:
+          Service:
+            - Amazon Bedrock
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref AIAlertTopic
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref AIAlertTopic
+
+  # ==================== Dashboard ====================
+  AIMonitoringDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${AWS::StackName}-monitoring"
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "properties": {
+                "title": "Lambda Invocations & Errors",
+                "metrics": [
+                  ["AWS/Lambda", "Invocations", "FunctionName", "${CostChatLambdaName}"],
+                  ["AWS/Lambda", "Errors", "FunctionName", "${CostChatLambdaName}"]
+                ],
+                "period": 300,
+                "stat": "Sum",
+                "view": "timeSeries"
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "title": "Lambda Duration (p95)",
+                "metrics": [
+                  ["AWS/Lambda", "Duration", "FunctionName", "${CostChatLambdaName}", {"stat": "p95"}]
+                ],
+                "period": 300,
+                "view": "timeSeries"
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "title": "API Gateway Requests",
+                "metrics": [
+                  ["AWS/ApiGateway", "Count", "ApiId", "${ApiId}"],
+                  ["AWS/ApiGateway", "5XXError", "ApiId", "${ApiId}"],
+                  ["AWS/ApiGateway", "4XXError", "ApiId", "${ApiId}"]
+                ],
+                "period": 300,
+                "stat": "Sum",
+                "view": "timeSeries"
+              }
+            }
+          ]
+        }
+
+Outputs:
+  AIAlertTopicArn:
+    Value: !Ref AIAlertTopic
+    Export:
+      Name: !Sub "${AWS::StackName}-AIAlertTopicArn"
+
+  DashboardUrl:
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home#dashboards:name=${AWS::StackName}-monitoring"

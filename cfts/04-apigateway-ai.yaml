@@ -1,0 +1,232 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "FinOps AI - API Gateway REST API for AI chat and summary endpoints"
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [dev, stg, prod]
+    Default: prod
+
+  CostChatLambdaArn:
+    Type: String
+    Description: ARN of the cost chat Lambda (from 03-lambda-ai stack)
+
+  CostChatLambdaName:
+    Type: String
+    Description: Name of the cost chat Lambda (from 03-lambda-ai stack)
+
+  AllowOrigin:
+    Type: String
+    Default: "https://finoptix.novactech.in"
+    Description: CORS allowed origin
+
+  ThrottlingRateLimit:
+    Type: Number
+    Default: 50
+
+  ThrottlingBurstLimit:
+    Type: Number
+    Default: 100
+
+  DeploymentVersion:
+    Type: String
+    Default: "v1"
+
+Conditions:
+  IsProduction: !Equals [!Ref Environment, prod]
+
+Resources:
+
+  # ==================== REST API ====================
+  FinOpsAIRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub "${AWS::StackName}-api"
+      Description: FinOps AI REST API — cost chat and summary endpoints
+      EndpointConfiguration:
+        Types: [REGIONAL]
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: FinOps-AI
+
+  # ==================== Security Headers ====================
+  GatewayResponse4XX:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref FinOpsAIRestApi
+      ResponseType: DEFAULT_4XX
+      ResponseParameters:
+        gatewayresponse.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+        gatewayresponse.header.X-Content-Type-Options: "'nosniff'"
+        gatewayresponse.header.X-Frame-Options: "'DENY'"
+
+  GatewayResponse5XX:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref FinOpsAIRestApi
+      ResponseType: DEFAULT_5XX
+      ResponseParameters:
+        gatewayresponse.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+        gatewayresponse.header.X-Content-Type-Options: "'nosniff'"
+        gatewayresponse.header.X-Frame-Options: "'DENY'"
+
+  # ==================== /ai resource ====================
+  AiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref FinOpsAIRestApi
+      ParentId: !GetAtt FinOpsAIRestApi.RootResourceId
+      PathPart: ai
+
+  # ==================== /ai/chat ====================
+  ChatResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref FinOpsAIRestApi
+      ParentId: !Ref AiResource
+      PathPart: chat
+
+  ChatMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref FinOpsAIRestApi
+      ResourceId: !Ref ChatResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        TimeoutInMillis: 29000
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaArn}/invocations"
+          - LambdaArn: !Ref CostChatLambdaArn
+
+  ChatOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref FinOpsAIRestApi
+      ResourceId: !Ref ChatResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowOrigin}'"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # ==================== /ai/summary ====================
+  SummaryResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref FinOpsAIRestApi
+      ParentId: !Ref AiResource
+      PathPart: summary
+
+  SummaryMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref FinOpsAIRestApi
+      ResourceId: !Ref SummaryResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        TimeoutInMillis: 29000
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaArn}/invocations"
+          - LambdaArn: !Ref CostChatLambdaArn
+
+  SummaryOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref FinOpsAIRestApi
+      ResourceId: !Ref SummaryResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowOrigin}'"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # ==================== Lambda Permissions ====================
+  ChatLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CostChatLambdaName
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${FinOpsAIRestApi}/*"
+
+  # ==================== Deployment & Stage ====================
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - ChatMethod
+      - SummaryMethod
+    Properties:
+      RestApiId: !Ref FinOpsAIRestApi
+      Description: !Sub "FinOps AI deployment ${DeploymentVersion}"
+
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref FinOpsAIRestApi
+      DeploymentId: !Ref ApiDeployment
+      StageName: !Ref Environment
+      Description: !Sub "${Environment} stage"
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          MetricsEnabled: true
+          ThrottlingBurstLimit: !Ref ThrottlingBurstLimit
+          ThrottlingRateLimit: !Ref ThrottlingRateLimit
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+  ApiId:
+    Value: !Ref FinOpsAIRestApi
+    Export:
+      Name: !Sub "${AWS::StackName}-ApiId"
+
+  ApiEndpoint:
+    Value: !Sub "https://${FinOpsAIRestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}"
+    Export:
+      Name: !Sub "${AWS::StackName}-ApiEndpoint"
+
+  ChatEndpoint:
+    Value: !Sub "https://${FinOpsAIRestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/ai/chat"
+    Export:
+      Name: !Sub "${AWS::StackName}-ChatEndpoint"
+
+  SummaryEndpoint:
+    Value: !Sub "https://${FinOpsAIRestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/ai/summary"
+    Export:
+      Name: !Sub "${AWS::StackName}-SummaryEndpoint"
