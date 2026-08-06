@@ -1,45 +1,44 @@
 import asyncio
 import uuid as _uuid
-from app.models.database import AsyncSessionLocal, init_db
-from sqlalchemy import text
+import os
+import asyncpg
+from app.config import settings
 
 CT_ID = '051dd3a4-9b33-42b4-ad09-e4606264fd11'
-CT_UUID = _uuid.UUID(CT_ID)
+CT_UUID = str(_uuid.UUID(CT_ID))
+
+# Strip asyncpg+postgresql:// -> postgresql:// for asyncpg.connect
+def _pg_dsn(url: str) -> str:
+    return url.replace("postgresql+asyncpg://", "postgresql://")
 
 async def rebuild():
-    await init_db()
+    dsn = _pg_dsn(settings.DATABASE_URL)
 
-    # Step 1: get distinct months
-    async with AsyncSessionLocal() as db:
-        r = await db.execute(text("""
+    # Raw asyncpg connection — no command_timeout, no statement_timeout
+    conn = await asyncpg.connect(dsn, statement_cache_size=0)
+    await conn.execute("SET statement_timeout = 0")
+
+    try:
+        # Step 1: get distinct months
+        rows = await conn.fetch("""
             SELECT DISTINCT TO_CHAR(date, 'YYYY-MM') AS month
             FROM azure_cost_records
-            WHERE control_tower_id = :ct_id
+            WHERE control_tower_id = $1::uuid
             ORDER BY month
-        """).bindparams(ct_id=CT_UUID))
-        months = [row[0] for row in r.fetchall()]
+        """, CT_UUID)
+        months = [r['month'] for r in rows]
+        print(f'Found {len(months)} months: {months}')
 
-    print(f'Found {len(months)} months: {months}')
-
-    # Step 2: clear existing summary for this CT using raw connection (no timeout)
-    async with AsyncSessionLocal() as db:
-        conn = await db.connection()
-        raw = await conn.get_raw_connection()
-        await raw.driver_connection.execute('SET statement_timeout = 0')
-        await db.execute(
-            text('DELETE FROM azure_monthly_summary WHERE control_tower_id = :ct_id')
-            .bindparams(ct_id=CT_UUID)
+        # Step 2: clear existing summary for this CT
+        deleted = await conn.execute(
+            "DELETE FROM azure_monthly_summary WHERE control_tower_id = $1::uuid",
+            CT_UUID
         )
-        await db.commit()
-    print('Cleared old summary rows for this CT')
+        print(f'Cleared old summary: {deleted}')
 
-    # Step 3: rebuild month by month
-    for month in months:
-        async with AsyncSessionLocal() as db:
-            conn = await db.connection()
-            raw = await conn.get_raw_connection()
-            await raw.driver_connection.execute('SET statement_timeout = 0')
-            await db.execute(text("""
+        # Step 3: rebuild month by month
+        for month in months:
+            await conn.execute("""
                 INSERT INTO azure_monthly_summary
                     (id, control_tower_id, month, subscription_id, subscription_name,
                      actual_cost, amortized_cost, refreshed_at)
@@ -52,22 +51,24 @@ async def rebuild():
                            SUM(actual_cost) AS actual_cost
                     FROM azure_cost_records
                     WHERE cost_type = 'actual'
-                      AND control_tower_id = :ct_id
-                      AND TO_CHAR(date, 'YYYY-MM') = :month
+                      AND control_tower_id = $1::uuid
+                      AND TO_CHAR(date, 'YYYY-MM') = $2
                     GROUP BY control_tower_id, TO_CHAR(date, 'YYYY-MM'), subscription_id
                 ) a
                 LEFT JOIN (
                     SELECT subscription_id, SUM(amortized_cost) AS amortized_cost
                     FROM azure_cost_records
                     WHERE cost_type = 'amortized'
-                      AND control_tower_id = :ct_id
-                      AND TO_CHAR(date, 'YYYY-MM') = :month
+                      AND control_tower_id = $1::uuid
+                      AND TO_CHAR(date, 'YYYY-MM') = $2
                     GROUP BY subscription_id
                 ) m ON a.subscription_id = m.subscription_id
-            """).bindparams(ct_id=CT_UUID, month=month))
-            await db.commit()
-        print(f'  {month} done')
+            """, CT_UUID, month)
+            print(f'  {month} done')
 
-    print('All months rebuilt successfully')
+        print('All months rebuilt successfully')
+
+    finally:
+        await conn.close()
 
 asyncio.run(rebuild())
