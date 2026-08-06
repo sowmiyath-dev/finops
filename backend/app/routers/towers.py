@@ -158,9 +158,6 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Option
             for period_idx, period in enumerate(billing_periods):
                 p_start = date(int(period[:4]), int(period[4:6]), int(period[6:8]))
                 p_end_raw = date(int(period[9:13]), int(period[13:15]), int(period[15:17]))
-                month_start = max(p_start, date.fromisoformat(start_date))
-                month_end = min(p_end_raw - timedelta(days=1), date.fromisoformat(end_date))
-
                 _sync_progress[ct_id]["message"] = f"Syncing {period} ({period_idx+1}/{len(billing_periods)})"
                 _sync_progress[ct_id]["percent"] = 30 + int(60 * period_idx / len(billing_periods))
 
@@ -177,26 +174,32 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Option
                     logger.info(f"No files for period {period}, skipping")
                     continue
 
-                # Delete existing records for this month
+                # Delete full month range - CUR files are per-month, so deleting only
+                # the incremental window leaves earlier days orphaned on re-sync.
+                full_month_start = p_start
+                full_month_end = p_end_raw - timedelta(days=1)
                 async with AsyncSessionLocal() as db:
                     await db.execute(
                         delete(CostRecord).where(
                             CostRecord.control_tower_id == ct_id,
-                            CostRecord.date >= month_start,
-                            CostRecord.date <= month_end,
+                            CostRecord.date >= full_month_start,
+                            CostRecord.date <= full_month_end,
                         )
                     )
                     await db.commit()
+
+                file_start = full_month_start.isoformat()
+                file_end = full_month_end.isoformat()
 
                 # Process ONE FILE AT A TIME using streaming batches
                 for file_idx, report_key in enumerate(report_keys):
                     logger.info(f"Period {period} file {file_idx+1}/{len(report_keys)}: {report_key}")
                     try:
-                        # stream_cur_file_batches is a generator â€” runs in executor per batch
+                        # stream_cur_file_batches is a generator - runs in executor per batch
                         streamer = await loop.run_in_executor(
                             _executor,
                             lambda rk=report_key: list(stream_cur_file_batches(
-                                ct, rk, month_start.isoformat(), month_end.isoformat(), 5000
+                                ct, rk, file_start, file_end, 5000
                             ))
                         )
                     except Exception as file_err:
