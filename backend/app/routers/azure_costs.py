@@ -1011,10 +1011,8 @@ async def all_business_azure_costs(
     result: dict = {str(m.business_id): {"actual_cost": 0.0, "savings": 0.0, "true_cost": 0.0} for m in mappings}
 
     async def _query_costs(conditions_actual, conditions_amortized, group_col):
-        actual_t, amortized_t = await asyncio.gather(
-            db.execute(select(group_col, func.sum(AzureCostRecord.actual_cost).label("c")).where(*conditions_actual).group_by(group_col)),
-            db.execute(select(group_col, func.sum(AzureCostRecord.amortized_cost).label("c")).where(*conditions_amortized).group_by(group_col)),
-        )
+        actual_t = await db.execute(select(group_col, func.sum(AzureCostRecord.actual_cost).label("c")).where(*conditions_actual).group_by(group_col))
+        amortized_t = await db.execute(select(group_col, func.sum(AzureCostRecord.amortized_cost).label("c")).where(*conditions_amortized).group_by(group_col))
         actual_map = {str(r[0]): float(r[1] or 0) for r in actual_t.all()}
         amortized_map = {str(r[0]): float(r[1] or 0) for r in amortized_t.all()}
         return actual_map, amortized_map
@@ -1068,10 +1066,8 @@ async def all_business_azure_costs(
                 continue
             base.append(AzureCostRecord.resource_id.in_(rids))
 
-        actual_t, amortized_t = await asyncio.gather(
-            db.execute(select(func.sum(AzureCostRecord.actual_cost)).where(*base, AzureCostRecord.cost_type == "actual")),
-            db.execute(select(func.sum(AzureCostRecord.amortized_cost)).where(*base, AzureCostRecord.cost_type == "amortized")),
-        )
+        actual_t = await db.execute(select(func.sum(AzureCostRecord.actual_cost)).where(*base, AzureCostRecord.cost_type == "actual"))
+        amortized_t = await db.execute(select(func.sum(AzureCostRecord.amortized_cost)).where(*base, AzureCostRecord.cost_type == "amortized"))
         actual = float(actual_t.scalar() or 0)
         amortized = float(amortized_t.scalar() or 0)
         result[biz_id]["actual_cost"] += actual
