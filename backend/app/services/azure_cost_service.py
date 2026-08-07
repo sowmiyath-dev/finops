@@ -286,17 +286,24 @@ def find_azure_export_blobs(ct: ControlTower, start_date: str, end_date: str, is
     # Build all prefix variants for every month and every known export path pattern
     prefixes = []
     for month_start in month_starts:
+        month_label = month_start.strftime('%Y-%m')  # e.g. 2026-01
         for folder in _get_month_folder_variants(month_start):
             prefixes += [
-                # Daily export — all subscriptions
+                # Daily export — all subscriptions (June+ pattern)
                 f"{export_name}-daily-actualcost/all-subs-daily-actualcost/{folder}/",
                 f"{export_name}-daily-amortizedcost/all-subs-daily-amortizedcost/{folder}/",
                 # Daily export — export name as subfolder
                 f"{export_name}-daily-actualcost/{export_name}-daily-actualcost/{folder}/",
                 f"{export_name}-daily-amortizedcost/{export_name}-daily-amortizedcost/{folder}/",
-                # Monthly export
+                # Monthly export — named subfolder pattern (Jan-May pattern)
+                f"{export_name}-actualcost/all-subs-actualcost-{month_label}/{folder}/",
+                f"{export_name}-amortizedcost/all-subs-amortizedcost-{month_label}/{folder}/",
+                # Monthly export — export name as subfolder
                 f"{export_name}-actualcost/{export_name}-actualcost/{folder}/",
                 f"{export_name}-amortizedcost/{export_name}-amortizedcost/{folder}/",
+                # Generic single export with uuid subfolder (finoptix/finoptixs-Cost-export-actual/folder/)
+                f"{export_name}/{export_name}s-Cost-export-actual/{folder}/",
+                f"{export_name}/{export_name}s-cost-export-amortized/{folder}/",
                 # Generic single export
                 f"{export_name}/{export_name}/{folder}/",
             ]
