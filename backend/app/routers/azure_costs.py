@@ -108,16 +108,18 @@ async def cost_overview(
                 "savings": savings, "true_cost": amortized if amortized > 0 else actual,
             })
     else:
-        # Fallback to raw table if summary not yet populated
+        # Fallback to raw table if summary not yet populated — sequential queries, same session
         ca = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "actual"]
         cm = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "amortized"]
-        actual_sub_r, amortized_sub_r = await asyncio.gather(
-            db.execute(select(AzureCostRecord.subscription_id, AzureCostRecord.subscription_name,
-                              func.sum(AzureCostRecord.actual_cost).label("actual_cost"))
-                       .where(*ca).group_by(AzureCostRecord.subscription_id, AzureCostRecord.subscription_name)
-                       .order_by(func.sum(AzureCostRecord.actual_cost).desc())),
-            db.execute(select(AzureCostRecord.subscription_id, func.sum(AzureCostRecord.amortized_cost).label("amortized_cost"))
-                       .where(*cm).group_by(AzureCostRecord.subscription_id)),
+        actual_sub_r = await db.execute(
+            select(AzureCostRecord.subscription_id, AzureCostRecord.subscription_name,
+                   func.sum(AzureCostRecord.actual_cost).label("actual_cost"))
+            .where(*ca).group_by(AzureCostRecord.subscription_id, AzureCostRecord.subscription_name)
+            .order_by(func.sum(AzureCostRecord.actual_cost).desc())
+        )
+        amortized_sub_r = await db.execute(
+            select(AzureCostRecord.subscription_id, func.sum(AzureCostRecord.amortized_cost).label("amortized_cost"))
+            .where(*cm).group_by(AzureCostRecord.subscription_id)
         )
         amortized_map = {r.subscription_id: float(r.amortized_cost or 0) for r in amortized_sub_r.all()}
         for r in actual_sub_r.all():
@@ -190,10 +192,8 @@ async def cost_summary(
     if actual == 0 and not subscription_id:
         ca = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "actual"]
         cm = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "amortized"]
-        actual_t, amortized_t = await asyncio.gather(
-            db.execute(select(func.sum(AzureCostRecord.actual_cost)).where(*ca)),
-            db.execute(select(func.sum(AzureCostRecord.amortized_cost)).where(*cm)),
-        )
+        actual_t = await db.execute(select(func.sum(AzureCostRecord.actual_cost)).where(*ca))
+        amortized_t = await db.execute(select(func.sum(AzureCostRecord.amortized_cost)).where(*cm))
         actual = float(actual_t.scalar() or 0)
         amortized = float(amortized_t.scalar() or 0)
 
