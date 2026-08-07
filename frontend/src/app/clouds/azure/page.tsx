@@ -44,13 +44,13 @@ export default function AzurePage() {
     queryKey: ["azure-tenants", lastMonth.start, lastMonth.end],
     queryFn: async () => {
       const [towersRes, overviewRes] = await Promise.all([
-        api.get("/towers/"),
+        api.get("/towers/azure"),
         api.get("/azure-costs/overview", {
           params: { start_date: lastMonth.start, end_date: lastMonth.end },
         }).then((r) => r.data as { summary: TenantCost; subscriptions: { subscription_id: string; actual_cost: number; sp_allocated: number; savings: number; true_cost: number; amortized_cost: number }[] })
           .catch(() => ({ summary: { actual_cost: 0, sp_allocated: 0, savings: 0, true_cost: 0 }, subscriptions: [] })),
       ]);
-      const azure = (towersRes.data as any[]).filter((t: any) => t.cloud_provider === "azure") as AzureTenant[];
+      const azure = towersRes.data as AzureTenant[];
 
       // Build per-tenant cost by matching azure_tenant_id → subscription costs
       // Each tenant's subscriptions are identified by the tenant's azure_tenant_id prefix in subscription_id

@@ -673,6 +673,31 @@ async def rebuild_azure_summary(
     return {"message": "Azure monthly summary rebuild started. All month data will be correct after completion."}
 
 
+@router.get("/azure", response_model=list[ControlTowerOut])
+async def list_azure_towers(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    """Lightweight endpoint — returns only Azure CTs, no sub_accounts."""
+    q = select(ControlTower).where(ControlTower.cloud_provider == "azure")
+    if user.role != "viewer":
+        q = q.where(ControlTower.user_id == user.id)
+    towers = (await db.execute(q)).scalars().all()
+    return [
+        ControlTowerOut(
+            id=t.id, name=t.name, cloud_provider="azure",
+            management_account_id=t.management_account_id,
+            management_account_name=t.management_account_name,
+            auth_method=t.auth_method, is_active=t.is_active,
+            auto_sync_enabled=t.auto_sync_enabled,
+            last_synced_at=t.last_synced_at,
+            azure_tenant_id=t.azure_tenant_id,
+            azure_storage_account=t.azure_storage_account,
+            azure_container_name=t.azure_container_name,
+            azure_export_name=t.azure_export_name,
+            sub_accounts=[],
+        )
+        for t in towers
+    ]
+
+
 @router.get("/sync-active")
 async def list_active_syncs(user: User = Depends(get_current_user)):
     """Returns all CTs that currently have a running sync."""
