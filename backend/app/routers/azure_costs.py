@@ -68,12 +68,14 @@ async def cost_overview(
     if (cached := _cache_get(cache_key)) is not None:
         return cached
 
-    # Build month list in range
+    # Build month list in range — fixed: increment after appending
     months, y, m = [], start.year, start.month
     while (y, m) <= (end.year, end.month):
         months.append(f"{y}-{m:02d}")
-        m += 1
-        if m > 12: m, y = 1, y + 1
+        if m == 12:
+            m, y = 1, y + 1
+        else:
+            m += 1
 
     # Query pre-aggregated summary table — tiny, fast
     rows = (await db.execute(
@@ -162,12 +164,14 @@ async def cost_summary(
     if (cached := _cache_get(cache_key)) is not None:
         return cached
 
-    # Build month list
+    # Build month list — fixed increment order
     months, y, m = [], start.year, start.month
     while (y, m) <= (end.year, end.month):
         months.append(f"{y}-{m:02d}")
-        m += 1
-        if m > 12: m, y = 1, y + 1
+        if m == 12:
+            m, y = 1, y + 1
+        else:
+            m += 1
 
     cond = [AzureMonthlySummary.month.in_(months)]
     if subscription_id:

@@ -63,8 +63,9 @@ export default function FinOpsDashboard() {
     setLoading(true);
     setCosts({});
     try {
+      // Single call replaces 1 + N vertical/business calls
       const [vertsRes, awsCostRes, azureCostRes] = await Promise.all([
-        api.get(`/verticals/`),
+        api.get(`/verticals/with-businesses`),
         api.get(`/verticals/all-businesses-cost`, {
           params: { granularity: "monthly", start_date: start, end_date: end },
         }).then((r) => r.data as Record<string, number>).catch(() => ({} as Record<string, number>)),
@@ -73,19 +74,7 @@ export default function FinOpsDashboard() {
         }).then((r) => r.data as Record<string, { actual_cost: number; savings: number; true_cost: number }>).catch(() => ({} as Record<string, any>)),
       ]);
 
-      const vertList = vertsRes.data as { id: string; name: string; color: string }[];
-
-      const bizResults = await Promise.all(
-        vertList.map((v) =>
-          api.get(`/verticals/${v.id}/businesses`)
-            .then((r) => ({ verticalId: v.id, businesses: r.data as Business[] }))
-        )
-      );
-
-      const fullVerticals: Vertical[] = vertList.map((v) => ({
-        ...v,
-        businesses: bizResults.find((b) => b.verticalId === v.id)?.businesses || [],
-      }));
+      const fullVerticals = vertsRes.data as Vertical[];
 
       const costMap: Record<string, CostRow> = {};
       for (const [bizId, awsCost] of Object.entries(awsCostRes)) {

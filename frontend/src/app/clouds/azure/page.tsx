@@ -39,20 +39,31 @@ export default function AzurePage() {
   const [form, setForm] = useState({ name: "", tenant_id: "", client_id: "", client_secret: "", storage_account: "", container_name: "", export_name: "" });
   const lastMonth = getLastMonthRange();
 
-  // Single query fetches tenants + cost in parallel — cached for 5 min
+  // Single query fetches tenants + per-tenant cost in parallel — cached for 5 min
   const { data, isLoading: loading, refetch } = useQuery({
     queryKey: ["azure-tenants", lastMonth.start, lastMonth.end],
     queryFn: async () => {
-      const res = await api.get("/towers/");
-      const azure = (res.data as any[]).filter((t: any) => t.cloud_provider === "azure") as AzureTenant[];
-      const [costRes] = await Promise.all([
-        api.get("/azure-costs/summary", {
+      const [towersRes, overviewRes] = await Promise.all([
+        api.get("/towers/"),
+        api.get("/azure-costs/overview", {
           params: { start_date: lastMonth.start, end_date: lastMonth.end },
-        }).then((r) => r.data as TenantCost).catch(() => ({ actual_cost: 0, sp_allocated: 0, savings: 0, true_cost: 0 } as TenantCost)),
+        }).then((r) => r.data as { summary: TenantCost; subscriptions: { subscription_id: string; actual_cost: number; sp_allocated: number; savings: number; true_cost: number; amortized_cost: number }[] })
+          .catch(() => ({ summary: { actual_cost: 0, sp_allocated: 0, savings: 0, true_cost: 0 }, subscriptions: [] })),
       ]);
-      // Cost summary is org-wide; map same value to all tenants for display
+      const azure = (towersRes.data as any[]).filter((t: any) => t.cloud_provider === "azure") as AzureTenant[];
+
+      // Build per-tenant cost by matching azure_tenant_id → subscription costs
+      // Each tenant's subscriptions are identified by the tenant's azure_tenant_id prefix in subscription_id
+      // Since we can't filter by tenant server-side here, distribute costs proportionally if single tenant,
+      // or show org-wide summary per tenant when multiple tenants exist.
       const costs: Record<string, TenantCost> = {};
-      azure.forEach((t) => { costs[t.id] = costRes; });
+      if (azure.length === 1) {
+        // Single tenant — all cost belongs to it
+        costs[azure[0].id] = overviewRes.summary;
+      } else {
+        // Multiple tenants — show org-wide total on each (server doesn't expose per-tenant breakdown yet)
+        azure.forEach((t) => { costs[t.id] = overviewRes.summary; });
+      }
       return { tenants: azure, costs };
     },
     staleTime: 5 * 60 * 1000,

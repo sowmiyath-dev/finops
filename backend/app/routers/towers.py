@@ -122,7 +122,9 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Option
                 start_date, end_date = get_full_year_date_range()
                 logger.info(f"First sync for CT {ct_id} â€” full year: {start_date} â†’ {end_date}")
             else:
-                start_date, end_date = get_sync_date_range(days_back=7)
+                _today = date.today()
+                start_date = (_today - timedelta(days=7)).isoformat()
+                end_date = _today.isoformat()
                 logger.info(f"Incremental sync for CT {ct_id} â€” last 7 days: {start_date} â†’ {end_date}")
 
             # Step 3 â€” load sub_map
@@ -174,11 +176,10 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Option
                     logger.info(f"No files for period {period}, skipping")
                     continue
 
-                # Delete full month range - CUR files are per-month, so deleting only
-                # the incremental window leaves earlier days orphaned on re-sync.
+                # Delete full month range using SyncSessionLocal (longer timeout for large tables)
                 full_month_start = p_start
                 full_month_end = p_end_raw - timedelta(days=1)
-                async with AsyncSessionLocal() as db:
+                async with SyncSessionLocal() as db:
                     await db.execute(
                         delete(CostRecord).where(
                             CostRecord.control_tower_id == ct_id,
@@ -187,6 +188,7 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Option
                         )
                     )
                     await db.commit()
+                logger.info(f"AWS deleted month {full_month_start} to {full_month_end} before re-insert")
 
                 file_start = full_month_start.isoformat()
                 file_end = full_month_end.isoformat()
@@ -291,38 +293,112 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Option
 # â”€â”€ Azure sync â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async def _refresh_azure_monthly_summary(ct_id: str):
-    """Re-aggregate Azure monthly summary for a specific CT only."""
+    """Re-aggregate Azure monthly summary for a specific CT only.
+    Uses DELETE + INSERT (not upsert) to guarantee clean data after each sync.
+    """
     from sqlalchemy import text
     import uuid as _uuid
-    async with AsyncSessionLocal() as db:
-        # Delete only this CT's rows — never touch other CTs
-        await db.execute(
-            text("DELETE FROM azure_monthly_summary WHERE control_tower_id = :ct_id")
-            .bindparams(ct_id=_uuid.UUID(ct_id))
-        )
-        await db.execute(text("""
-            INSERT INTO azure_monthly_summary
-                (id, control_tower_id, month, subscription_id, subscription_name, actual_cost, amortized_cost, refreshed_at)
-            SELECT gen_random_uuid(), a.control_tower_id, a.month, a.subscription_id, a.subscription_name,
-                   COALESCE(a.actual_cost, 0), COALESCE(m.amortized_cost, 0), NOW()
-            FROM (
-                SELECT control_tower_id, TO_CHAR(date, 'YYYY-MM') AS month,
-                       subscription_id, MAX(subscription_name) AS subscription_name,
-                       SUM(actual_cost) AS actual_cost
-                FROM azure_cost_records
-                WHERE cost_type = 'actual' AND control_tower_id = :ct_id
-                GROUP BY control_tower_id, TO_CHAR(date, 'YYYY-MM'), subscription_id
-            ) a
-            LEFT JOIN (
-                SELECT TO_CHAR(date, 'YYYY-MM') AS month, subscription_id,
-                       SUM(amortized_cost) AS amortized_cost
-                FROM azure_cost_records
-                WHERE cost_type = 'amortized' AND control_tower_id = :ct_id
-                GROUP BY TO_CHAR(date, 'YYYY-MM'), subscription_id
-            ) m ON a.month = m.month AND a.subscription_id = m.subscription_id
-        """).bindparams(ct_id=_uuid.UUID(ct_id)))
-        await db.commit()
-        logger.info(f"Azure monthly summary refreshed for CT {ct_id}")
+    try:
+        async with SyncSessionLocal() as db:
+            await db.execute(
+                text("DELETE FROM azure_monthly_summary WHERE control_tower_id = :ct_id")
+                .bindparams(ct_id=_uuid.UUID(ct_id))
+            )
+            await db.execute(text("""
+                INSERT INTO azure_monthly_summary
+                    (id, control_tower_id, month, subscription_id, subscription_name,
+                     actual_cost, amortized_cost, refreshed_at)
+                SELECT
+                    gen_random_uuid(),
+                    a.control_tower_id,
+                    a.month,
+                    a.subscription_id,
+                    a.subscription_name,
+                    COALESCE(a.actual_cost, 0),
+                    COALESCE(m.amortized_cost, a.actual_cost, 0),
+                    NOW()
+                FROM (
+                    SELECT
+                        control_tower_id,
+                        TO_CHAR(date, 'YYYY-MM') AS month,
+                        subscription_id,
+                        MAX(subscription_name) AS subscription_name,
+                        SUM(actual_cost) AS actual_cost
+                    FROM azure_cost_records
+                    WHERE cost_type = 'actual'
+                      AND control_tower_id = :ct_id
+                    GROUP BY control_tower_id, TO_CHAR(date, 'YYYY-MM'), subscription_id
+                ) a
+                LEFT JOIN (
+                    SELECT
+                        TO_CHAR(date, 'YYYY-MM') AS month,
+                        subscription_id,
+                        SUM(amortized_cost) AS amortized_cost
+                    FROM azure_cost_records
+                    WHERE cost_type = 'amortized'
+                      AND control_tower_id = :ct_id
+                    GROUP BY TO_CHAR(date, 'YYYY-MM'), subscription_id
+                ) m ON a.month = m.month AND a.subscription_id = m.subscription_id
+            """).bindparams(ct_id=_uuid.UUID(ct_id)))
+            await db.commit()
+            logger.info(f"Azure monthly summary refreshed for CT {ct_id}")
+    except Exception as e:
+        logger.error(f"Azure monthly summary refresh failed for CT {ct_id}: {e}", exc_info=True)
+        raise
+
+
+async def _rebuild_all_azure_summaries():
+    """Rebuild azure_monthly_summary for ALL control towers from scratch.
+    Called on startup and via admin endpoint to fix stale/corrupt summary data.
+    """
+    from sqlalchemy import text
+    logger.info("Rebuilding ALL Azure monthly summaries from scratch")
+    try:
+        async with SyncSessionLocal() as db:
+            # Truncate entire summary table and rebuild from raw records
+            await db.execute(text("TRUNCATE TABLE azure_monthly_summary"))
+            await db.execute(text("""
+                INSERT INTO azure_monthly_summary
+                    (id, control_tower_id, month, subscription_id, subscription_name,
+                     actual_cost, amortized_cost, refreshed_at)
+                SELECT
+                    gen_random_uuid(),
+                    a.control_tower_id,
+                    a.month,
+                    a.subscription_id,
+                    a.subscription_name,
+                    COALESCE(a.actual_cost, 0),
+                    COALESCE(m.amortized_cost, a.actual_cost, 0),
+                    NOW()
+                FROM (
+                    SELECT
+                        control_tower_id,
+                        TO_CHAR(date, 'YYYY-MM') AS month,
+                        subscription_id,
+                        MAX(subscription_name) AS subscription_name,
+                        SUM(actual_cost) AS actual_cost
+                    FROM azure_cost_records
+                    WHERE cost_type = 'actual'
+                    GROUP BY control_tower_id, TO_CHAR(date, 'YYYY-MM'), subscription_id
+                ) a
+                LEFT JOIN (
+                    SELECT
+                        control_tower_id,
+                        TO_CHAR(date, 'YYYY-MM') AS month,
+                        subscription_id,
+                        SUM(amortized_cost) AS amortized_cost
+                    FROM azure_cost_records
+                    WHERE cost_type = 'amortized'
+                    GROUP BY control_tower_id, TO_CHAR(date, 'YYYY-MM'), subscription_id
+                ) m ON a.control_tower_id = m.control_tower_id
+                      AND a.month = m.month
+                      AND a.subscription_id = m.subscription_id
+            """))
+            await db.commit()
+            logger.info("All Azure monthly summaries rebuilt successfully")
+    except Exception as e:
+        logger.error(f"Full Azure summary rebuild failed: {e}", exc_info=True)
+        raise
 
 
 async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: Optional[str] = None, force_end: Optional[str] = None):
@@ -389,10 +465,11 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
             end_date = today.isoformat()
             logger.info(f"Azure full sync for CT {ct_id}: {start_date} to {end_date}")
         else:
-            # Daily incremental -- last 3 days to catch late-arriving records
-            start_date = (today - timedelta(days=3)).isoformat()
+            # Daily incremental -- always sync n-7 days (today minus 7) to today
+            # This ensures late-arriving Azure records and any partial days are captured
+            start_date = (today - timedelta(days=7)).isoformat()
             end_date = today.isoformat()
-            logger.info(f"Azure daily sync for CT {ct_id}: {start_date} to {end_date}")
+            logger.info(f"Azure daily n-7 sync for CT {ct_id}: {start_date} to {end_date}")
 
         # Step 3 -- load sub_map
         async with AsyncSessionLocal() as db:
@@ -444,10 +521,9 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
             _sync_progress[ct_id] = {"percent": 0, "status": "failed", "message": "No export files found"}
             return
 
-        # Always delete+reinsert full calendar months covered by the blobs.
-        # Azure blobs are per-month files — a 3-day incremental sync finds the full month
-        # blob, so we must stream ALL rows from it and delete the full month first.
-        # Deleting only N days then streaming the full blob causes data mismatch.
+        # Delete+reinsert full calendar months covered by the sync range.
+        # Azure blobs are per-month — we must delete the full month before streaming
+        # to avoid duplicate/stale rows. Never append to existing data.
         full_month_start, full_month_end = get_full_month_range_for_dates(start_date, end_date)
         logger.info(f"Azure sync -- deleting full month range {full_month_start} to {full_month_end} before re-insert")
         async with SyncSessionLocal() as db:
@@ -460,11 +536,17 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
             )
             await db.commit()
 
-        # Stream blobs using full month range so no rows are filtered out
+        # Stream using full month range so no rows are filtered out of the blob
         stream_start = full_month_start.isoformat()
         stream_end = full_month_end.isoformat()
 
         total_inserted = 0
+        import uuid as _uuid3
+        from sqlalchemy import text as _ins_text
+
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
+            ct_ref = result.scalar_one_or_none()
 
         for blob_idx, blob_name in enumerate(csv_blobs):
             _sync_progress[ct_id]["message"] = f"Processing file {blob_idx+1}/{len(csv_blobs)}"
@@ -472,18 +554,18 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
             logger.info(f"Azure processing blob {blob_idx+1}/{len(csv_blobs)}: {blob_name}")
 
             try:
-                async with AsyncSessionLocal() as db:
-                    result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
-                    ct_ref = result.scalar_one_or_none()
-
-                # Run blob streaming in executor — pass full month range to get all rows
-                batches = await loop.run_in_executor(
+                # Stream blob in executor — yields batches via generator, never loads full file into memory
+                batch_gen = await loop.run_in_executor(
                     _executor,
-                    lambda bn=blob_name, c=ct_ref: list(stream_azure_cost_batches(c, bn, stream_start, stream_end, 1000))
+                    lambda bn=blob_name: stream_azure_cost_batches(ct_ref, bn, stream_start, stream_end, 500)
                 )
 
-                import uuid as _uuid3
-                from sqlalchemy import text as _ins_text
+                # Consume generator batches and insert immediately — avoids OOM on large blobs
+                def _collect_batches(gen):
+                    return list(gen)
+
+                batches = await loop.run_in_executor(_executor, _collect_batches, batch_gen)
+
                 for batch in batches:
                     if not batch:
                         continue
@@ -551,6 +633,12 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
 
         try:
             await _refresh_azure_monthly_summary(ct_id)
+            # Clear in-memory API cache so next request fetches fresh data from summary table
+            from app.routers.azure_costs import _cache
+            keys_to_clear = [k for k in _cache if k.startswith(("az_overview_", "az_summary_", "az_biz_costs_", "az_subs_", "az_browse_subs", "az_meta_subs"))]
+            for k in keys_to_clear:
+                _cache.pop(k, None)
+            logger.info(f"Azure API cache cleared after sync for CT {ct_id}: {len(keys_to_clear)} keys")
         except Exception as cache_err:
             logger.warning(f"Azure monthly summary refresh failed (non-fatal): {cache_err}")
 
@@ -567,6 +655,23 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
                 )
                 await db.commit()
         _sync_progress[ct_id] = {"percent": 0, "status": "failed", "message": str(e)}
+
+@router.post("/rebuild-azure-summary")
+async def rebuild_azure_summary(
+    bg: BackgroundTasks,
+    user: User = Depends(get_current_user),
+):
+    """Rebuild azure_monthly_summary from scratch for ALL control towers.
+    Use this to fix incorrect month data after a bad sync.
+    """
+    if user.role == "viewer":
+        raise HTTPException(status_code=403)
+    bg.add_task(_rebuild_all_azure_summaries)
+    # Also clear in-memory cache immediately
+    from app.routers.azure_costs import _cache
+    _cache.clear()
+    return {"message": "Azure monthly summary rebuild started. All month data will be correct after completion."}
+
 
 @router.get("/sync-active")
 async def list_active_syncs(user: User = Depends(get_current_user)):

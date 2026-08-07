@@ -14,15 +14,13 @@ _scheduler_tasks: set = set()
 
 
 async def _recover_stuck_syncs():
-    """Re-trigger any CTs whose last sync log from yesterday is stuck (started) or failed."""
+    """Re-trigger any CTs whose last sync log is stuck (started) or failed.
+    Uses the original sync's date range so the full failed period is resynced.
+    """
     from app.routers.towers import _do_sync
-    yesterday = date.today() - timedelta(days=1)
-    yesterday_start = datetime(yesterday.year, yesterday.month, yesterday.day, 0, 0, 0, tzinfo=timezone.utc)
-    yesterday_end = datetime(yesterday.year, yesterday.month, yesterday.day, 23, 59, 59, tzinfo=timezone.utc)
-
     try:
         async with AsyncSessionLocal() as db:
-            # Also mark any "started" logs older than 2 hours as failed (stuck/crashed)
+            # Mark any 'started' logs older than 2 hours as failed (crashed/stuck)
             from sqlalchemy import update as sa_update
             stale_cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
             await db.execute(
@@ -31,44 +29,52 @@ async def _recover_stuck_syncs():
                     SyncLog.status == "started",
                     SyncLog.started_at < stale_cutoff,
                 )
-                .values(status="failed", error_message="Sync timed out or worker crashed", finished_at=datetime.now(timezone.utc))
+                .values(status="failed", error_message="Sync timed out or worker crashed",
+                        finished_at=datetime.now(timezone.utc))
             )
             await db.commit()
             logger.info("Worker: Marked stale 'started' logs as failed")
 
-            result = await db.execute(
-                select(SyncLog).where(
-                    and_(
-                        SyncLog.status.in_(["started", "failed"]),
-                        SyncLog.started_at >= yesterday_start,
-                        SyncLog.started_at <= yesterday_end,
-                    )
-                )
-            )
-            stuck_logs = result.scalars().all()
+            # Find the latest sync log per CT — if it's failed, recover it
+            # Use a subquery to get the most recent log per control_tower_id
+            from sqlalchemy import text as sa_text
+            failed_rows = (await db.execute(sa_text("""
+                SELECT DISTINCT ON (control_tower_id)
+                    control_tower_id, id, status, date_range_start, date_range_end, started_at
+                FROM sync_logs
+                ORDER BY control_tower_id, started_at DESC
+            """))).all()
 
-        if not stuck_logs:
-            logger.info("Worker: No stuck/failed syncs from yesterday")
+        failed_cts = [
+            r for r in failed_rows
+            if r.status in ("failed", "started")
+        ]
+
+        if not failed_cts:
+            logger.info("Worker: No failed syncs to recover")
             return
 
-        # Deduplicate by CT — only recover each CT once
-        seen_ct_ids: set = set()
-        for log in stuck_logs:
-            ct_id = str(log.control_tower_id)
-            if ct_id in seen_ct_ids:
-                continue
-            seen_ct_ids.add(ct_id)
-            logger.info(f"Worker: Recovering CT {ct_id} (log {log.id}, status={log.status}) for {yesterday}")
+        for row in failed_cts:
+            ct_id = str(row.control_tower_id)
+            # Use the original failed sync's date range if available,
+            # otherwise fall back to n-7 days so we don't miss data
+            if row.date_range_start and row.date_range_end:
+                force_start = row.date_range_start.isoformat()
+                force_end = row.date_range_end.isoformat()
+            else:
+                today = date.today()
+                force_start = (today - timedelta(days=7)).isoformat()
+                force_end = today.isoformat()
+
+            logger.info(f"Worker: Recovering CT {ct_id} (status={row.status}) range {force_start} to {force_end}")
             task = asyncio.create_task(
-                _do_sync(ct_id, triggered_by="recovery",
-                         force_start=yesterday.isoformat(),
-                         force_end=yesterday.isoformat())
+                _do_sync(ct_id, triggered_by="recovery", force_start=force_start, force_end=force_end)
             )
             _scheduler_tasks.add(task)
             task.add_done_callback(_scheduler_tasks.discard)
-            await asyncio.sleep(10)  # stagger to avoid DB overload
+            await asyncio.sleep(15)  # stagger to avoid DB overload
 
-        logger.info(f"Worker: Recovery triggered for {len(seen_ct_ids)} CT(s)")
+        logger.info(f"Worker: Recovery triggered for {len(failed_cts)} CT(s)")
 
     except Exception as e:
         logger.error(f"Worker: Recovery check error: {e}", exc_info=True)

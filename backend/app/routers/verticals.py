@@ -244,6 +244,41 @@ async def _cost_for_resources_and_accounts(
 # STATIC ROUTES FIRST
 # ═════════════════════════════════════════════════════════════════════════════
 
+@router.get("/with-businesses")
+async def list_verticals_with_businesses(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Single query: all verticals + their businesses. Replaces N+1 calls from frontend."""
+    cache_key = "verticals:with_businesses"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    vert_rows = (await db.execute(select(Vertical).order_by(Vertical.name))).scalars().all()
+    biz_rows = (await db.execute(
+        select(Business).order_by(Business.name)
+    )).scalars().all()
+
+    biz_by_vert: dict[str, list] = {}
+    for b in biz_rows:
+        vid = str(b.vertical_id)
+        biz_by_vert.setdefault(vid, []).append({
+            "id": str(b.id), "name": b.name, "owner_name": b.owner_name,
+            "cost_type": b.cost_type or "resource",
+        })
+
+    result = [
+        {
+            "id": str(v.id), "name": v.name, "color": v.color,
+            "businesses": biz_by_vert.get(str(v.id), []),
+        }
+        for v in vert_rows
+    ]
+    await _cache_set(cache_key, result, ttl=300)
+    return result
+
+
 @router.get("/report")
 async def vertical_report(
     start_date: str,
@@ -1273,6 +1308,7 @@ async def delete_business(
         raise HTTPException(404)
     await db.delete(b)
     await db.commit()
+    await _cache_delete_pattern("verticals:with_businesses")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1503,6 +1539,7 @@ async def create_business(
     db.add(b)
     await db.commit()
     await db.refresh(b)
+    await _cache_delete_pattern("verticals:with_businesses")
     return {"id": str(b.id), "name": b.name, "color": b.color}
 
 

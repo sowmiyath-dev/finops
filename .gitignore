@@ -36,3 +36,19 @@ work log/
 
 # Local deployment notes
 How to deploy this in each Control tower.txt
+
+# CFT files
+cft/
+cfts/
+
+# Enhancement prompts
+enhanceent prompt.txt
+
+# Fix/diagnostic scripts
+fix_log.txt
+fix_step4.ps1
+fix_azure_sync.py
+rebuild_azure_summary.py
+run_azure_sync.py
+migrate_azure_unique.py
+diagnose_azure.py
