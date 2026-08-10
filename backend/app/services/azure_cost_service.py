@@ -296,9 +296,10 @@ def find_azure_export_blobs(ct: ControlTower, start_date: str, end_date: str, is
         else:
             cur = cur.replace(month=cur.month + 1, day=1)
 
-    # Daily sync — ONLY scan daily paths in cost-exports container
+    # is_daily_sync = True ONLY when scheduler triggers (is_first_sync=False AND start is current month start)
+    # Manual syncs with force_start always go through full historical path
     today = date.today()
-    is_daily_sync = not is_first_sync and start >= today.replace(day=1)
+    is_daily_sync = (not is_first_sync) and (start == today.replace(day=1)) and (end == today)
 
     def _scan(container_name: str, prefixes: list[str]) -> list[tuple[str, str]]:
         found = []
@@ -322,12 +323,14 @@ def find_azure_export_blobs(ct: ControlTower, start_date: str, end_date: str, is
         return found
 
     if is_daily_sync:
-        # Daily sync — only cost-exports container, only daily paths
+        # Daily sync — ONLY cost-exports container, ONLY daily paths
+        # cost-exports/finoptix-daily/all-subs-daily-actualcost/YYYYMMDD-YYYYMMDD/
+        # cost-exports/finoptix-daily-amortizedcost/all-subs-daily-amortizedcost/YYYYMMDD-YYYYMMDD/
         daily_prefixes = []
         for month_start in month_starts:
             for folder in _get_month_folder_variants(month_start):
                 daily_prefixes += [
-                    f"{export_name}-daily-actualcost/all-subs-daily-actualcost/{folder}/",
+                    f"{export_name}-daily/all-subs-daily-actualcost/{folder}/",
                     f"{export_name}-daily-amortizedcost/all-subs-daily-amortizedcost/{folder}/",
                 ]
         csv_blobs = _scan("cost-exports", daily_prefixes)
@@ -342,14 +345,20 @@ def find_azure_export_blobs(ct: ControlTower, start_date: str, end_date: str, is
             year        = month_start.strftime('%Y')          # e.g. 2026
 
             for folder in _get_month_folder_variants(month_start):
-                # cost-exports container: Jan-May monthly + Aug+ daily
+                # cost-exports container:
+                # Jan-May: finoptix-actualcost/all-subs-actualcost-YYYY-MM/
+                # Jan-May: finoptix-amortizedcost/all-subs-amortizedcost-YYYY-MM/
+                # Aug+:    finoptix-daily/all-subs-daily-actualcost/
+                # Aug+:    finoptix-daily-amortizedcost/all-subs-daily-amortizedcost/
                 cost_exports_prefixes += [
                     f"{export_name}-actualcost/all-subs-actualcost-{month_label}/{folder}/",
                     f"{export_name}-amortizedcost/all-subs-amortizedcost-{month_label}/{folder}/",
-                    f"{export_name}-daily-actualcost/all-subs-daily-actualcost/{folder}/",
+                    f"{export_name}-daily/all-subs-daily-actualcost/{folder}/",
                     f"{export_name}-daily-amortizedcost/all-subs-daily-amortizedcost/{folder}/",
                 ]
-                # finoptixcostexports container: Jun-Jul one-time exports
+                # finoptixcostexports container:
+                # Jun-Jul: cost-exports/finoptix-actualcost/finoptix-actualcost-june2026/
+                # Jun-Jul: cost-exports/finoptix-amortizedcost/finoptix-amortizedcost-june2026/
                 finoptix_container_prefixes += [
                     f"cost-exports/{export_name}-actualcost/{export_name}-actualcost-{month_name}{year}/{folder}/",
                     f"cost-exports/{export_name}-amortizedcost/{export_name}-amortizedcost-{month_name}{year}/{folder}/",
