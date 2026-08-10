@@ -525,7 +525,7 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
         # This prevents over-deletion (e.g. deleting all of June when syncing June 25–July 2)
         # and prevents under-deletion (stale rows from a previous bad sync).
         blob_months: set[tuple] = set()
-        for bn in csv_blobs:
+        for _bc, bn in csv_blobs:
             # Extract YYYYMMDD from blob path folder name e.g. .../20250601-20250701/...
             import re as _re
             m = _re.search(r'/(\d{8})-(\d{8})/', bn)
@@ -579,16 +579,15 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
             result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
             ct_ref = result.scalar_one_or_none()
 
-        for blob_idx, blob_name in enumerate(csv_blobs):
+        for blob_idx, (blob_container, blob_name) in enumerate(csv_blobs):
             _sync_progress[ct_id]["message"] = f"Processing file {blob_idx+1}/{len(csv_blobs)}"
             _sync_progress[ct_id]["percent"] = 30 + int(60 * blob_idx / len(csv_blobs))
-            logger.info(f"Azure processing blob {blob_idx+1}/{len(csv_blobs)}: {blob_name}")
+            logger.info(f"Azure processing blob {blob_idx+1}/{len(csv_blobs)}: [{blob_container}] {blob_name}")
 
             try:
-                # Stream blob in executor — yields batches via generator, never loads full file into memory
                 batch_gen = await loop.run_in_executor(
                     _executor,
-                    lambda bn=blob_name: stream_azure_cost_batches(ct_ref, bn, stream_start, stream_end, 500)
+                    lambda bc=blob_container, bn=blob_name: stream_azure_cost_batches(ct_ref, bn, stream_start, stream_end, 500, bc)
                 )
 
                 # Consume generator batches and insert immediately — avoids OOM on large blobs
