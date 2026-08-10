@@ -263,7 +263,22 @@ def get_full_month_range_for_dates(start_date: str, end_date: str) -> tuple[date
 
 
 def find_azure_export_blobs(ct: ControlTower, start_date: str, end_date: str, is_first_sync: bool = False) -> list[str]:
-    """Find all Azure cost export blobs covering the months in the given date range."""
+    """Find all Azure cost export blobs covering the months in the given date range.
+
+    Known blob path patterns in finoptixcostexports container:
+
+    Jan-May (monthly export):
+        finoptix-actualcost/all-subs-actualcost-2026-MM/YYYYMMDD-YYYYMMDD/<file>.csv
+        finoptix-amortizedcost/all-subs-amortizedcost-2026-MM/YYYYMMDD-YYYYMMDD/<file>.csv
+
+    Jun-Jul (one-time export via cost-exports path):
+        cost-exports/finoptix-actualcost/finoptix-actualcost-<monthname><year>/YYYYMMDD-YYYYMMDD/<file>.csv
+        cost-exports/finoptix-amortizedcost/finoptix-amortizedcost-<monthname><year>/YYYYMMDD-YYYYMMDD/<file>.csv
+
+    Aug+ daily export (daily sync ONLY uses this path):
+        finoptix-daily-actualcost/all-subs-daily-actualcost/YYYYMMDD-YYYYMMDD/<file>.csv
+        finoptix-daily-amortizedcost/all-subs-daily-amortizedcost/YYYYMMDD-YYYYMMDD/<file>.csv
+    """
     _sync_clock()
     blob_client = get_blob_service_client(ct)
     container = blob_client.get_container_client(ct.azure_container_name)
@@ -283,30 +298,37 @@ def find_azure_export_blobs(ct: ControlTower, start_date: str, end_date: str, is
         else:
             cur = cur.replace(month=cur.month + 1, day=1)
 
-    # Build all prefix variants for every month and every known export path pattern
+    # Daily sync (is_first_sync=False, recent range) — ONLY check daily export path
+    # This avoids re-scanning monthly/one-time blobs on every daily run
+    today = date.today()
+    is_daily_sync = not is_first_sync and start >= today.replace(day=1)
+
     prefixes = []
     for month_start in month_starts:
-        month_label = month_start.strftime('%Y-%m')  # e.g. 2026-01
+        month_label = month_start.strftime('%Y-%m')          # e.g. 2026-08
+        month_name  = month_start.strftime('%B').lower()     # e.g. august
+        year        = month_start.strftime('%Y')             # e.g. 2026
+
         for folder in _get_month_folder_variants(month_start):
-            prefixes += [
-                # Daily export — all subscriptions (June+ pattern)
-                f"{export_name}-daily-actualcost/all-subs-daily-actualcost/{folder}/",
-                f"{export_name}-daily-amortizedcost/all-subs-daily-amortizedcost/{folder}/",
-                # Daily export — export name as subfolder
-                f"{export_name}-daily-actualcost/{export_name}-daily-actualcost/{folder}/",
-                f"{export_name}-daily-amortizedcost/{export_name}-daily-amortizedcost/{folder}/",
-                # Monthly export — named subfolder pattern (Jan-May pattern)
-                f"{export_name}-actualcost/all-subs-actualcost-{month_label}/{folder}/",
-                f"{export_name}-amortizedcost/all-subs-amortizedcost-{month_label}/{folder}/",
-                # Monthly export — export name as subfolder
-                f"{export_name}-actualcost/{export_name}-actualcost/{folder}/",
-                f"{export_name}-amortizedcost/{export_name}-amortizedcost/{folder}/",
-                # Generic single export with uuid subfolder (finoptix/finoptixs-Cost-export-actual/folder/)
-                f"{export_name}/{export_name}s-Cost-export-actual/{folder}/",
-                f"{export_name}/{export_name}s-cost-export-amortized/{folder}/",
-                # Generic single export
-                f"{export_name}/{export_name}/{folder}/",
-            ]
+            if is_daily_sync:
+                # Daily sync — only look at daily export paths
+                prefixes += [
+                    f"{export_name}-daily-actualcost/all-subs-daily-actualcost/{folder}/",
+                    f"{export_name}-daily-amortizedcost/all-subs-daily-amortizedcost/{folder}/",
+                ]
+            else:
+                # Full / historical sync — check all known path patterns
+                prefixes += [
+                    # Jan-May: monthly export pattern
+                    f"{export_name}-actualcost/all-subs-actualcost-{month_label}/{folder}/",
+                    f"{export_name}-amortizedcost/all-subs-amortizedcost-{month_label}/{folder}/",
+                    # Jun-Jul: one-time export via cost-exports path
+                    f"cost-exports/{export_name}-actualcost/{export_name}-actualcost-{month_name}{year}/{folder}/",
+                    f"cost-exports/{export_name}-amortizedcost/{export_name}-amortizedcost-{month_name}{year}/{folder}/",
+                    # Aug+: daily export path (also checked in full sync)
+                    f"{export_name}-daily-actualcost/all-subs-daily-actualcost/{folder}/",
+                    f"{export_name}-daily-amortizedcost/all-subs-daily-amortizedcost/{folder}/",
+                ]
 
     seen: set[str] = set()
     for prefix in prefixes:
