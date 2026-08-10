@@ -465,11 +465,11 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
             end_date = today.isoformat()
             logger.info(f"Azure full sync for CT {ct_id}: {start_date} to {end_date}")
         else:
-            # Daily incremental -- always sync n-7 days (today minus 7) to today
-            # This ensures late-arriving Azure records and any partial days are captured
-            start_date = (today - timedelta(days=7)).isoformat()
+            # Daily incremental -- sync current month only (1st of month to today)
+            # Avoids cross-month boundary that caused over-deletion of prior month data
+            start_date = today.replace(day=1).isoformat()
             end_date = today.isoformat()
-            logger.info(f"Azure daily n-7 sync for CT {ct_id}: {start_date} to {end_date}")
+            logger.info(f"Azure daily sync for CT {ct_id}: {start_date} to {end_date} (current month only)")
 
         # Step 3 -- load sub_map
         async with AsyncSessionLocal() as db:
@@ -521,22 +521,53 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
             _sync_progress[ct_id] = {"percent": 0, "status": "failed", "message": "No export files found"}
             return
 
-        # Delete+reinsert full calendar months covered by the sync range.
-        # Azure blobs are per-month — we must delete the full month before streaming
-        # to avoid duplicate/stale rows. Never append to existing data.
-        full_month_start, full_month_end = get_full_month_range_for_dates(start_date, end_date)
-        logger.info(f"Azure sync -- deleting full month range {full_month_start} to {full_month_end} before re-insert")
-        async with SyncSessionLocal() as db:
-            await db.execute(
-                delete(AzureCostRecord).where(
-                    AzureCostRecord.control_tower_id == ct_id,
-                    AzureCostRecord.date >= full_month_start,
-                    AzureCostRecord.date <= full_month_end,
+        # Derive the exact months covered by the blobs found — delete only those months.
+        # This prevents over-deletion (e.g. deleting all of June when syncing June 25–July 2)
+        # and prevents under-deletion (stale rows from a previous bad sync).
+        blob_months: set[tuple] = set()
+        for bn in csv_blobs:
+            # Extract YYYYMMDD from blob path folder name e.g. .../20250601-20250701/...
+            import re as _re
+            m = _re.search(r'/(\d{8})-(\d{8})/', bn)
+            if m:
+                try:
+                    ms = date.fromisoformat(m.group(1)[:4] + "-" + m.group(1)[4:6] + "-" + m.group(1)[6:8])
+                    blob_months.add((ms.year, ms.month))
+                except Exception:
+                    pass
+
+        # Fallback: use full month range from date params if no months parsed from blobs
+        if not blob_months:
+            full_month_start, full_month_end = get_full_month_range_for_dates(start_date, end_date)
+            blob_months = set()
+            cur = full_month_start
+            while cur <= full_month_end:
+                blob_months.add((cur.year, cur.month))
+                if cur.month == 12:
+                    cur = cur.replace(year=cur.year + 1, month=1, day=1)
+                else:
+                    cur = cur.replace(month=cur.month + 1, day=1)
+
+        # Delete only the exact months covered by blobs
+        for yr, mo in sorted(blob_months):
+            mo_start = date(yr, mo, 1)
+            if mo == 12:
+                mo_end = date(yr + 1, 1, 1) - timedelta(days=1)
+            else:
+                mo_end = date(yr, mo + 1, 1) - timedelta(days=1)
+            logger.info(f"Azure sync -- deleting month {mo_start} to {mo_end} before re-insert")
+            async with SyncSessionLocal() as db:
+                await db.execute(
+                    delete(AzureCostRecord).where(
+                        AzureCostRecord.control_tower_id == ct_id,
+                        AzureCostRecord.date >= mo_start,
+                        AzureCostRecord.date <= mo_end,
+                    )
                 )
-            )
-            await db.commit()
+                await db.commit()
 
         # Stream using full month range so no rows are filtered out of the blob
+        full_month_start, full_month_end = get_full_month_range_for_dates(start_date, end_date)
         stream_start = full_month_start.isoformat()
         stream_end = full_month_end.isoformat()
 
@@ -655,6 +686,107 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
                 )
                 await db.commit()
         _sync_progress[ct_id] = {"percent": 0, "status": "failed", "message": str(e)}
+
+@router.post("/clear-all-azure-data")
+async def clear_all_azure_data(
+    bg: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Wipe ALL azure_cost_records, azure_monthly_summary and sync_logs for every Azure CT,
+    reset last_synced_at, then trigger a full-year resync for each CT.
+    Use this to fix data multiplication / incorrect totals.
+    """
+    if user.role == "viewer":
+        raise HTTPException(status_code=403)
+
+    result = await db.execute(
+        select(ControlTower).where(ControlTower.cloud_provider == "azure")
+    )
+    cts = result.scalars().all()
+    if not cts:
+        raise HTTPException(status_code=404, detail="No Azure control towers found")
+
+    from sqlalchemy import text
+    import uuid as _uuid
+
+    async with SyncSessionLocal() as sdb:
+        # Wipe all Azure cost data and summaries in one shot
+        await sdb.execute(text("DELETE FROM azure_cost_records"))
+        await sdb.execute(text("DELETE FROM azure_monthly_summary"))
+        # Clear sync logs for Azure CTs so history is clean
+        for ct in cts:
+            await sdb.execute(
+                text("DELETE FROM sync_logs WHERE control_tower_id = :ct_id")
+                .bindparams(ct_id=ct.id)
+            )
+        # Reset last_synced_at so each CT is treated as first-time sync
+        await sdb.execute(
+            text("UPDATE control_towers SET last_synced_at = NULL WHERE cloud_provider = 'azure'")
+        )
+        await sdb.commit()
+
+    # Clear in-memory API cache
+    from app.routers.azure_costs import _cache
+    _cache.clear()
+    logger.info(f"Cleared ALL Azure data for {len(cts)} control tower(s)")
+
+    # Trigger full-year resync for each CT (staggered by 5s to avoid DB overload)
+    async def _resync_all():
+        for ct in cts:
+            await _do_sync(str(ct.id), triggered_by="clear-resync")
+            await asyncio.sleep(5)
+
+    bg.add_task(_resync_all)
+    return {
+        "message": f"All Azure data cleared for {len(cts)} CT(s). Full resync started.",
+        "control_towers": [str(ct.id) for ct in cts],
+    }
+
+
+@router.post("/{ct_id}/clear-azure-data")
+async def clear_azure_data(
+    ct_id: str,
+    bg: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Wipe azure_cost_records and azure_monthly_summary for a single CT, then resync from scratch."""
+    if user.role == "viewer":
+        raise HTTPException(status_code=403)
+    result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
+    ct = result.scalar_one_or_none()
+    if not ct or ct.cloud_provider != "azure":
+        raise HTTPException(status_code=404, detail="Azure control tower not found")
+
+    from sqlalchemy import text
+    import uuid as _uuid
+    async with SyncSessionLocal() as sdb:
+        await sdb.execute(
+            text("DELETE FROM azure_cost_records WHERE control_tower_id = :ct_id")
+            .bindparams(ct_id=_uuid.UUID(ct_id))
+        )
+        await sdb.execute(
+            text("DELETE FROM azure_monthly_summary WHERE control_tower_id = :ct_id")
+            .bindparams(ct_id=_uuid.UUID(ct_id))
+        )
+        await sdb.execute(
+            text("DELETE FROM sync_logs WHERE control_tower_id = :ct_id")
+            .bindparams(ct_id=_uuid.UUID(ct_id))
+        )
+        await sdb.execute(
+            text("UPDATE control_towers SET last_synced_at = NULL WHERE id = :ct_id")
+            .bindparams(ct_id=_uuid.UUID(ct_id))
+        )
+        await sdb.commit()
+
+    from app.routers.azure_costs import _cache
+    _cache.clear()
+    logger.info(f"Cleared all Azure data for CT {ct_id}, triggering full resync")
+
+    bg.add_task(_do_sync, ct_id, "clear-resync")
+    return {"message": "All Azure data cleared. Full resync started.", "ct_id": ct_id}
+
 
 @router.post("/rebuild-azure-summary")
 async def rebuild_azure_summary(
