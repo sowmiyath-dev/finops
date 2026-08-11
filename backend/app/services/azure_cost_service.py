@@ -329,16 +329,18 @@ def find_azure_export_blobs(ct: ControlTower, start_date: str, end_date: str, is
             ]
 
     # --- Container 2: finoptixcostexports ---
-    # Jun-Jul actual/amortized under cost-exports/ subfolder
+    # Jun-Jul pattern (double subfolder — Azure repeats export name as subfolder):
+    # cost-exports/finoptix-actualcost/finoptix-actualcost-{month}{year}/finoptix-actualcost-{month}{year}/YYYYMMDD-YYYYMMDD/<file>.csv
     finoptix_container_prefixes = []
     for month_start in month_starts:
-        month_name = month_start.strftime('%B').lower()  # e.g. june, july
-        year = month_start.strftime('%Y')                # e.g. 2026
-        for folder in _get_month_folder_variants(month_start):
-            finoptix_container_prefixes += [
-                f"cost-exports/{export_name}-actualcost/{export_name}-actualcost-{month_name}{year}/{folder}/",
-                f"cost-exports/{export_name}-amortizedcost/{export_name}-amortizedcost-{month_name}{year}/{folder}/",
-            ]
+        month_name = month_start.strftime('%B').lower()  # june, july
+        year = month_start.strftime('%Y')                # 2026
+        tag_actual = f"{export_name}-actualcost-{month_name}{year}"
+        tag_amort  = f"{export_name}-amortizedcost-{month_name}{year}"
+        finoptix_container_prefixes += [
+            f"cost-exports/{export_name}-actualcost/{tag_actual}/{tag_actual}/",
+            f"cost-exports/{export_name}-amortizedcost/{tag_amort}/{tag_amort}/",
+        ]
 
     csv_blobs = _scan("cost-exports", cost_exports_prefixes)
     csv_blobs += _scan("finoptixcostexports", finoptix_container_prefixes)
