@@ -1145,6 +1145,50 @@ async def sync_status(ct_id: str, user: User = Depends(get_current_user)):
     return _sync_progress.get(ct_id, {"percent": 0, "status": "idle", "message": ""})
 
 
+@router.get("/{ct_id}/sync-status-internal")
+async def sync_status_internal(ct_id: str, request: Request):
+    """No-auth sync status — localhost only."""
+    return _sync_progress.get(ct_id, {"percent": 0, "status": "idle", "message": ""})
+
+
+@router.post("/{ct_id}/sync-monthly-internal")
+async def sync_monthly_internal(
+    ct_id: str,
+    request: Request,
+    bg: BackgroundTasks,
+    year: int = Query(...),
+    month: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """No-auth monthly sync trigger — localhost only."""
+    result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
+    ct = result.scalar_one_or_none()
+    if not ct or ct.cloud_provider != "azure":
+        raise HTTPException(status_code=404, detail="Azure control tower not found")
+
+    from datetime import date as dt_date
+    today = dt_date.today()
+    if month:
+        months_to_sync = [(year, month)]
+    else:
+        last_month = today.month if today.year == year else 12
+        months_to_sync = [(year, m) for m in range(1, last_month + 1)]
+
+    async def _run():
+        for idx, (yr, mo) in enumerate(months_to_sync):
+            label = f"{yr}-{mo:02d}"
+            _sync_progress[ct_id] = {"percent": int(100 * idx / len(months_to_sync)), "status": "running", "message": f"Syncing {label} ({idx+1}/{len(months_to_sync)})"}
+            try:
+                await _do_azure_sync(ct_id, triggered_by="monthly-internal", month_only=(yr, mo))
+            except Exception as e:
+                _sync_progress[ct_id] = {"percent": 0, "status": "failed", "message": f"{label} failed: {e}"}
+                return
+        _sync_progress[ct_id] = {"percent": 100, "status": "done", "message": f"All {len(months_to_sync)} month(s) synced"}
+
+    bg.add_task(_run)
+    return {"message": f"Sync started for {len(months_to_sync)} month(s)", "months": [f"{yr}-{mo:02d}" for yr, mo in months_to_sync]}
+
+
 @router.patch("/{ct_id}/name")
 async def update_tower_name(
     ct_id: str,
