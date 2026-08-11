@@ -1,7 +1,7 @@
 ﻿import uuid, asyncio, logging
 from datetime import datetime, timezone, date, timedelta
 from concurrent.futures import ThreadPoolExecutor
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query, Request
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func
@@ -1023,12 +1023,15 @@ async def list_towers(db: AsyncSession = Depends(get_db), user: User = Depends(g
 @router.get("/{ct_id}/azure-blobs-debug")
 async def azure_blobs_debug(
     ct_id: str,
+    request: Request,
     prefix: str = Query("", description="Optional prefix to filter blobs"),
     container: str = Query("cost-exports", description="Container name to list"),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
 ):
-    """List actual blobs in Azure storage container — use to verify paths before sync."""
+    """List actual blobs in Azure storage — no auth required, localhost only."""
+    client_ip = request.client.host
+    if client_ip not in ("127.0.0.1", "::1"):
+        raise HTTPException(status_code=403, detail="Localhost only")
     result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
     ct = result.scalar_one_or_none()
     if not ct or ct.cloud_provider != "azure":
