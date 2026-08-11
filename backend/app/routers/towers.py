@@ -401,8 +401,10 @@ async def _rebuild_all_azure_summaries():
         raise
 
 
-async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: Optional[str] = None, force_end: Optional[str] = None):
-    """Sync cost data from Azure Cost Management Export."""
+async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: Optional[str] = None, force_end: Optional[str] = None, month_only: tuple = None):
+    """Sync cost data from Azure Cost Management Export.
+    If month_only=(year, month) is given, syncs only that calendar month.
+    """
     _sync_progress[ct_id] = {"percent": 0, "status": "running", "message": "Starting Azure sync"}
     sync_log_id = None
 
@@ -455,18 +457,24 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
 
         from datetime import date as dt_date
         today = dt_date.today()
-        if force_start and force_end:
+        if month_only:
+            yr, mo = month_only
+            start_date = dt_date(yr, mo, 1).isoformat()
+            if mo == 12:
+                end_date = dt_date(yr + 1, 1, 1) - timedelta(days=1)
+            else:
+                end_date = dt_date(yr, mo + 1, 1) - timedelta(days=1)
+            end_date = end_date.isoformat()
+            logger.info(f"Azure month-only sync for CT {ct_id}: {start_date} to {end_date}")
+        elif force_start and force_end:
             start_date = force_start
             end_date = force_end
             logger.info(f"Azure manual sync for CT {ct_id}: {start_date} to {end_date}")
         elif existing_count == 0:
-            # Full sync -- start of current year
             start_date = today.replace(month=1, day=1).isoformat()
             end_date = today.isoformat()
             logger.info(f"Azure full sync for CT {ct_id}: {start_date} to {end_date}")
         else:
-            # Daily incremental -- sync current month only (1st of month to today)
-            # Avoids cross-month boundary that caused over-deletion of prior month data
             start_date = today.replace(day=1).isoformat()
             end_date = today.isoformat()
             logger.info(f"Azure daily sync for CT {ct_id}: {start_date} to {end_date} (current month only)")
@@ -521,34 +529,14 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
             _sync_progress[ct_id] = {"percent": 0, "status": "failed", "message": "No export files found"}
             return
 
-        # Derive the exact months covered by the blobs found — delete only those months.
-        # This prevents over-deletion (e.g. deleting all of June when syncing June 25–July 2)
-        # and prevents under-deletion (stale rows from a previous bad sync).
+        # Delete only the months in the sync range (exact, no over/under deletion)
+        full_month_start, full_month_end = get_full_month_range_for_dates(start_date, end_date)
         blob_months: set[tuple] = set()
-        for _bc, bn in csv_blobs:
-            # Extract YYYYMMDD from blob path folder name e.g. .../20250601-20250701/...
-            import re as _re
-            m = _re.search(r'/(\d{8})-(\d{8})/', bn)
-            if m:
-                try:
-                    ms = date.fromisoformat(m.group(1)[:4] + "-" + m.group(1)[4:6] + "-" + m.group(1)[6:8])
-                    blob_months.add((ms.year, ms.month))
-                except Exception:
-                    pass
+        cur = full_month_start
+        while cur <= full_month_end:
+            blob_months.add((cur.year, cur.month))
+            cur = cur.replace(year=cur.year + 1, month=1, day=1) if cur.month == 12 else cur.replace(month=cur.month + 1, day=1)
 
-        # Fallback: use full month range from date params if no months parsed from blobs
-        if not blob_months:
-            full_month_start, full_month_end = get_full_month_range_for_dates(start_date, end_date)
-            blob_months = set()
-            cur = full_month_start
-            while cur <= full_month_end:
-                blob_months.add((cur.year, cur.month))
-                if cur.month == 12:
-                    cur = cur.replace(year=cur.year + 1, month=1, day=1)
-                else:
-                    cur = cur.replace(month=cur.month + 1, day=1)
-
-        # Delete only the exact months covered by blobs
         for yr, mo in sorted(blob_months):
             mo_start = date(yr, mo, 1)
             if mo == 12:
@@ -566,8 +554,6 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
                 )
                 await db.commit()
 
-        # Stream using full month range so no rows are filtered out of the blob
-        full_month_start, full_month_end = get_full_month_range_for_dates(start_date, end_date)
         stream_start = full_month_start.isoformat()
         stream_end = full_month_end.isoformat()
 
@@ -579,7 +565,15 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
             result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
             ct_ref = result.scalar_one_or_none()
 
-        for blob_idx, (blob_container, blob_name) in enumerate(csv_blobs):
+        for blob_idx, blob_entry in enumerate(csv_blobs):
+            # blob_entry is either (container, blob_name) tuple or plain blob_name string
+            if isinstance(blob_entry, tuple):
+                blob_container, blob_name = blob_entry
+            else:
+                blob_name = blob_entry
+                # Infer container from blob path: Jun-Jul blobs start with "cost-exports/"
+                blob_container = "finoptixcostexports" if blob_name.startswith("cost-exports/") else "cost-exports"
+
             _sync_progress[ct_id]["message"] = f"Processing file {blob_idx+1}/{len(csv_blobs)}"
             _sync_progress[ct_id]["percent"] = 30 + int(60 * blob_idx / len(csv_blobs))
             logger.info(f"Azure processing blob {blob_idx+1}/{len(csv_blobs)}: [{blob_container}] {blob_name}")
@@ -1025,6 +1019,87 @@ async def list_towers(db: AsyncSession = Depends(get_db), user: User = Depends(g
 
 
 # â”€â”€ dynamic /{ct_id} routes AFTER all static routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+@router.get("/{ct_id}/azure-blobs-debug")
+async def azure_blobs_debug(
+    ct_id: str,
+    prefix: str = Query("", description="Optional prefix to filter blobs"),
+    container: str = Query("cost-exports", description="Container name to list"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """List actual blobs in Azure storage container — use to verify paths before sync."""
+    result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
+    ct = result.scalar_one_or_none()
+    if not ct or ct.cloud_provider != "azure":
+        raise HTTPException(status_code=404, detail="Azure control tower not found")
+
+    from app.services.azure_session import get_blob_service_client
+    loop = asyncio.get_running_loop()
+
+    def _list():
+        svc = get_blob_service_client(ct)
+        c = svc.get_container_client(container)
+        blobs = list(c.list_blobs(name_starts_with=prefix or None))
+        return sorted([b.name for b in blobs])[:200]  # cap at 200
+
+    blobs = await loop.run_in_executor(_executor, _list)
+    return {"container": container, "prefix": prefix, "count": len(blobs), "blobs": blobs}
+
+
+@router.post("/{ct_id}/sync-monthly")
+async def sync_monthly(
+    ct_id: str,
+    bg: BackgroundTasks,
+    year: int = Query(..., description="Year to sync, e.g. 2026"),
+    month: Optional[int] = Query(None, description="Specific month 1-12. Omit to sync all months Jan to current."),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Sync Azure cost data month by month for the given year.
+    If month is specified, syncs only that month.
+    If month is omitted, syncs Jan through current month sequentially.
+    Each month: delete existing data → ingest blobs → refresh summary.
+    """
+    if user.role == "viewer":
+        raise HTTPException(status_code=403, detail="Viewers cannot sync")
+    result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
+    ct = result.scalar_one_or_none()
+    if not ct or ct.cloud_provider != "azure":
+        raise HTTPException(status_code=404, detail="Azure control tower not found")
+
+    from datetime import date as dt_date
+    today = dt_date.today()
+    if month:
+        months_to_sync = [(year, month)]
+    else:
+        last_month = today.month if today.year == year else 12
+        months_to_sync = [(year, m) for m in range(1, last_month + 1)]
+
+    async def _run_monthly_sync():
+        for idx, (yr, mo) in enumerate(months_to_sync):
+            label = f"{yr}-{mo:02d}"
+            _sync_progress[ct_id] = {
+                "percent": int(100 * idx / len(months_to_sync)),
+                "status": "running",
+                "message": f"Syncing {label} ({idx+1}/{len(months_to_sync)})",
+            }
+            logger.info(f"Monthly sync: starting {label} for CT {ct_id}")
+            try:
+                await _do_azure_sync(ct_id, triggered_by="monthly", month_only=(yr, mo))
+            except Exception as e:
+                logger.error(f"Monthly sync failed for {label}: {e}", exc_info=True)
+                _sync_progress[ct_id] = {"percent": 0, "status": "failed", "message": f"{label} failed: {e}"}
+                return
+        _sync_progress[ct_id] = {"percent": 100, "status": "done", "message": f"All {len(months_to_sync)} month(s) synced"}
+        logger.info(f"Monthly sync complete for CT {ct_id}: {months_to_sync}")
+
+    bg.add_task(_run_monthly_sync)
+    return {
+        "message": f"Month-by-month sync started for {len(months_to_sync)} month(s)",
+        "months": [f"{yr}-{mo:02d}" for yr, mo in months_to_sync],
+    }
+
 
 @router.post("/{ct_id}/sync")
 async def sync_tower(
