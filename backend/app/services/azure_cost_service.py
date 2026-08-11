@@ -262,46 +262,35 @@ def get_full_month_range_for_dates(start_date: str, end_date: str) -> tuple[date
     return full_start, full_end
 
 
-def find_azure_export_blobs(ct: ControlTower, start_date: str, end_date: str, is_first_sync: bool = False) -> list[tuple[str, str]]:
+def find_azure_export_blobs(ct: ControlTower, start_date: str, end_date: str, is_first_sync: bool = False) -> list[str]:
     """Find all Azure cost export blobs covering the months in the given date range.
-    Returns list of (container_name, blob_name) tuples.
 
     Storage account: finoptixcostexports
 
     Container: cost-exports
         Jan-May actual   : finoptix-actualcost/all-subs-actualcost-YYYY-MM/YYYYMMDD-YYYYMMDD/<file>.csv
         Jan-May amortized: finoptix-amortizedcost/all-subs-amortizedcost-YYYY-MM/YYYYMMDD-YYYYMMDD/<file>.csv
-        Aug+ actual      : finoptix-daily-actualcost/all-subs-daily-actualcost/YYYYMMDD-YYYYMMDD/<file>.csv
+        Aug+ actual      : finoptix-daily/all-subs-daily-actualcost/YYYYMMDD-YYYYMMDD/<file>.csv
         Aug+ amortized   : finoptix-daily-amortizedcost/all-subs-daily-amortizedcost/YYYYMMDD-YYYYMMDD/<file>.csv
 
     Container: finoptixcostexports
-        Jun-Jul actual   : cost-exports/finoptix-actualcost/finoptix-actualcost-<monthname><year>/YYYYMMDD-YYYYMMDD/<file>.csv
-        Jun-Jul amortized: cost-exports/finoptix-amortizedcost/finoptix-amortizedcost-<monthname><year>/YYYYMMDD-YYYYMMDD/<file>.csv
+        Jun-Jul actual   : cost-exports/finoptix-actualcost/finoptix-actualcost-{month}{year}/YYYYMMDD-YYYYMMDD/<file>.csv
+        Jun-Jul amortized: cost-exports/finoptix-amortizedcost/finoptix-amortizedcost-{month}{year}/YYYYMMDD-YYYYMMDD/<file>.csv
     """
     _sync_clock()
     blob_svc = get_blob_service_client(ct)
-    csv_blobs: list[tuple[str, str]] = []  # (container_name, blob_name)
-
     export_name = ct.azure_export_name or "finoptix"
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
 
-    # Collect all month start dates in range
+    # Collect all month starts in range
     month_starts: list[date] = []
     cur = start.replace(day=1)
     while cur <= end:
         month_starts.append(cur)
-        if cur.month == 12:
-            cur = cur.replace(year=cur.year + 1, month=1, day=1)
-        else:
-            cur = cur.replace(month=cur.month + 1, day=1)
+        cur = cur.replace(year=cur.year + 1, month=1, day=1) if cur.month == 12 else cur.replace(month=cur.month + 1, day=1)
 
-    # is_daily_sync = True ONLY when scheduler triggers (is_first_sync=False AND start is current month start)
-    # Manual syncs with force_start always go through full historical path
-    today = date.today()
-    is_daily_sync = (not is_first_sync) and (start == today.replace(day=1)) and (end == today)
-
-    def _scan(container_name: str, prefixes: list[str]) -> list[tuple[str, str]]:
+    def _scan(container_name: str, prefixes: list[str]) -> list[str]:
         found = []
         try:
             container = blob_svc.get_container_client(container_name)
@@ -314,60 +303,46 @@ def find_azure_export_blobs(ct: ControlTower, start_date: str, end_date: str, is
                     blobs = list(container.list_blobs(name_starts_with=prefix))
                     matched = [b.name for b in blobs if b.name.endswith(".csv") or b.name.endswith(".csv.gz")]
                     if matched:
-                        found += [(container_name, b) for b in matched]
+                        found += matched
                         logger.info(f"Container '{container_name}' prefix '{prefix}': {len(matched)} blob(s)")
                 except Exception as e:
-                    logger.warning(f"Container '{container_name}' prefix '{prefix}' failed: {e}")
+                    logger.warning(f"Prefix '{prefix}' scan failed: {e}")
         except Exception as e:
             logger.warning(f"Cannot access container '{container_name}': {e}")
         return found
 
-    if is_daily_sync:
-        # Daily sync — ONLY cost-exports container, ONLY daily paths
-        # cost-exports/finoptix-daily/all-subs-daily-actualcost/YYYYMMDD-YYYYMMDD/
-        # cost-exports/finoptix-daily-amortizedcost/all-subs-daily-amortizedcost/YYYYMMDD-YYYYMMDD/
-        daily_prefixes = []
-        for month_start in month_starts:
-            for folder in _get_month_folder_variants(month_start):
-                daily_prefixes += [
-                    f"{export_name}-daily/all-subs-daily-actualcost/{folder}/",
-                    f"{export_name}-daily-amortizedcost/all-subs-daily-amortizedcost/{folder}/",
-                ]
-        csv_blobs = _scan("cost-exports", daily_prefixes)
-    else:
-        # Full / historical sync — scan both containers
-        cost_exports_prefixes = []
-        finoptix_container_prefixes = []
+    # --- Container 1: cost-exports ---
+    # Jan-May monthly + Aug+ daily
+    cost_exports_prefixes = []
+    for month_start in month_starts:
+        month_label = month_start.strftime('%Y-%m')  # e.g. 2026-01
+        for folder in _get_month_folder_variants(month_start):
+            # Jan-May actual/amortized
+            cost_exports_prefixes += [
+                f"{export_name}-actualcost/all-subs-actualcost-{month_label}/{folder}/",
+                f"{export_name}-amortizedcost/all-subs-amortizedcost-{month_label}/{folder}/",
+            ]
+            # Aug+ daily actual/amortized
+            cost_exports_prefixes += [
+                f"{export_name}-daily/all-subs-daily-actualcost/{folder}/",
+                f"{export_name}-daily-amortizedcost/all-subs-daily-amortizedcost/{folder}/",
+            ]
 
-        for month_start in month_starts:
-            month_label = month_start.strftime('%Y-%m')       # e.g. 2026-06
-            month_name  = month_start.strftime('%B').lower()  # e.g. june
-            year        = month_start.strftime('%Y')          # e.g. 2026
+    # --- Container 2: finoptixcostexports ---
+    # Jun-Jul actual/amortized under cost-exports/ subfolder
+    finoptix_container_prefixes = []
+    for month_start in month_starts:
+        month_name = month_start.strftime('%B').lower()  # e.g. june, july
+        year = month_start.strftime('%Y')                # e.g. 2026
+        for folder in _get_month_folder_variants(month_start):
+            finoptix_container_prefixes += [
+                f"cost-exports/{export_name}-actualcost/{export_name}-actualcost-{month_name}{year}/{folder}/",
+                f"cost-exports/{export_name}-amortizedcost/{export_name}-amortizedcost-{month_name}{year}/{folder}/",
+            ]
 
-            for folder in _get_month_folder_variants(month_start):
-                # cost-exports container:
-                # Jan-May: finoptix-actualcost/all-subs-actualcost-YYYY-MM/
-                # Jan-May: finoptix-amortizedcost/all-subs-amortizedcost-YYYY-MM/
-                # Aug+:    finoptix-daily/all-subs-daily-actualcost/
-                # Aug+:    finoptix-daily-amortizedcost/all-subs-daily-amortizedcost/
-                cost_exports_prefixes += [
-                    f"{export_name}-actualcost/all-subs-actualcost-{month_label}/{folder}/",
-                    f"{export_name}-amortizedcost/all-subs-amortizedcost-{month_label}/{folder}/",
-                    f"{export_name}-daily/all-subs-daily-actualcost/{folder}/",
-                    f"{export_name}-daily-amortizedcost/all-subs-daily-amortizedcost/{folder}/",
-                ]
-                # finoptixcostexports container:
-                # Jun-Jul: cost-exports/finoptix-actualcost/finoptix-actualcost-june2026/
-                # Jun-Jul: cost-exports/finoptix-amortizedcost/finoptix-amortizedcost-june2026/
-                finoptix_container_prefixes += [
-                    f"cost-exports/{export_name}-actualcost/{export_name}-actualcost-{month_name}{year}/{folder}/",
-                    f"cost-exports/{export_name}-amortizedcost/{export_name}-amortizedcost-{month_name}{year}/{folder}/",
-                ]
+    csv_blobs = _scan("cost-exports", cost_exports_prefixes)
+    csv_blobs += _scan("finoptixcostexports", finoptix_container_prefixes)
 
-        csv_blobs  = _scan("cost-exports", cost_exports_prefixes)
-        csv_blobs += _scan("finoptixcostexports", finoptix_container_prefixes)
-
-    # Deduplicate
     csv_blobs = list(set(csv_blobs))
     logger.info(f"Total blobs found for {start_date} to {end_date}: {len(csv_blobs)}")
     return csv_blobs
