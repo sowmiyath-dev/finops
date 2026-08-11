@@ -1028,10 +1028,7 @@ async def azure_blobs_debug(
     container: str = Query("cost-exports", description="Container name to list"),
     db: AsyncSession = Depends(get_db),
 ):
-    """List actual blobs in Azure storage — no auth required, localhost only."""
-    client_ip = request.client.host
-    if client_ip not in ("127.0.0.1", "::1"):
-        raise HTTPException(status_code=403, detail="Localhost only")
+    """List actual blobs in Azure storage — no auth required, debug only."""
     result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
     ct = result.scalar_one_or_none()
     if not ct or ct.cloud_provider != "azure":
