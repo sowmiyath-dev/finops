@@ -107,11 +107,11 @@ function buildNovacSheet(novacCT: CTData, rate: number): XLSX.WorkSheet {
     boldCell("Shared cost"), boldCell("Total cost"),
   ]);
 
-  // Regular accounts
+  // Regular accounts — exclude payer from shared split AND from totals
   let totalUsd = 0, totalInr = 0, totalShared = 0, totalFinal = 0;
   for (const acc of regularAccs) {
-    const costInr   = inr(acc.trueCost, rate);
-    const pct       = totalRegularInr > 0 ? costInr / totalRegularInr * 100 : 0;
+    const costInr    = inr(acc.trueCost, rate);
+    const pct        = totalRegularInr > 0 ? costInr / totalRegularInr * 100 : 0;
     const sharedCost = inr(sharedUsd, rate) * pct / 100;
     const finalCost  = costInr + sharedCost;
     totalUsd    += acc.trueCost;
@@ -121,13 +121,13 @@ function buildNovacSheet(novacCT: CTData, rate: number): XLSX.WorkSheet {
     rows.push([acc.accountId, acc.accountName, numCell(acc.trueCost), numCell(acc.trueCost), numCell(costInr), pctCell(pct), numCell(sharedCost), numCell(finalCost)]);
   }
 
-  // Payer row (no shared cost)
+  // Payer row — shown separately, NOT included in totals, no shared cost
   if (payerAcc) {
     const costInr = inr(payerAcc.trueCost, rate);
     rows.push([payerAcc.accountId, payerAcc.accountName, numCell(payerAcc.trueCost), numCell(payerAcc.trueCost), numCell(costInr), "", "", numCell(costInr)]);
   }
 
-  // Total row
+  // Total row — only regular accounts (payer excluded)
   rows.push([
     boldCell(""), boldCell("Total Cost"),
     numCell(totalUsd), numCell(totalUsd), numCell(totalInr),
