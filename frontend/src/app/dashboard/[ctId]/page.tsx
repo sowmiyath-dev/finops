@@ -386,14 +386,13 @@ export default function CTDetailPage() {
                         { name: "Resource True Cost", headers, rows },
                       ]);
                     } else if (trueCostData.length > 0) {
-                      const tcHeaders = ["Account", "Account ID", "Usage Cost", "SP Allocated", "True Cost", "Savings", "Savings %"];
+                      const tcHeaders = ["Account", "Account ID", "Usage Cost", "SP Allocated", "True Cost"];
                       const filteredAccounts = trueCostData.filter((acc: any) => selectedAccounts.length === 0 || selectedAccounts.includes(acc.aws_account_id));
                       const tcRows = filteredAccounts.map((acc: any) => [
                           acc.account_name || "", acc.aws_account_id,
                           acc.usage_cost ?? 0,
                           acc.is_payer ? -(acc.sp_fee_distributed ?? 0) : (acc.sp_allocated ?? 0),
-                          acc.true_cost ?? 0, acc.savings ?? 0,
-                          acc.savings_pct ? `${acc.savings_pct}%` : "0%",
+                          acc.true_cost ?? 0,
                         ]);
                       // Total row
                       tcRows.push([
@@ -401,8 +400,6 @@ export default function CTDetailPage() {
                         filteredAccounts.reduce((s: number, a: any) => s + (a.usage_cost ?? 0), 0),
                         filteredAccounts.reduce((s: number, a: any) => s + (a.is_payer ? -(a.sp_fee_distributed ?? 0) : (a.sp_allocated ?? 0)), 0),
                         filteredAccounts.reduce((s: number, a: any) => s + (a.true_cost ?? 0), 0),
-                        filteredAccounts.reduce((s: number, a: any) => s + (a.savings ?? 0), 0),
-                        "",
                       ]);
                       downloadMultiSheetXls(`true-cost-${ct?.name}-${startDate}-${endDate}.xlsx`, [
                         { name: "True Cost", headers: tcHeaders, rows: tcRows },
