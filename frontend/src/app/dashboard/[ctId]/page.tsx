@@ -401,7 +401,11 @@ export default function CTDetailPage() {
                         filteredAccounts.reduce((s: number, a: any) => s + (a.is_payer ? -(a.sp_fee_distributed ?? 0) : (a.sp_allocated ?? 0)), 0),
                         filteredAccounts.reduce((s: number, a: any) => s + (a.true_cost ?? 0), 0),
                       ]);
-                      downloadMultiSheetXls(`true-cost-${ct?.name}-${startDate}-${endDate}.xlsx`, [
+                      const monthLabel = new Date(startDate).toLocaleString("en-US", { month: "long", year: "numeric" }).replace(" ", "");
+                      const accountLabel = selectedAccounts.length === 1
+                        ? (trueCostData.find((a: any) => a.aws_account_id === selectedAccounts[0])?.account_name || selectedAccounts[0])
+                        : (ct?.name || "All");
+                      downloadMultiSheetXls(`${accountLabel}-cost-${monthLabel}.xlsx`, [
                         { name: "True Cost", headers: tcHeaders, rows: tcRows },
                       ]);
                     } else if (summary?.per_account?.length > 0) {
