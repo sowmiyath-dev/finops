@@ -25,7 +25,7 @@ export default function OrgPage() {
               name: "Amazon Web Services",
               short: "AWS",
               status: "Active",
-              href: "/dashboard",
+              href: "/aws",
               gradient: "linear-gradient(135deg, #ff9a3c 0%, #ff6b00 100%)",
               desc: "Control Towers · CUR Reports · Cost Analysis",
               cta: "View Control Towers",

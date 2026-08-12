@@ -12,7 +12,7 @@ export default function SyncLogsPage() {
 
   useEffect(() => {
     if (!token) { router.push("/auth"); return; }
-    if (user && user.role === "viewer") router.push("/dashboard");
+    if (user && user.role === "viewer") router.push("/aws");
   }, [token, user]);
 
   const [refreshing, setRefreshing] = useState(false);
