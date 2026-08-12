@@ -1,12 +1,13 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
 import Link from "next/link";
-import { Plus, RefreshCw, Trash2, ChevronRight, Clock, Building2, Users, AlertCircle, FileText, Calendar, X } from "lucide-react";
+import { Plus, RefreshCw, Trash2, ChevronRight, Clock, Building2, Users, AlertCircle, FileText, Calendar, X, Download, IndianRupee } from "lucide-react";
+import { generateAwsMonthlyReport } from "@/lib/awsMonthlyReport";
 
 function fmtDate(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
@@ -193,6 +194,77 @@ export default function DashboardPage() {
 
   const totalAccounts = towers.reduce((s: number, ct: any) => s + (ct.sub_accounts?.length || 0), 0);
 
+  // ── AWS Monthly Cost report state ──────────────────────────────────────────
+  const reportMonths = (() => {
+    const opts = [];
+    const now = new Date();
+    for (let i = 1; i <= 12; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      opts.push({
+        label: d.toLocaleString("en-US", { month: "long", year: "numeric" }),
+        start: fmtDate(new Date(d.getFullYear(), d.getMonth(), 1)),
+        end: fmtDate(new Date(d.getFullYear(), d.getMonth() + 1, 0)),
+      });
+    }
+    return opts;
+  })();
+  const [reportMonth, setReportMonth] = useState(reportMonths[0]);
+  const [inrRate, setInrRate] = useState<string>("84");
+  const [reportLoading, setReportLoading] = useState(false);
+
+  const handleDownloadReport = async () => {
+    const rate = parseFloat(inrRate);
+    if (!rate || rate <= 0) { toast.error("Enter a valid INR rate"); return; }
+    setReportLoading(true);
+    try {
+      const awsTowers = towers.filter((t: any) => t.cloud_provider === "aws");
+      const ctDataList = await Promise.all(
+        awsTowers.map(async (ct: any) => {
+          const res = await api.get("/reports/savings/ct-distribution", {
+            params: { ct_id: ct.id, start_date: reportMonth.start, end_date: reportMonth.end },
+          }).catch(() => ({ data: null }));
+          const subAccounts: { accountId: string; accountName: string; trueCost: number }[] = [];
+          if (res.data?.sub_accounts) {
+            for (const acc of res.data.sub_accounts) {
+              subAccounts.push({
+                accountId: acc.aws_account_id,
+                accountName: (acc.account_name || acc.aws_account_id).replace(" (Payer)", ""),
+                trueCost: acc.true_cost || 0,
+              });
+            }
+          } else {
+            // fallback to summary per_account
+            const sumRes = await api.post("/reports/summary", {
+              control_tower_ids: [ct.id],
+              start_date: reportMonth.start,
+              end_date: reportMonth.end,
+              granularity: "monthly",
+              metric: "unblended_cost",
+              group_by: "account",
+              charge_types: ["Usage", "SavingsPlanCoveredUsage", "DiscountedUsage", "RIFee"],
+            }).catch(() => ({ data: null }));
+            for (const acc of sumRes.data?.per_account || []) {
+              subAccounts.push({
+                accountId: acc.aws_account_id,
+                accountName: acc.account_name || acc.aws_account_id,
+                trueCost: acc.cost || 0,
+              });
+            }
+          }
+          return { ctName: ct.name, ctId: ct.id, accounts: subAccounts };
+        })
+      );
+      const monthLabel = reportMonth.label.replace(" ", "");
+      generateAwsMonthlyReport(ctDataList, rate, monthLabel);
+      toast.success("Report downloaded");
+    } catch (e) {
+      console.error(e);
+      toast.error("Failed to generate report");
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
   if (isLoading) return (
     <div className="flex items-center justify-center h-64">
       <div className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin border-blue-900" />
@@ -235,6 +307,51 @@ export default function DashboardPage() {
           Cost data accurate up to <strong>{boundary.accurate_until}</strong> · Daily sync at <strong>10:30 AM UTC</strong>
         </div>
       )}
+
+      {/* AWS Monthly Cost card */}
+      <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5 mb-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-bold text-black">AWS Monthly Cost Report</h2>
+            <p className="text-xs text-black mt-0.5">Download full multi-sheet Excel with shared cost split</p>
+          </div>
+          <div className="flex items-center gap-3">
+            {/* Month picker */}
+            <select
+              value={reportMonth.start}
+              onChange={(e) => setReportMonth(reportMonths.find((m) => m.start === e.target.value) || reportMonths[0])}
+              className="border border-gray-300 rounded-md px-3 py-2 text-xs font-bold text-black focus:border-blue-900 outline-none bg-white">
+              {reportMonths.map((m) => (
+                <option key={m.start} value={m.start}>{m.label}</option>
+              ))}
+            </select>
+            {/* INR rate input */}
+            <div className="flex items-center border border-gray-300 rounded-md overflow-hidden">
+              <div className="px-2 py-2 bg-gray-50 border-r border-gray-300">
+                <IndianRupee className="w-3.5 h-3.5 text-black" />
+              </div>
+              <input
+                type="number"
+                value={inrRate}
+                onChange={(e) => setInrRate(e.target.value)}
+                placeholder="84"
+                className="w-20 px-2 py-2 text-xs font-bold text-black outline-none"
+              />
+              <span className="px-2 text-xs text-black font-semibold">/ $</span>
+            </div>
+            {/* Download button */}
+            <button
+              onClick={handleDownloadReport}
+              disabled={reportLoading || towers.length === 0}
+              className="flex items-center gap-1.5 px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold rounded-md transition disabled:opacity-50">
+              {reportLoading
+                ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                : <Download className="w-3.5 h-3.5" />}
+              {reportLoading ? "Generating..." : "Download Excel"}
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* Summary cards */}
       {towers.length > 0 && (

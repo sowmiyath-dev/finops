@@ -6,4 +6,59 @@ ok now consider my application as a standalone application and i want to name th
 
 in my app after in dashboard remove monthly weekly and daily from dashboards and add vertical, owner section inside vertical i have to add the application name that will add via tag using tag manager. i can able to add any resources to that application and owner name and i can able add application to owner. i should use both tags from resource and custom tag also to my application.how can we design you can suggest idea for organizing this as well. here in my office we have many resourcesin aws, azure and gcp and that belongs to same project. for an example website will be in aws and mobile app is in azure but i want to organize the cost based on project wise. so i plan to add resources that is in one project like in aws and azur one tag and group them using a tag like projectwise cost owner wise cost and besides accountwise, subscription wise, resource group wise, service wise cost. this is the custom requirement that i need to group resources from different cloud under few category. if possible you also also provide me ideas to group the resources. and in tag manager i need the excel/csv upload option to add resources with tag. in excel resources and tag coulunmn will be there and we can save that resource and tag locally within our application.
 
+remove finops Dashboard page and add dashboard in left button and add AWS monthly cost card and inside there has to be a master sheet report with whole cost details like below for an example novac control tower should have like below
+
+	Dollar 	95.29						Total cost 	₹ 27,84,891
+								Shared cost 	₹ 5,12,510
+Account ID	Account	Usage Cost	True Cost	Cost in INR	Percentage	Shared cost	Total cost		
+269670822583	NOVAC-SLIC	6935.59	6935.59	₹ 6,60,892.37	23.73135314	₹ 1,21,625.47	₹ 7,82,517.84		
+329446032359	LMS-PROD	6318.43	6318.43	₹ 6,02,083.19	21.61963058	₹ 1,10,802.69	₹ 7,12,885.89		
+10241470425	Redington limited	4619.54	4619.54	₹ 4,40,195.97			₹ 4,40,195.97	Amazon Q usage	
+374552481440	NOVAC-SGIC	4204.63	4204.63	₹ 4,00,659.19	14.38688841	₹ 73,734.19	₹ 4,74,393.38		
+876493681666	Novac-Prod	3526.81	3526.81	₹ 3,36,069.72	12.06760688	₹ 61,847.65	₹ 3,97,917.37		
+583617605382	Novac-EBS	3015.16	3015.16	₹ 2,87,314.60	10.31690552	₹ 52,875.14	₹ 3,40,189.73		
+573774855993	SFL-Credacc	1228.83	1228.83	₹ 1,17,095.21	4.20466012	₹ 21,549.29	₹ 1,38,644.50		
+78418245182	Novac-RnD	945.05	945.05	₹ 90,053.81	3.233656442	₹ 16,572.80	₹ 1,06,626.62		
+818131745851	NOVAC-LMS-UAT	894.68	894.68	₹ 85,254.06	3.06130654	₹ 15,689.49	₹ 1,00,943.55		
+489600149487	NTS-IDC	666.85	666.85	₹ 63,544.14	2.281745726	₹ 11,694.17	₹ 75,238.30		
+706490763534	Novac-UAT	587.62	587.62	₹ 55,994.31	2.010646208	₹ 10,304.76	₹ 66,299.07		
+540717552703	Novac-Digital	435.80	435.8	₹ 41,527.38	1.49116711	₹ 7,642.38	₹ 49,169.76		
+375983336769	Novac-DevOps	174.55	174.55	₹ 16,632.87	0.59725383	₹ 3,060.98	₹ 19,693.85		
+870415500840	Novac-Immerz	151.30	151.3	₹ 14,417.38	0.517699825	₹ 2,653.26	₹ 17,070.64		
+870415500840	NOVAC-SLIC-PROD	62.06	62.06	₹ 5,913.70	0.212349314	₹ 1,088.31	₹ 7,002.01		
+870415500840	NOVAC-SLIC-UAT	61.85	61.85	₹ 5,893.69	0.211630761	₹ 1,084.63	₹ 6,978.31		
+870415500840	Log Archive	9.26	9.26	₹ 882.39	0.031684735	₹ 162.39	₹ 1,044.77		
+870415500840	NTS-DEVELOPMENT	4.38	4.38	₹ 417.37	0.014986948	₹ 76.81	₹ 494.18		
+870415500840	Audit	2.58	2.58	₹ 245.85	0.008827928	₹ 45.24	₹ 291.09		
+	Total Cost	33844.97	33844.97	₹ 27,84,891.22	100	₹ 5,12,509.64	₹ 37,37,596.83		
+240329355338	Shared-Services	5378.42	5378.42	₹ 5,12,509.64					
+683092765314	SFL-PROD	26851.11	26851.11	₹ 25,58,642.27					
+400487655910	SFL-UAT	4798.05	4798.05	₹ 4,57,206.18					
+833660969797	SFL-SHARED-SERVICE	1429.72	1429.72	₹ 1,36,238.02					
+				₹ 31,52,086.48					
+and for others there has to be separate sheet in one excel frst sheet has to be master sheet name i will say the format of that later and 2nd as novac account and shared services  account cost has to split across all accounts except resington and sflprod and sfl  uat should have sfl shared services cost split all these has to be like split based on usage next automall sheet wih accountwisse cost indostar with indostar cost wise and credit nivaran and wonderland hubs cost as they are and master sheet should have the consolidated cost of all control tower it has to be like below
+
+Application Name	cost in INR	
+Finergy	₹ 1,70,094.87	Novac-EBS/2
+Pahal	₹ 1,70,094.87	Novac-EBS/2
+SLIC	₹ 7,96,498.17	NOVAC-SLIC +NOVAC-SLIC-PROD+NOVAC-SLIC-UAT
+SGIC	₹ 4,74,393.38	NOVAC-SGIC
+LMS	₹ 8,13,829.43	LMS-PROD+NOVAC-LMS-UAT
+Nestavia	₹ 4,64,216.44	Novac-Prod+Novac UAT
+SFL -  Credacc	₹ 1,38,644.50	SFL-Credacc
+Immerz	₹ 17,070.64	Novac-Immerz
+IDC	₹ 75,238.30	NTS-IDC
+Devops	₹ 19,693.85	Novac-DevOps
+Digital	₹ 49,169.76	Novac-Digital
+Rnd	₹ 1,06,626.62	Novac-RnD
+NTS-Developmet	₹ 494.18	NTS-DEVELOPMENT
+Payer account Novac	₹ 4,40,195.97	Redington limited(10241470425)
+SFL	₹ 31,52,086.48	SFL-PROD + SFL-UAT+SFL-SHARED-SERVICE
+Automall	₹ 27,57,329.48	Automall CT total cost
+Indostar	₹ 23,65,359.28	Indostar CT total cost
+NOVACwonderlendhubs	₹ 9,29,711.60	NOVACwonderlendhubs
+Novac Credit Nirvana	₹ 1,45,585.93	NOVACcreditnirvana+NOVACcreditnirvana UAT+Redington Limited(471112760393)
+Total	₹ 1,30,86,333.73	
+
+
 
