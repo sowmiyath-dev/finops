@@ -20,8 +20,7 @@ interface NavItem {
 
 const STATIC_NAV: NavItem[] = [
   { id: "dashboard",        label: "Dashboard",       icon: LayoutDashboard, href: "/dashboard" },
-  { id: "aws",              label: "AWS",             icon: Building2,       href: "/aws" },
-  { id: "finops-dashboard", label: "FinOps Dashboard", icon: BarChart2, href: "/finops-dashboard" },
+  { id: "finops-dashboard", label: "FinOps Dashboard", icon: BarChart2,        href: "/finops-dashboard" },
   { id: "org",              label: "Organization",    icon: Building2, href: "/org" },
   { id: "verticals",        label: "Verticals",       icon: Layers,    href: "/verticals" },
   { id: "tags",             label: "Tag Manager",     icon: Tag,       href: "/tag-manager" },

@@ -71,12 +71,13 @@ async function fetchCtData(towers: any[], start: string, end: string): Promise<C
 
 // ── Editable mapping row ──────────────────────────────────────────────────────
 function MappingRow({
-  row, index, onUpdate, onDelete, allAccounts,
+  row, index, onUpdate, onDelete, allAccounts, cost,
 }: {
   row: AppMapping; index: number;
   onUpdate: (i: number, updated: AppMapping) => void;
   onDelete: (i: number) => void;
   allAccounts: { accountId: string; accountName: string }[];
+  cost: number | null;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<AppMapping>(row);
@@ -90,6 +91,9 @@ function MappingRow({
         <td className="px-3 py-2 text-xs font-semibold text-black">{row.appName}</td>
         <td className="px-3 py-2 text-xs text-gray-500">{row.accounts.map((a) => `${a.accountId}${a.fraction && a.fraction !== 1 ? ` (${(a.fraction * 100).toFixed(0)}%)` : ""}`).join(", ")}</td>
         <td className="px-3 py-2 text-xs text-gray-400">{row.note}</td>
+        <td className="px-3 py-2 text-right text-xs font-semibold text-blue-900">
+          {cost != null ? `₹${cost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+        </td>
         <td className="px-3 py-2">
           <div className="flex gap-1">
             <button onClick={() => setEditing(true)} className="p-1 rounded hover:bg-blue-100 text-blue-900"><Pencil className="w-3 h-3" /></button>
@@ -131,6 +135,9 @@ function MappingRow({
         <input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })}
           className="w-full border border-gray-300 rounded px-2 py-1 text-xs outline-none focus:border-blue-900" />
       </td>
+      <td className="px-3 py-2 text-right text-xs text-gray-400">
+        {cost != null ? `₹${cost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+      </td>
       <td className="px-3 py-2">
         <div className="flex gap-1">
           <button onClick={save} className="p-1 rounded hover:bg-green-100 text-green-700"><Check className="w-3 h-3" /></button>
@@ -163,6 +170,8 @@ export default function DashboardPage() {
   const [inrRate, setInrRate]           = useState("");
   const [reportLoading, setReportLoading] = useState(false);
   const [mappings, setMappings]         = useState<AppMapping[]>(DEFAULT_APP_MAPPINGS);
+  const [ctDataCache, setCtDataCache]   = useState<CTData[]>([]);
+  const [costLoading, setCostLoading]   = useState(false);
 
   // ── Individual CT download state ──────────────────────────────────────────
   const [ctStart, setCtStart]           = useState(lastMonth.start);
@@ -172,6 +181,35 @@ export default function DashboardPage() {
   const [ctLoading, setCtLoading]       = useState(false);
 
   const awsTowers = towers.filter((t: any) => t.cloud_provider === "aws");
+
+  // ── Compute live cost for a mapping row ─────────────────────────────────
+  function computeMappingCost(m: AppMapping, ctData: CTData[], rate: number): number {
+    const accMap = new Map<string, number>();
+    for (const ct of ctData) for (const acc of ct.accounts) accMap.set(acc.accountId, (accMap.get(acc.accountId) || 0) + acc.trueCost);
+    let costInr = 0;
+    for (const { accountId, fraction = 1 } of m.accounts) {
+      if (accountId === "__CT_AUTOMALL__") { const ct = ctData.find((c) => c.ctName.toLowerCase().includes("automall")); costInr += (ct ? ct.accounts.reduce((s,a)=>s+a.trueCost,0) : 0) * rate * fraction; }
+      else if (accountId === "__CT_INDOSTAR__") { const ct = ctData.find((c) => c.ctName.toLowerCase().includes("indostar")); costInr += (ct ? ct.accounts.reduce((s,a)=>s+a.trueCost,0) : 0) * rate * fraction; }
+      else costInr += (accMap.get(accountId) || 0) * rate * fraction;
+    }
+    return costInr;
+  }
+
+  // Load CT data whenever month changes and rate is set
+  const loadCostPreview = async () => {
+    if (!inrRate || parseFloat(inrRate) <= 0 || awsTowers.length === 0) return;
+    setCostLoading(true);
+    try { const data = await fetchCtData(awsTowers, reportMonth.start, reportMonth.end); setCtDataCache(data); }
+    catch (e) { console.error(e); }
+    finally { setCostLoading(false); }
+  };
+
+  useEffect(() => { if (inrRate && parseFloat(inrRate) > 0) loadCostPreview(); }, [reportMonth.start, inrRate]);
+
+  const rate = parseFloat(inrRate) || 0;
+  const grandTotal = rate > 0 && ctDataCache.length > 0
+    ? mappings.reduce((s, m) => s + computeMappingCost(m, ctDataCache, rate), 0)
+    : 0;
 
   // ── Download full monthly report ──────────────────────────────────────────
   const handleDownload = async () => {
@@ -337,13 +375,27 @@ export default function DashboardPage() {
                 <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-3 py-2 w-40">Application</th>
                 <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-3 py-2">Account IDs (fraction %)</th>
                 <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-3 py-2">Note</th>
+                <th className="text-right text-xs font-bold uppercase tracking-wider text-black px-3 py-2 w-36">
+                  Cost in INR
+                  {costLoading && <span className="ml-1 text-[10px] text-gray-400 font-normal">loading...</span>}
+                </th>
                 <th className="px-3 py-2 w-16" />
               </tr>
             </thead>
             <tbody>
               {mappings.map((row, i) => (
-                <MappingRow key={i} row={row} index={i} onUpdate={updateMapping} onDelete={deleteMapping} allAccounts={[]} />
+                <MappingRow key={i} row={row} index={i} onUpdate={updateMapping} onDelete={deleteMapping} allAccounts={[]}
+                  cost={rate > 0 && ctDataCache.length > 0 ? computeMappingCost(row, ctDataCache, rate) : null} />
               ))}
+              {rate > 0 && ctDataCache.length > 0 && (
+                <tr className="border-t-2 border-gray-300 bg-gray-50">
+                  <td className="px-3 py-2 text-xs font-bold text-black" colSpan={3}>Total</td>
+                  <td className="px-3 py-2 text-right text-xs font-bold text-blue-900">
+                    ₹{grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </td>
+                  <td />
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
