@@ -1,4 +1,5 @@
 "use client";
+import * as XLSX from "xlsx";
 import { useEffect, useState, Fragment } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -76,31 +77,28 @@ function downloadCSV(filename: string, rows: string[][]) {
   URL.revokeObjectURL(url);
 }
 
-function xlsCell(val: string) {
-  const s = String(val).split("&").join("&").split("<").join("<").split(">").join(">");
-  return "<Cell><Data ss:Type='String'>" + s + "</Data></Cell>";
-}
+// Cost column header keywords — these columns get numeric cells + left alignment
+const COST_HEADERS = new Set(["Usage Cost", "SP Allocated", "True Cost", "Actual Cost", "Savings", "On-Demand Equiv", "On-Demand Cost", "Uncovered Cost", "Cost (USD)", "Usage Cost (USD)", "Actual Cost (USD)"]);
 
-function downloadMultiSheetXls(filename: string, sheets: { name: string; headers: string[]; rows: string[][] }[]) {
-  const dq = String.fromCharCode(34);
-  let xml = "<?xml version=" + dq + "1.0" + dq + "?>";
-  xml += "<?mso-application progid=" + dq + "Excel.Sheet" + dq + "?>";
-  xml += "<Workbook xmlns=" + dq + "urn:schemas-microsoft-com:office:spreadsheet" + dq;
-  xml += " xmlns:ss=" + dq + "urn:schemas-microsoft-com:office:spreadsheet" + dq + ">";
+function downloadMultiSheetXls(filename: string, sheets: { name: string; headers: string[]; rows: (string | number)[][] }[]) {
+  const wb = XLSX.utils.book_new();
   for (const s of sheets) {
-    xml += "<Worksheet ss:Name=" + dq + s.name + dq + "><Table>";
-    xml += "<Row>" + s.headers.map(xlsCell).join("") + "</Row>";
-    for (const row of s.rows) {
-      xml += "<Row>" + row.map(xlsCell).join("") + "</Row>";
-    }
-    xml += "</Table></Worksheet>";
+    const ws = XLSX.utils.aoa_to_sheet([s.headers, ...s.rows]);
+    // Apply left alignment + number format to cost columns
+    const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
+    s.headers.forEach((h, colIdx) => {
+      if (!COST_HEADERS.has(h)) return;
+      for (let row = 1; row <= range.e.r; row++) {
+        const addr = XLSX.utils.encode_cell({ r: row, c: colIdx });
+        if (!ws[addr]) return;
+        const raw = ws[addr].v;
+        const num = typeof raw === "number" ? raw : parseFloat(String(raw));
+        ws[addr] = { t: "n", v: isNaN(num) ? 0 : num, z: "#,##0.00", s: { alignment: { horizontal: "left" } } };
+      }
+    });
+    XLSX.utils.book_append_sheet(wb, ws, s.name);
   }
-  xml += "</Workbook>";
-  const blob = new Blob([xml], { type: "application/vnd.ms-excel" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
+  XLSX.writeFile(wb, filename);
 }
 
 export default function CTDetailPage() {
@@ -377,14 +375,14 @@ export default function CTDetailPage() {
                       const rows = (data as any[]).map((r: any) => [
                         r.service || "-", r.resource_id || "-", r.instance_type || "-", r.account_name || "-", r.aws_account_id || "-",
                         r.region || "-", r.total_hours != null ? `${Math.floor(r.total_hours)}h ${Math.round((r.total_hours % 1) * 60)}m` : "-",
-                        r.on_demand_cost?.toFixed(2) || "0",
-                        r.sp_allocated_cost?.toFixed(2) || "0",
-                        r.uncovered_cost?.toFixed(2) || "0",
-                        r.true_cost?.toFixed(2) || "0",
-                        r.savings?.toFixed(2) || "0",
+                        r.on_demand_cost ?? 0,
+                        r.sp_allocated_cost ?? 0,
+                        r.uncovered_cost ?? 0,
+                        r.true_cost ?? 0,
+                        r.savings ?? 0,
                         r.savings_pct ? `${r.savings_pct}%` : "0%",
                       ]);
-                      downloadMultiSheetXls(`true-cost-resource-wise-${ct?.name}-${startDate}-${endDate}.xls`, [
+                      downloadMultiSheetXls(`true-cost-resource-wise-${ct?.name}-${startDate}-${endDate}.xlsx`, [
                         { name: "Resource True Cost", headers, rows },
                       ]);
                     } else if (trueCostData.length > 0) {
@@ -393,9 +391,9 @@ export default function CTDetailPage() {
                         .filter((acc: any) => selectedAccounts.length === 0 || selectedAccounts.includes(acc.aws_account_id))
                         .map((acc: any) => [
                           acc.account_name || "", acc.aws_account_id,
-                          acc.usage_cost?.toFixed(2) || "0",
-                          acc.is_payer ? `-${acc.sp_fee_distributed?.toFixed(2)}` : (acc.sp_allocated?.toFixed(2) || "0"),
-                          acc.true_cost?.toFixed(2) || "0", acc.savings?.toFixed(2) || "0",
+                          acc.usage_cost ?? 0,
+                          acc.is_payer ? -(acc.sp_fee_distributed ?? 0) : (acc.sp_allocated ?? 0),
+                          acc.true_cost ?? 0, acc.savings ?? 0,
                           acc.savings_pct ? `${acc.savings_pct}%` : "0%",
                         ]);
                       const accountsWithSp = trueCostData.filter((acc: any) => !acc.is_payer && acc.sp_resources > 0);
@@ -413,12 +411,12 @@ export default function CTDetailPage() {
                         spRows = results.flatMap(({ accountName, accountId, resources }) =>
                           (resources as any[]).map((r: any) => [
                             accountName, accountId, r.resource_id || "-", r.service || "-", r.region || "-",
-                            r.on_demand_cost?.toFixed(2) || "0", r.sp_allocated_cost?.toFixed(2) || "0",
-                            r.savings?.toFixed(2) || "0", r.savings_pct ? `${r.savings_pct}%` : "0%",
+                            r.on_demand_cost ?? 0, r.sp_allocated_cost ?? 0,
+                            r.savings ?? 0, r.savings_pct ? `${r.savings_pct}%` : "0%",
                           ])
                         );
                       }
-                      downloadMultiSheetXls(`true-cost-${ct?.name}-${startDate}-${endDate}.xls`, [
+                      downloadMultiSheetXls(`true-cost-${ct?.name}-${startDate}-${endDate}.xlsx`, [
                         { name: "True Cost", headers: tcHeaders, rows: tcRows },
                         { name: "SP Resources", headers: spHeaders, rows: spRows },
                       ]);
@@ -428,10 +426,12 @@ export default function CTDetailPage() {
                         .filter((acc: any) => selectedAccounts.length === 0 || selectedAccounts.includes(acc.aws_account_id))
                         .map((acc: any) => [
                           acc.account_name || "Unknown", acc.aws_account_id,
-                          acc.cost?.toFixed(2) || "0",
+                          acc.cost ?? 0,
                           totalCost > 0 ? `${((acc.cost / totalCost) * 100).toFixed(1)}%` : "0%",
                         ]);
-                      downloadCSV(`subaccount-cost-${ct?.name}-${startDate}-${endDate}.csv`, [headers, ...rows]);
+                      downloadMultiSheetXls(`subaccount-cost-${ct?.name}-${startDate}-${endDate}.xlsx`, [
+                        { name: "Subaccount Costs", headers, rows },
+                      ]);
                     }
                   }}
                   className="flex items-center gap-1.5 px-3 py-1 rounded-md border border-gray-300 text-xs font-bold text-black hover:border-blue-900 hover:text-blue-900 transition bg-white"
