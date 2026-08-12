@@ -201,7 +201,7 @@ export default function CTDetailPage() {
       return { summary: summaryRes.data, spDist: spDistRes.data };
     },
     enabled: !!token && !!ctId,
-    staleTime: 2 * 60 * 1000,
+    staleTime: 30 * 60 * 1000,
   });
 
   const summary = primaryData?.summary;
@@ -220,7 +220,7 @@ export default function CTDetailPage() {
     queryKey: ["ct-tab", ctId, activeTab, startDate, endDate, selectedAccounts, selectedChargeTypes],
     queryFn: () => api.post(tabEndpoint, tabFilter).then((r) => r.data),
     enabled: !!token && !!ctId && !summaryLoading,
-    staleTime: 2 * 60 * 1000,
+    staleTime: 30 * 60 * 1000,
   });
 
   const stackedData = (() => {
@@ -387,38 +387,25 @@ export default function CTDetailPage() {
                       ]);
                     } else if (trueCostData.length > 0) {
                       const tcHeaders = ["Account", "Account ID", "Usage Cost", "SP Allocated", "True Cost", "Savings", "Savings %"];
-                      const tcRows = trueCostData
-                        .filter((acc: any) => selectedAccounts.length === 0 || selectedAccounts.includes(acc.aws_account_id))
-                        .map((acc: any) => [
+                      const filteredAccounts = trueCostData.filter((acc: any) => selectedAccounts.length === 0 || selectedAccounts.includes(acc.aws_account_id));
+                      const tcRows = filteredAccounts.map((acc: any) => [
                           acc.account_name || "", acc.aws_account_id,
                           acc.usage_cost ?? 0,
                           acc.is_payer ? -(acc.sp_fee_distributed ?? 0) : (acc.sp_allocated ?? 0),
                           acc.true_cost ?? 0, acc.savings ?? 0,
                           acc.savings_pct ? `${acc.savings_pct}%` : "0%",
                         ]);
-                      const accountsWithSp = trueCostData.filter((acc: any) => !acc.is_payer && acc.sp_resources > 0);
-                      let spRows: string[][] = [];
-                      const spHeaders = ["Account", "Account ID", "Resource ID", "Service", "Region", "On-Demand Cost", "SP Allocated", "Savings", "Savings %"];
-                      if (accountsWithSp.length > 0) {
-                        const results = await Promise.all(
-                          accountsWithSp.map((acc: any) =>
-                            api.get("/reports/savings/resources", {
-                              params: { start_date: startDate, end_date: endDate, account_ids: acc.aws_account_id, limit: 1000 },
-                            }).then((r) => ({ accountName: acc.account_name, accountId: acc.aws_account_id, resources: r.data }))
-                            .catch(() => ({ accountName: acc.account_name, accountId: acc.aws_account_id, resources: [] }))
-                          )
-                        );
-                        spRows = results.flatMap(({ accountName, accountId, resources }) =>
-                          (resources as any[]).map((r: any) => [
-                            accountName, accountId, r.resource_id || "-", r.service || "-", r.region || "-",
-                            r.on_demand_cost ?? 0, r.sp_allocated_cost ?? 0,
-                            r.savings ?? 0, r.savings_pct ? `${r.savings_pct}%` : "0%",
-                          ])
-                        );
-                      }
+                      // Total row
+                      tcRows.push([
+                        "Total", "",
+                        filteredAccounts.reduce((s: number, a: any) => s + (a.usage_cost ?? 0), 0),
+                        filteredAccounts.reduce((s: number, a: any) => s + (a.is_payer ? -(a.sp_fee_distributed ?? 0) : (a.sp_allocated ?? 0)), 0),
+                        filteredAccounts.reduce((s: number, a: any) => s + (a.true_cost ?? 0), 0),
+                        filteredAccounts.reduce((s: number, a: any) => s + (a.savings ?? 0), 0),
+                        "",
+                      ]);
                       downloadMultiSheetXls(`true-cost-${ct?.name}-${startDate}-${endDate}.xlsx`, [
                         { name: "True Cost", headers: tcHeaders, rows: tcRows },
-                        { name: "SP Resources", headers: spHeaders, rows: spRows },
                       ]);
                     } else if (summary?.per_account?.length > 0) {
                       const headers = ["Account", "Account ID", "Cost (USD)", "% of Total"];

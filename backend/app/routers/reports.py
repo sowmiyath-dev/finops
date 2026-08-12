@@ -17,15 +17,22 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 # Simple in-memory cache for metadata — these rarely change
 _cache: dict = {}
 _CACHE_TTL = 1800  # 30 minutes
+_HIST_CACHE_TTL = 6 * 3600  # 6 hours for historical (closed) months
+
+def _is_historical(start_date: str, end_date: str) -> bool:
+    """A period is historical if end_date is before the current month."""
+    today = date.today()
+    end = date.fromisoformat(end_date)
+    return end < today.replace(day=1)
 
 def _cache_get(key: str):
     e = _cache.get(key)
-    if e and time.time() - e["t"] < _CACHE_TTL:
+    if e and time.time() - e["t"] < e["ttl"]:
         return e["d"]
     return None
 
-def _cache_set(key: str, data):
-    _cache[key] = {"d": data, "t": time.time()}
+def _cache_set(key: str, data, ttl: int = _CACHE_TTL):
+    _cache[key] = {"d": data, "t": time.time(), "ttl": ttl}
 
 METRIC_MAP = {
     "unblended_cost": CostRecord.unblended_cost,
@@ -436,14 +443,15 @@ async def summary(f: ReportFilter, db: AsyncSession = Depends(get_db), user: Use
     per_account = [{"aws_account_id": r.aws_account_id, "account_name": r.account_name, "cost": float(r.cost or 0)} for r in acc_result.all()]
 
     result = {
-        "total_cost": total_cost,
+        "total_cost": round(total_cost, 2),
         "top_services": top_services,
         "daily_trend": daily_trend,
         "per_account": per_account,
         "metric": f.metric,
         "period": {"start": f.start_date, "end": f.end_date},
     }
-    _cache_set(cache_key, result)
+    ttl = _HIST_CACHE_TTL if _is_historical(f.start_date, f.end_date) else _CACHE_TTL
+    _cache_set(cache_key, result, ttl)
     return result
 
 
@@ -803,7 +811,8 @@ async def savings_ct_distribution(
         "total_savings":      round(total_savings, 2),
         "sub_accounts":       sub_accounts,
     }
-    _cache_set(cache_key, result)
+    ttl = _HIST_CACHE_TTL if _is_historical(start_date, end_date) else _CACHE_TTL
+    _cache_set(cache_key, result, ttl)
     return result
 async def savings_summary(
     start_date: str,
