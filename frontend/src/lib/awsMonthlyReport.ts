@@ -1,200 +1,306 @@
 import * as XLSX from "xlsx";
 import {
-  APP_MAPPINGS, NOVAC_SHARED_SERVICES_ID, NOVAC_PAYER_ID,
+  AppMapping,
+  NOVAC_SHARED_SERVICES_ID, NOVAC_PAYER_ID,
   SFL_SHARED_ID, SFL_PROD_ID, SFL_UAT_ID,
-  AUTOMALL_PAYER_ID, INDOSTAR_PAYER_ID,
 } from "./awsMonthlyReportConfig";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-interface AccountCost { accountId: string; accountName: string; trueCost: number; }
-interface CTData { ctName: string; ctId: string; accounts: AccountCost[]; }
+export interface AccountCost {
+  accountId: string;
+  accountName: string;
+  usageCost: number;   // USD — cost without SP
+  trueCost: number;    // USD — usage + SP allocated
+}
+export interface CTData { ctName: string; ctId: string; accounts: AccountCost[]; }
+export interface ServiceCost { service: string; usageCost: number; trueCost: number; }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function inr(usd: number, rate: number) { return usd * rate; }
-function numCell(v: number): XLSX.CellObject { return { t: "n", v, z: '₹#,##0.00', s: { alignment: { horizontal: "left" } } }; }
-function pctCell(v: number): XLSX.CellObject { return { t: "n", v, z: "0.00", s: { alignment: { horizontal: "left" } } }; }
-function boldCell(v: string): XLSX.CellObject { return { t: "s", v, s: { font: { bold: true } } }; }
-function setColWidths(ws: XLSX.WorkSheet, widths: number[]) {
+// ── Cell helpers ──────────────────────────────────────────────────────────────
+function inrCell(v: number): XLSX.CellObject {
+  return { t: "n", v, z: "₹#,##0.00", s: { alignment: { horizontal: "left" } } };
+}
+function usdCell(v: number): XLSX.CellObject {
+  return { t: "n", v, z: "#,##0.00", s: { alignment: { horizontal: "left" } } };
+}
+function pctCell(v: number): XLSX.CellObject {
+  return { t: "n", v, z: "0.00", s: { alignment: { horizontal: "left" } } };
+}
+function boldStr(v: string): XLSX.CellObject {
+  return { t: "s", v, s: { font: { bold: true } } };
+}
+function setWidths(ws: XLSX.WorkSheet, widths: number[]) {
   ws["!cols"] = widths.map((w) => ({ wch: w }));
 }
 
-// ── Build account cost map from all CTs ───────────────────────────────────────
-function buildAccountMap(ctDataList: CTData[]): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const ct of ctDataList) {
-    for (const acc of ct.accounts) {
-      map.set(acc.accountId, (map.get(acc.accountId) || 0) + acc.trueCost);
-    }
-  }
-  return map;
-}
-
-function ctTotal(ct: CTData): number {
+function ctTotal(ct: CTData) {
   return ct.accounts.reduce((s, a) => s + a.trueCost, 0);
 }
 
 // ── Sheet 1: Master ───────────────────────────────────────────────────────────
-function buildMasterSheet(ctDataList: CTData[], rate: number): XLSX.WorkSheet {
-  const accMap = buildAccountMap(ctDataList);
-  const ctMap = new Map(ctDataList.map((ct) => [ct.ctName.toLowerCase(), ctTotal(ct)]));
+// cost = totalCost column (costInINR + sharedCost) for regular accounts
+// For payer/CT-level entries = trueCost × rate
+function buildMasterSheet(
+  ctDataList: CTData[],
+  rate: number,
+  mappings: AppMapping[],
+  // totalCostByAccountId: map of accountId → total cost in INR (after shared split)
+  novacTotalCostMap: Map<string, number>,
+): XLSX.WorkSheet {
+  const accMap = new Map<string, number>();
+  for (const ct of ctDataList) {
+    for (const acc of ct.accounts) {
+      accMap.set(acc.accountId, (accMap.get(acc.accountId) || 0) + acc.trueCost);
+    }
+  }
 
   const rows: any[][] = [
-    [boldCell("Application Name"), boldCell("Cost in INR"), boldCell("Note")],
+    [boldStr("Application Name"), boldStr("Cost in INR"), boldStr("Note")],
   ];
 
   let grandTotal = 0;
-  for (const m of APP_MAPPINGS) {
-    let usd = 0;
+  for (const m of mappings) {
+    let costInr = 0;
     for (const { accountId, fraction = 1 } of m.accounts) {
       if (accountId === "__CT_AUTOMALL__") {
         const ct = ctDataList.find((c) => c.ctName.toLowerCase().includes("automall"));
-        usd += (ct ? ctTotal(ct) : 0) * fraction;
+        costInr += (ct ? ctTotal(ct) : 0) * rate * fraction;
       } else if (accountId === "__CT_INDOSTAR__") {
         const ct = ctDataList.find((c) => c.ctName.toLowerCase().includes("indostar"));
-        usd += (ct ? ctTotal(ct) : 0) * fraction;
+        costInr += (ct ? ctTotal(ct) : 0) * rate * fraction;
+      } else if (accountId === NOVAC_PAYER_ID) {
+        // Payer: trueCost × rate (no shared split)
+        costInr += (accMap.get(accountId) || 0) * rate * fraction;
+      } else if (novacTotalCostMap.has(accountId)) {
+        // Regular Novac account: use total cost (after shared split) from Novac sheet
+        costInr += (novacTotalCostMap.get(accountId) || 0) * fraction;
       } else {
-        usd += (accMap.get(accountId) || 0) * fraction;
+        costInr += (accMap.get(accountId) || 0) * rate * fraction;
       }
     }
-    const costInr = inr(usd, rate);
     grandTotal += costInr;
-    rows.push([m.appName, numCell(costInr), m.note]);
+    rows.push([m.appName, inrCell(costInr), m.note]);
   }
-
-  rows.push([boldCell("Total"), numCell(grandTotal), ""]);
+  rows.push([boldStr("Total"), inrCell(grandTotal), ""]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  setColWidths(ws, [28, 18, 50]);
+  setWidths(ws, [28, 18, 52]);
   return ws;
 }
 
-// ── Sheet: Novac (with shared cost split + SFL below) ────────────────────────
-function buildNovacSheet(novacCT: CTData, rate: number): XLSX.WorkSheet {
+// ── Sheet: Novac ──────────────────────────────────────────────────────────────
+// Returns sheet + map of accountId → totalCostINR (for master sheet)
+function buildNovacSheet(
+  novacCT: CTData,
+  rate: number,
+): { ws: XLSX.WorkSheet; totalCostMap: Map<string, number> } {
   const accounts = novacCT.accounts;
 
-  // Separate shared-services, payer, SFL group, and regular accounts
-  const sharedAcc  = accounts.find((a) => a.accountId === NOVAC_SHARED_SERVICES_ID);
-  const payerAcc   = accounts.find((a) => a.accountId === NOVAC_PAYER_ID);
-  const sflAccs    = accounts.filter((a) => [SFL_PROD_ID, SFL_UAT_ID, SFL_SHARED_ID].includes(a.accountId));
+  const sharedAcc   = accounts.find((a) => a.accountId === NOVAC_SHARED_SERVICES_ID);
+  const payerAcc    = accounts.find((a) => a.accountId === NOVAC_PAYER_ID);
+  const sflIds      = new Set([SFL_PROD_ID, SFL_UAT_ID, SFL_SHARED_ID]);
   const regularAccs = accounts.filter((a) =>
     a.accountId !== NOVAC_SHARED_SERVICES_ID &&
     a.accountId !== NOVAC_PAYER_ID &&
-    ![SFL_PROD_ID, SFL_UAT_ID, SFL_SHARED_ID].includes(a.accountId)
+    !sflIds.has(a.accountId)
   );
 
-  const sharedUsd  = sharedAcc?.trueCost || 0;
-  const totalRegularInr = regularAccs.reduce((s, a) => s + inr(a.trueCost, rate), 0);
+  const sharedUsd       = sharedAcc?.trueCost || 0;
+  const totalRegularInr = regularAccs.reduce((s, a) => s + a.trueCost * rate, 0);
 
-  // SFL: SFL-SHARED splits into SFL-PROD + SFL-UAT proportionally
-  const sflSharedUsd = sflAccs.find((a) => a.accountId === SFL_SHARED_ID)?.trueCost || 0;
-  const sflProdUsd   = sflAccs.find((a) => a.accountId === SFL_PROD_ID)?.trueCost || 0;
-  const sflUatUsd    = sflAccs.find((a) => a.accountId === SFL_UAT_ID)?.trueCost || 0;
-  const sflBase      = sflProdUsd + sflUatUsd;
-  const sflProdShare = sflBase > 0 ? sflProdUsd / sflBase : 0;
-  const sflUatShare  = sflBase > 0 ? sflUatUsd / sflBase : 0;
+  const totalCostMap = new Map<string, number>();
 
   const rows: any[][] = [];
-
-  // Header info row
-  rows.push(["Dollar", rate, "", "", "Total cost", numCell(inr(regularAccs.reduce((s, a) => s + a.trueCost, 0), rate))]);
-  rows.push(["", "", "", "", "Shared cost", numCell(inr(sharedUsd, rate))]);
+  rows.push(["Dollar", rate, "", "", "", "Total cost", inrCell(totalRegularInr)]);
+  rows.push(["", "", "", "", "", "Shared cost", inrCell(sharedUsd * rate)]);
   rows.push([]);
-
-  // Table header
   rows.push([
-    boldCell("Account ID"), boldCell("Account"), boldCell("Usage Cost"),
-    boldCell("True Cost"), boldCell("Cost in INR"), boldCell("Percentage"),
-    boldCell("Shared cost"), boldCell("Total cost"),
+    boldStr("Account ID"), boldStr("Account"),
+    boldStr("Usage Cost (USD)"), boldStr("True Cost (USD)"),
+    boldStr("Cost in INR"), boldStr("Percentage"),
+    boldStr("Shared cost"), boldStr("Total cost"),
   ]);
 
-  // Regular accounts — exclude payer from shared split AND from totals
-  let totalUsd = 0, totalInr = 0, totalShared = 0, totalFinal = 0;
+  let totUsage = 0, totTrue = 0, totInr = 0, totShared = 0, totFinal = 0;
+
   for (const acc of regularAccs) {
-    const costInr    = inr(acc.trueCost, rate);
+    const costInr    = acc.trueCost * rate;
     const pct        = totalRegularInr > 0 ? costInr / totalRegularInr * 100 : 0;
-    const sharedCost = inr(sharedUsd, rate) * pct / 100;
+    const sharedCost = sharedUsd * rate * pct / 100;
     const finalCost  = costInr + sharedCost;
-    totalUsd    += acc.trueCost;
-    totalInr    += costInr;
-    totalShared += sharedCost;
-    totalFinal  += finalCost;
-    rows.push([acc.accountId, acc.accountName, numCell(acc.trueCost), numCell(acc.trueCost), numCell(costInr), pctCell(pct), numCell(sharedCost), numCell(finalCost)]);
+    totUsage  += acc.usageCost;
+    totTrue   += acc.trueCost;
+    totInr    += costInr;
+    totShared += sharedCost;
+    totFinal  += finalCost;
+    totalCostMap.set(acc.accountId, finalCost);
+    rows.push([acc.accountId, acc.accountName, usdCell(acc.usageCost), usdCell(acc.trueCost), inrCell(costInr), pctCell(pct), inrCell(sharedCost), inrCell(finalCost)]);
   }
 
-  // Payer row — shown separately, NOT included in totals, no shared cost
-  if (payerAcc) {
-    const costInr = inr(payerAcc.trueCost, rate);
-    rows.push([payerAcc.accountId, payerAcc.accountName, numCell(payerAcc.trueCost), numCell(payerAcc.trueCost), numCell(costInr), "", "", numCell(costInr)]);
-  }
-
-  // Total row — only regular accounts (payer excluded)
+  // Total row (regular accounts only — payer excluded)
   rows.push([
-    boldCell(""), boldCell("Total Cost"),
-    numCell(totalUsd), numCell(totalUsd), numCell(totalInr),
-    pctCell(100), numCell(totalShared), numCell(totalFinal),
+    boldStr(""), boldStr("Total Cost"),
+    usdCell(totUsage), usdCell(totTrue), inrCell(totInr),
+    pctCell(100), inrCell(totShared), inrCell(totFinal),
   ]);
 
-  rows.push([]);
-
-  // SFL section below
-  const sflRows = [
-    { acc: sflAccs.find((a) => a.accountId === SFL_SHARED_ID)!, share: null },
-    { acc: sflAccs.find((a) => a.accountId === SFL_PROD_ID)!, share: sflProdShare },
-    { acc: sflAccs.find((a) => a.accountId === SFL_UAT_ID)!, share: sflUatShare },
-  ].filter((r) => r.acc);
-
-  let sflTotal = 0;
-  for (const { acc, share } of sflRows) {
-    const costInr = inr(acc.trueCost, rate);
-    const allocatedShared = share != null ? inr(sflSharedUsd, rate) * share : 0;
-    const finalCost = costInr + allocatedShared;
-    sflTotal += finalCost;
-    rows.push([acc.accountId, acc.accountName, numCell(acc.trueCost), numCell(acc.trueCost), numCell(costInr), "", "", numCell(finalCost)]);
+  // Payer row — Cost in INR = 0, Shared = 0, Total = trueCost × rate
+  if (payerAcc) {
+    const payerTotal = payerAcc.trueCost * rate;
+    totalCostMap.set(payerAcc.accountId, payerTotal);
+    rows.push([
+      payerAcc.accountId, payerAcc.accountName,
+      usdCell(payerAcc.usageCost), usdCell(payerAcc.trueCost),
+      inrCell(0), pctCell(0), inrCell(0), inrCell(payerTotal),
+    ]);
   }
-  rows.push(["", "", "", "", numCell(sflTotal)]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  setColWidths(ws, [18, 22, 14, 14, 16, 12, 14, 16]);
-  return ws;
+  setWidths(ws, [18, 22, 16, 16, 16, 12, 14, 16]);
+  return { ws, totalCostMap };
 }
 
-// ── Sheet: Generic CT (account-wise, no shared split) ────────────────────────
-function buildGenericSheet(ct: CTData, rate: number, excludePayerIds: string[] = []): XLSX.WorkSheet {
+// ── Sheet: SFL ────────────────────────────────────────────────────────────────
+function buildSflSheet(novacCT: CTData, rate: number): XLSX.WorkSheet {
+  const accounts   = novacCT.accounts;
+  const sflShared  = accounts.find((a) => a.accountId === SFL_SHARED_ID);
+  const sflProd    = accounts.find((a) => a.accountId === SFL_PROD_ID);
+  const sflUat     = accounts.find((a) => a.accountId === SFL_UAT_ID);
+
+  const sharedUsd  = sflShared?.trueCost || 0;
+  const prodUsd    = sflProd?.trueCost || 0;
+  const uatUsd     = sflUat?.trueCost || 0;
+  const base       = prodUsd + uatUsd;
+  const prodShare  = base > 0 ? prodUsd / base : 0.5;
+  const uatShare   = base > 0 ? uatUsd / base : 0.5;
+
   const rows: any[][] = [
-    [boldCell("Account ID"), boldCell("Account"), boldCell("Usage Cost"), boldCell("True Cost"), boldCell("Cost in INR")],
+    [
+      boldStr("Account ID"), boldStr("Account"),
+      boldStr("Usage Cost (USD)"), boldStr("True Cost (USD)"),
+      boldStr("Cost in INR"), boldStr("Shared cost"), boldStr("Total cost"),
+    ],
   ];
 
-  let totalUsd = 0, totalInr = 0;
-  for (const acc of ct.accounts) {
-    const costInr = inr(acc.trueCost, rate);
-    totalUsd += acc.trueCost;
-    totalInr += costInr;
-    rows.push([acc.accountId, acc.accountName, numCell(acc.trueCost), numCell(acc.trueCost), numCell(costInr)]);
+  const entries = [
+    { acc: sflProd, share: prodShare },
+    { acc: sflUat,  share: uatShare },
+  ].filter((e) => e.acc);
+
+  let totFinal = 0;
+  for (const { acc, share } of entries) {
+    if (!acc) continue;
+    const costInr    = acc.trueCost * rate;
+    const sharedCost = sharedUsd * rate * share;
+    const finalCost  = costInr + sharedCost;
+    totFinal += finalCost;
+    rows.push([acc.accountId, acc.accountName, usdCell(acc.usageCost), usdCell(acc.trueCost), inrCell(costInr), inrCell(sharedCost), inrCell(finalCost)]);
   }
 
-  rows.push([boldCell(""), boldCell("Total"), numCell(totalUsd), numCell(totalUsd), numCell(totalInr)]);
+  // SFL-SHARED row for reference
+  if (sflShared) {
+    rows.push([sflShared.accountId, sflShared.accountName, usdCell(sflShared.usageCost), usdCell(sflShared.trueCost), inrCell(sflShared.trueCost * rate), boldStr("(split above)"), inrCell(0)]);
+  }
+
+  rows.push([boldStr(""), boldStr("Total"), usdCell(0), usdCell(0), inrCell(0), inrCell(0), inrCell(totFinal)]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  setColWidths(ws, [18, 24, 14, 14, 16]);
+  setWidths(ws, [18, 24, 16, 16, 16, 14, 16]);
   return ws;
 }
 
-// ── Main export function ──────────────────────────────────────────────────────
+// ── Sheet: Generic CT ─────────────────────────────────────────────────────────
+function buildGenericSheet(ct: CTData, rate: number): XLSX.WorkSheet {
+  const rows: any[][] = [
+    [boldStr("Account ID"), boldStr("Account"), boldStr("Usage Cost (USD)"), boldStr("True Cost (USD)"), boldStr("Cost in INR")],
+  ];
+  let totUsage = 0, totTrue = 0, totInr = 0;
+  for (const acc of ct.accounts) {
+    const costInr = acc.trueCost * rate;
+    totUsage += acc.usageCost;
+    totTrue  += acc.trueCost;
+    totInr   += costInr;
+    rows.push([acc.accountId, acc.accountName, usdCell(acc.usageCost), usdCell(acc.trueCost), inrCell(costInr)]);
+  }
+  rows.push([boldStr(""), boldStr("Total"), usdCell(totUsage), usdCell(totTrue), inrCell(totInr)]);
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  setWidths(ws, [18, 26, 16, 16, 16]);
+  return ws;
+}
+
+// ── Individual CT download ────────────────────────────────────────────────────
+export function generateCtReport(
+  ct: CTData,
+  rate: number,
+  monthLabel: string,
+  servicesByCt: Map<string, ServiceCost[]>, // accountId → service rows
+) {
+  const wb = XLSX.utils.book_new();
+
+  // Sheet 1: account-wise
+  const accRows: any[][] = [
+    [boldStr("Account ID"), boldStr("Account"), boldStr("Usage Cost (USD)"), boldStr("True Cost (USD)"), boldStr("Cost in INR")],
+  ];
+  let totUsage = 0, totTrue = 0, totInr = 0;
+  for (const acc of ct.accounts) {
+    const costInr = acc.trueCost * rate;
+    totUsage += acc.usageCost; totTrue += acc.trueCost; totInr += costInr;
+    accRows.push([acc.accountId, acc.accountName, usdCell(acc.usageCost), usdCell(acc.trueCost), inrCell(costInr)]);
+  }
+  accRows.push([boldStr(""), boldStr("Total"), usdCell(totUsage), usdCell(totTrue), inrCell(totInr)]);
+  const accWs = XLSX.utils.aoa_to_sheet(accRows);
+  setWidths(accWs, [18, 26, 16, 16, 16]);
+  XLSX.utils.book_append_sheet(wb, accWs, "Accounts");
+
+  // One sheet per sub-account: service-wise
+  for (const acc of ct.accounts) {
+    const services = servicesByCt.get(acc.accountId) || [];
+    const svcRows: any[][] = [
+      [boldStr("Service"), boldStr("Usage Cost (USD)"), boldStr("True Cost (USD)"), boldStr("Cost in INR")],
+    ];
+    let sTotUsage = 0, sTotTrue = 0, sTotInr = 0;
+    for (const svc of services) {
+      const costInr = svc.trueCost * rate;
+      sTotUsage += svc.usageCost; sTotTrue += svc.trueCost; sTotInr += costInr;
+      svcRows.push([svc.service, usdCell(svc.usageCost), usdCell(svc.trueCost), inrCell(costInr)]);
+    }
+    svcRows.push([boldStr("Total"), usdCell(sTotUsage), usdCell(sTotTrue), inrCell(sTotInr)]);
+    const svcWs = XLSX.utils.aoa_to_sheet(svcRows);
+    setWidths(svcWs, [30, 16, 16, 16]);
+    // Sheet name max 31 chars
+    const sheetName = acc.accountName.slice(0, 31);
+    XLSX.utils.book_append_sheet(wb, svcWs, sheetName);
+  }
+
+  XLSX.writeFile(wb, `${ct.ctName}-Cost-${monthLabel}.xlsx`);
+}
+
+// ── Main multi-CT report ──────────────────────────────────────────────────────
 export function generateAwsMonthlyReport(
   ctDataList: CTData[],
   rate: number,
   monthLabel: string,
+  mappings: AppMapping[],
 ) {
   const wb = XLSX.utils.book_new();
 
-  // Sheet 1: Master
-  XLSX.utils.book_append_sheet(wb, buildMasterSheet(ctDataList, rate), "Master");
+  // Build Novac sheet first to get totalCostMap for master
+  const novacCT = ctDataList.find((c) => c.ctName.toLowerCase().includes("novac") && !c.ctName.toLowerCase().includes("wonder") && !c.ctName.toLowerCase().includes("credit"));
+  let novacTotalCostMap = new Map<string, number>();
 
-  // Remaining sheets in CT order — Novac first (with SFL inline), then others
+  // Sheet 1: Master
+  if (novacCT) {
+    const { totalCostMap } = buildNovacSheet(novacCT, rate);
+    novacTotalCostMap = totalCostMap;
+  }
+  XLSX.utils.book_append_sheet(wb, buildMasterSheet(ctDataList, rate, mappings, novacTotalCostMap), "Master");
+
+  // Remaining sheets
   for (const ct of ctDataList) {
     const nameL = ct.ctName.toLowerCase();
     if (nameL.includes("novac") && !nameL.includes("wonder") && !nameL.includes("credit")) {
-      XLSX.utils.book_append_sheet(wb, buildNovacSheet(ct, rate), ct.ctName.slice(0, 31));
+      const { ws } = buildNovacSheet(ct, rate);
+      XLSX.utils.book_append_sheet(wb, ws, ct.ctName.slice(0, 31));
+      // SFL sheet
+      XLSX.utils.book_append_sheet(wb, buildSflSheet(ct, rate), "SFL");
     } else {
       XLSX.utils.book_append_sheet(wb, buildGenericSheet(ct, rate), ct.ctName.slice(0, 31));
     }
@@ -202,5 +308,3 @@ export function generateAwsMonthlyReport(
 
   XLSX.writeFile(wb, `AWS-Monthly-Cost-${monthLabel}.xlsx`);
 }
-
-export type { CTData, AccountCost };
