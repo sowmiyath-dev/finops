@@ -6,7 +6,7 @@ import { useAuthStore } from "@/store/authStore";
 import {
   Building2, Tag, Bell, Settings, ChevronRight, ChevronDown,
   Menu, X, Users, Mail, AlertTriangle, Zap,
-  LayoutDashboard, Layers, TrendingDown, BarChart2,
+  LayoutDashboard, Layers, TrendingDown, BarChart2, PieChart,
 } from "lucide-react";
 
 interface NavItem {
@@ -19,12 +19,13 @@ interface NavItem {
 }
 
 const STATIC_NAV: NavItem[] = [
-  { id: "dashboard",    label: "Dashboard",    icon: LayoutDashboard, href: "/dashboard" },
-  { id: "org",          label: "Organization", icon: Building2, href: "/org" },
-  { id: "verticals",    label: "Verticals",    icon: Layers,    href: "/verticals" },
-  { id: "tags",         label: "Tag Manager",  icon: Tag,       href: "/tag-manager" },
-  { id: "alerts",       label: "Alerts",       icon: Bell,      href: "/alerts",      badge: "Soon" },
-  { id: "optimization", label: "Optimization", icon: Zap,       href: "/optimization", badge: "Soon" },
+  { id: "dashboard",    label: "Dashboard",         icon: LayoutDashboard, href: "/dashboard" },
+  { id: "finops",       label: "Application Cost",  icon: PieChart,        href: "/finops-dashboard" },
+  { id: "org",          label: "Organization",      icon: Building2,       href: "/org" },
+  { id: "verticals",    label: "Verticals",         icon: Layers,          href: "/verticals" },
+  { id: "tags",         label: "Tag Manager",       icon: Tag,             href: "/tag-manager" },
+  { id: "alerts",       label: "Alerts",            icon: Bell,            href: "/alerts",       badge: "Soon" },
+  { id: "optimization", label: "Optimization",      icon: Zap,             href: "/optimization", badge: "Soon" },
   {
     id: "settings", label: "Settings", icon: Settings,
     children: [

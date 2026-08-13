@@ -145,18 +145,14 @@ export default function FinOpsDashboard() {
     return { aws, azure_actual, azure_savings, azure_true, total: aws + azure_true };
   };
 
-  const VERTICAL_SFL_MAP: Record<string, "SFL" | "Non - SFL"> = {
-    "Finergy": "Non - SFL", "Pahal": "Non - SFL", "SLIC": "Non - SFL", "SGIC": "Non - SFL",
-    "LMS": "Non - SFL", "Nestavia": "Non - SFL", "SFL - Credacc": "SFL", "Immerz": "Non - SFL",
-    "IDC": "Non - SFL", "Devops": "SFL", "Digital": "SFL", "SFL-RnD": "SFL",
-    "NTS-Development": "Non - SFL", "Payer account Novac": "Non - SFL", "SFL": "SFL",
-    "Automall": "Non - SFL", "Indostar": "Non - SFL", "NOVACwonderlendhubs": "SFL", "Novac Credit Nirvana": "SFL",
-  };
+  // SFL = vertical named "Lending"; Non-SFL = everything else
+  const isSflVertical = (vName: string) => vName.toLowerCase() === "lending";
 
-  const filteredVerticals = sflFilter === "all" ? verticals : verticals.map((v) => ({
-    ...v,
-    businesses: v.businesses.filter((b) => (VERTICAL_SFL_MAP[b.name] || "Non - SFL") === sflFilter),
-  })).filter((v) => v.businesses.length > 0);
+  const filteredVerticals = sflFilter === "all"
+    ? verticals
+    : verticals.filter((v) =>
+        sflFilter === "SFL" ? isSflVertical(v.name) : !isSflVertical(v.name)
+      );
 
   const grandTotal = filteredVerticals.reduce((acc, v) => {
     const t = verticalTotals(v);
