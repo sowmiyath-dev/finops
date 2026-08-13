@@ -24,11 +24,6 @@ const ALL_CHARGE_TYPES = [
   "Tax", "DistributorDiscount", "Credit", "Refund", "OCBLateFee", "Fee",
 ];
 
-const GRANULARITY = [
-  { label: "Daily", value: "daily" },
-  { label: "Monthly", value: "monthly" },
-];
-
 const TABS = [
   { label: "Service Wise", value: "service" },
   { label: "Resource Wise", value: "resource" },
@@ -116,7 +111,7 @@ export default function CTDetailPage() {
 
   const [startDate, setStartDate] = useState(lastMonth.start);
   const [endDate, setEndDate] = useState(lastMonth.end);
-  const [granularity, setGranularity] = useState("monthly");
+  const granularity = "monthly";
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [selectedChargeTypes, setSelectedChargeTypes] = useState<string[]>(DEFAULT_CHARGE_TYPES);
   const [chargeFilterOpen, setChargeFilterOpen] = useState(false);
@@ -260,14 +255,6 @@ export default function CTDetailPage() {
           <p className="text-xs text-black mt-0.5 font-mono">{ct?.management_account_id} &middot; {ct?.management_account_name}</p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex border border-gray-300 rounded-md overflow-hidden">
-            {GRANULARITY.map((g) => (
-              <button key={g.value} onClick={() => setGranularity(g.value)}
-                className={`px-4 py-2 text-xs font-bold transition ${granularity === g.value ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-gray-50"}`}>
-                {g.label}
-              </button>
-            ))}
-          </div>
           <div className="flex items-center gap-2">
             <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
               max={boundary?.accurate_until}
@@ -327,7 +314,7 @@ export default function CTDetailPage() {
           {/* Subaccount cost chart */}
           <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5 mb-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-bold text-black">Subaccount Cost - {granularity === "daily" ? "Daily Trend" : "By Account"}</h2>
+              <h2 className="text-sm font-bold text-black">Subaccount Cost - By Account</h2>
             </div>
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={stackedData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
