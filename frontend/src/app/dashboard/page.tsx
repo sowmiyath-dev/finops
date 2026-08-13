@@ -364,7 +364,7 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <div className="p-5 space-y-4 max-w-screen-xl mx-auto">
+      <div className="p-4 space-y-4">
 
         {/* Header */}
         <div className="rounded-xl px-5 py-3.5 flex items-center justify-between" style={{ background: "linear-gradient(135deg,#0f2d5e 0%,#1a6fa8 100%)" }}>
@@ -602,53 +602,51 @@ export default function DashboardPage() {
           </div>
 
           {/* Table */}
-          <div className="overflow-x-auto">
-            <table className="w-full" style={{ borderCollapse: "collapse" }}>
-              <colgroup>
-                <col style={{ width: "36%" }} />
-                <col style={{ width: "16%" }} />
-                <col style={{ width: "20%" }} />
-                <col style={{ width: "20%" }} />
-                <col style={{ width: "8%" }} />
-              </colgroup>
-              <thead>
-                <tr style={{ background: "linear-gradient(90deg,#0f2d5e 0%,#1e4d8c 100%)", position: "sticky", top: 0, zIndex: 10 }}>
-                  <th className="text-left text-xs font-bold uppercase tracking-wider text-white px-4 py-3">Application Name</th>
-                  <th className="text-left text-xs font-bold uppercase tracking-wider text-white px-4 py-3">Vertical</th>
-                  <th className="text-right text-xs font-bold uppercase tracking-wider text-white px-4 py-3">Cost (USD)</th>
-                  <th className="text-right text-xs font-bold uppercase tracking-wider text-white px-4 py-3">
-                    Cost (INR){costLoading && <span className="ml-1 text-[9px] text-blue-200 font-normal animate-pulse">loading...</span>}
-                  </th>
-                  <th className="px-4 py-3" />
+          <table className="w-full" style={{ borderCollapse: "collapse" }}>
+            <colgroup>
+              <col style={{ width: "38%" }} />
+              <col style={{ width: "14%" }} />
+              <col style={{ width: "20%" }} />
+              <col style={{ width: "20%" }} />
+              <col style={{ width: "8%" }} />
+            </colgroup>
+            <thead>
+              <tr style={{ background: "linear-gradient(90deg,#0f2d5e 0%,#1e4d8c 100%)" }}>
+                <th className="text-left text-xs font-bold uppercase tracking-wider text-white px-4 py-3">Application Name</th>
+                <th className="text-left text-xs font-bold uppercase tracking-wider text-white px-4 py-3">Vertical</th>
+                <th className="text-right text-xs font-bold uppercase tracking-wider text-white px-4 py-3">Cost (USD)</th>
+                <th className="text-right text-xs font-bold uppercase tracking-wider text-white px-4 py-3">
+                  Cost (INR){costLoading && <span className="ml-1 text-[9px] text-blue-200 font-normal animate-pulse">loading...</span>}
+                </th>
+                <th className="px-4 py-3" />
+              </tr>
+            </thead>
+            <tbody>
+              {filteredMappings.map((row, i) => {
+                const globalIndex = mappings.indexOf(row);
+                const usdCost = ctDataCache.length > 0 ? computeMappingCostUSD(row, ctDataCache) : null;
+                const inrCost = rate > 0 && ctDataCache.length > 0 ? computeMappingCost(row, ctDataCache, rate) : null;
+                return (
+                  <MappingRow key={globalIndex} row={row} index={globalIndex} onUpdate={updateMapping} onDelete={deleteMapping} allAccounts={[]}
+                    usdCost={usdCost} inrCost={inrCost} rate={rate} />
+                );
+              })}
+              {ctDataCache.length > 0 && (
+                <tr style={{ background: "#e8f0fe", borderTop: "2px solid #3b82f6" }}>
+                  <td className="px-4 py-3 text-sm font-extrabold text-slate-800" colSpan={2}>
+                    Total {sflFilter !== "all" && <span className="ml-1 text-xs font-semibold text-blue-600">({sflFilter})</span>}
+                  </td>
+                  <td className="px-4 py-3 text-right text-sm font-extrabold font-mono text-blue-800">
+                    ${filteredGrandUSD.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </td>
+                  <td className="px-4 py-3 text-right text-sm font-extrabold font-mono text-emerald-700">
+                    {rate > 0 ? `₹${filteredGrandINR.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : <span className="text-xs text-slate-300">enter rate</span>}
+                  </td>
+                  <td />
                 </tr>
-              </thead>
-              <tbody>
-                {filteredMappings.map((row, i) => {
-                  const globalIndex = mappings.indexOf(row);
-                  const usdCost = ctDataCache.length > 0 ? computeMappingCostUSD(row, ctDataCache) : null;
-                  const inrCost = rate > 0 && ctDataCache.length > 0 ? computeMappingCost(row, ctDataCache, rate) : null;
-                  return (
-                    <MappingRow key={globalIndex} row={row} index={globalIndex} onUpdate={updateMapping} onDelete={deleteMapping} allAccounts={[]}
-                      usdCost={usdCost} inrCost={inrCost} rate={rate} />
-                  );
-                })}
-                {ctDataCache.length > 0 && (
-                  <tr style={{ background: "#e8f0fe", borderTop: "2px solid #3b82f6" }}>
-                    <td className="px-4 py-3 text-sm font-extrabold text-slate-800" colSpan={2}>
-                      Total {sflFilter !== "all" && <span className="ml-1 text-xs font-semibold text-blue-600">({sflFilter})</span>}
-                    </td>
-                    <td className="px-4 py-3 text-right text-sm font-extrabold font-mono text-blue-800">
-                      ${filteredGrandUSD.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                    <td className="px-4 py-3 text-right text-sm font-extrabold font-mono text-emerald-700">
-                      {rate > 0 ? `₹${filteredGrandINR.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : <span className="text-xs text-slate-300">enter rate</span>}
-                    </td>
-                    <td />
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+              )}
+            </tbody>
+          </table>
         </div>
 
       </div>
