@@ -93,20 +93,20 @@ function MappingRow({
 
   if (!editing) {
     return (
-      <tr className="border-b border-gray-100 hover:bg-slate-50 transition">
-        <td className="px-3 py-2 text-sm font-semibold text-gray-800 w-48">{row.appName}</td>
-        <td className="px-3 py-2 w-28">
-          <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+      <tr className="border-b border-slate-100 hover:bg-slate-50 transition">
+        <td className="px-4 py-2 text-xs font-semibold text-slate-800 truncate">{row.appName}</td>
+        <td className="px-3 py-2">
+          <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${
             vertical === "SFL" ? "bg-blue-100 text-blue-700" : vertical === "Non - SFL" ? "bg-violet-100 text-violet-700" : "bg-gray-100 text-gray-500"
           }`}>{vertical}</span>
         </td>
-        <td className="px-3 py-2 text-right text-sm font-bold font-mono text-blue-700 w-36">{fmtUSD(usdCost)}</td>
-        <td className="px-3 py-2 text-right text-sm font-bold font-mono text-emerald-700 w-36">
-          {rate > 0 ? fmtINR(inrCost) : <span className="text-xs text-slate-300">enter rate</span>}
+        <td className="px-4 py-2 text-right text-xs font-bold font-mono text-blue-700">{fmtUSD(usdCost)}</td>
+        <td className="px-4 py-2 text-right text-xs font-bold font-mono text-emerald-700">
+          {rate > 0 ? fmtINR(inrCost) : <span className="text-[10px] text-slate-300">enter rate</span>}
         </td>
-        <td className="px-3 py-2 w-16">
-          <div className="flex gap-1">
-            <button onClick={() => setEditing(true)} className="p-1 rounded hover:bg-blue-100 text-blue-700"><Pencil className="w-3 h-3" /></button>
+        <td className="px-3 py-2">
+          <div className="flex gap-1 justify-end">
+            <button onClick={() => setEditing(true)} className="p-1 rounded hover:bg-blue-100 text-blue-600"><Pencil className="w-3 h-3" /></button>
             <button onClick={() => onDelete(index)} className="p-1 rounded hover:bg-red-100 text-red-500"><Trash2 className="w-3 h-3" /></button>
           </div>
         </td>
@@ -116,40 +116,35 @@ function MappingRow({
 
   return (
     <tr className="border-b border-blue-100 bg-blue-50">
-      <td className="px-3 py-2">
+      <td className="px-4 py-2">
         <input value={draft.appName} onChange={(e) => setDraft({ ...draft, appName: e.target.value })}
-          className="w-full border border-gray-300 rounded px-2 py-1 text-xs outline-none focus:border-blue-700 mb-1" />
+          className="w-full border border-slate-300 rounded px-2 py-1 text-xs outline-none focus:border-blue-600 mb-1" />
         <div className="space-y-1">
           {draft.accounts.map((a, ai) => (
             <div key={ai} className="flex gap-1 items-center">
-              <input value={a.accountId} onChange={(e) => {
-                const accs = [...draft.accounts]; accs[ai] = { ...accs[ai], accountId: e.target.value };
-                setDraft({ ...draft, accounts: accs });
-              }} placeholder="Account ID" className="w-32 border border-gray-300 rounded px-2 py-1 text-xs outline-none focus:border-blue-700" />
-              <input value={a.fraction != null ? String(a.fraction * 100) : "100"} onChange={(e) => {
-                const accs = [...draft.accounts]; accs[ai] = { ...accs[ai], fraction: parseFloat(e.target.value) / 100 };
-                setDraft({ ...draft, accounts: accs });
-              }} placeholder="%" className="w-12 border border-gray-300 rounded px-2 py-1 text-xs outline-none focus:border-blue-700" />
-              <span className="text-xs text-gray-400">%</span>
-              <button onClick={() => { const accs = draft.accounts.filter((_, i) => i !== ai); setDraft({ ...draft, accounts: accs }); }}
-                className="text-red-400 hover:text-red-600"><X className="w-3 h-3" /></button>
+              <input value={a.accountId} onChange={(e) => { const accs = [...draft.accounts]; accs[ai] = { ...accs[ai], accountId: e.target.value }; setDraft({ ...draft, accounts: accs }); }}
+                placeholder="Account ID" className="w-32 border border-slate-300 rounded px-2 py-0.5 text-[11px] outline-none focus:border-blue-600" />
+              <input value={a.fraction != null ? String(a.fraction * 100) : "100"} onChange={(e) => { const accs = [...draft.accounts]; accs[ai] = { ...accs[ai], fraction: parseFloat(e.target.value) / 100 }; setDraft({ ...draft, accounts: accs }); }}
+                placeholder="%" className="w-10 border border-slate-300 rounded px-2 py-0.5 text-[11px] outline-none focus:border-blue-600" />
+              <span className="text-[10px] text-slate-400">%</span>
+              <button onClick={() => { const accs = draft.accounts.filter((_, i) => i !== ai); setDraft({ ...draft, accounts: accs }); }} className="text-red-400 hover:text-red-600"><X className="w-3 h-3" /></button>
             </div>
           ))}
           <button onClick={() => setDraft({ ...draft, accounts: [...draft.accounts, { accountId: "", fraction: 1 }] })}
-            className="text-xs text-blue-700 hover:underline flex items-center gap-1"><Plus className="w-3 h-3" /> Add</button>
+            className="text-[11px] text-blue-600 hover:underline flex items-center gap-0.5"><Plus className="w-3 h-3" />Add</button>
         </div>
       </td>
       <td className="px-3 py-2">
-        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+        <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full ${
           vertical === "SFL" ? "bg-blue-100 text-blue-700" : "bg-violet-100 text-violet-700"
         }`}>{vertical}</span>
       </td>
-      <td className="px-3 py-2 text-right text-xs font-mono text-blue-700">{fmtUSD(usdCost)}</td>
-      <td className="px-3 py-2 text-right text-xs font-mono text-emerald-700">{rate > 0 ? fmtINR(inrCost) : "—"}</td>
+      <td className="px-4 py-2 text-right text-[11px] font-mono text-blue-700">{fmtUSD(usdCost)}</td>
+      <td className="px-4 py-2 text-right text-[11px] font-mono text-emerald-700">{rate > 0 ? fmtINR(inrCost) : "—"}</td>
       <td className="px-3 py-2">
-        <div className="flex gap-1">
+        <div className="flex gap-1 justify-end">
           <button onClick={save} className="p-1 rounded hover:bg-green-100 text-green-700"><Check className="w-3 h-3" /></button>
-          <button onClick={cancel} className="p-1 rounded hover:bg-gray-100 text-gray-500"><X className="w-3 h-3" /></button>
+          <button onClick={cancel} className="p-1 rounded hover:bg-slate-100 text-slate-500"><X className="w-3 h-3" /></button>
         </div>
       </td>
     </tr>
@@ -364,8 +359,221 @@ export default function DashboardPage() {
     : 0;
 
   return (
-    <div className="min-h-screen" style={{ background: "#f4f6fb" }}>
-      <div className="p-6 space-y-5">
+    <div className="min-h-screen bg-slate-50">
+      <div className="p-5 space-y-4 max-w-screen-xl mx-auto">
+
+        {/* Header */}
+        <div className="rounded-xl px-5 py-3.5 flex items-center justify-between" style={{ background: "linear-gradient(135deg,#0f2d5e 0%,#1a6fa8 100%)" }}>
+          <div>
+            <h1 className="text-base font-extrabold text-white tracking-tight">AWS Monthly Cost Report</h1>
+            <p className="text-blue-200 text-[11px] mt-0.5">Multi-sheet Excel · Master sheet with shared cost split</p>
+          </div>
+          <div className="text-right">
+            <div className="text-blue-300 text-[10px] font-semibold uppercase tracking-wider">Control Towers</div>
+            <div className="text-white text-xl font-extrabold leading-none mt-0.5">{awsTowers.length}</div>
+          </div>
+        </div>
+
+        {/* Two cards */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+          {/* Full Monthly Report */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-1 h-4 rounded-full bg-blue-600" />
+              <span className="text-sm font-bold text-slate-800">Full Monthly Report</span>
+            </div>
+            <p className="text-[11px] text-slate-400 mb-3 ml-3">All CTs · shared cost split · Master + per-CT sheets</p>
+
+            {/* By Month / Custom toggle */}
+            <div className="flex gap-1 bg-slate-100 rounded-lg p-0.5 w-fit mb-3">
+              {([false, true] as const).map((c) => (
+                <button key={String(c)} onClick={() => setReportCustom(c)}
+                  className={`px-3 py-1 text-[11px] font-bold rounded-md transition ${
+                    reportCustom === c ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                  }`}>{c ? "Custom Range" : "By Month"}</button>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              {!reportCustom ? (
+                <div className="col-span-2">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1 block">Month</label>
+                  <select value={reportMonth.start}
+                    onChange={(e) => { const m = monthOptions.find((m) => m.start === e.target.value) || monthOptions[0]; setReportMonth(m); setReportStart(m.start); setReportEnd(m.end); }}
+                    className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-700 focus:border-blue-600 outline-none bg-white">
+                    {monthOptions.map((m) => <option key={m.start} value={m.start}>{m.label}</option>)}
+                  </select>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1 block">From</label>
+                    <input type="date" value={reportStart} onChange={(e) => setReportStart(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 focus:border-blue-600 outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1 block">To</label>
+                    <input type="date" value={reportEnd} onChange={(e) => setReportEnd(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 focus:border-blue-600 outline-none" />
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="flex items-end gap-2">
+              <div className="flex-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1 block">1 USD = INR</label>
+                <div className="flex items-center border border-slate-300 rounded-lg overflow-hidden focus-within:border-blue-600">
+                  <div className="px-2 py-1.5 bg-slate-50 border-r border-slate-200"><IndianRupee className="w-3 h-3 text-slate-400" /></div>
+                  <input type="number" value={inrRate} onChange={(e) => setInrRate(e.target.value)}
+                    placeholder="84.50" className="flex-1 px-2 py-1.5 text-xs font-semibold text-slate-700 outline-none" />
+                </div>
+              </div>
+              <button onClick={handleDownload} disabled={reportLoading || awsTowers.length === 0 || !inrRate}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-50 whitespace-nowrap">
+                {reportLoading ? <><RefreshCw className="w-3 h-3 animate-spin" />Generating...</> : <><Download className="w-3 h-3" />Download Excel</>}
+              </button>
+            </div>
+          </div>
+
+          {/* Individual CT Report */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-1 h-4 rounded-full bg-orange-500" />
+              <span className="text-sm font-bold text-slate-800">Individual CT Report</span>
+            </div>
+            <p className="text-[11px] text-slate-400 mb-3 ml-3">Account-wise + service-wise per sub-account</p>
+
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <div className="col-span-2">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1 block">Control Tower</label>
+                <select value={selectedCtId} onChange={(e) => setSelectedCtId(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-700 focus:border-blue-600 outline-none bg-white">
+                  <option value="">Select CT</option>
+                  {awsTowers.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1 block">From</label>
+                <input type="date" value={ctStart} onChange={(e) => setCtStart(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 focus:border-blue-600 outline-none" />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1 block">To</label>
+                <input type="date" value={ctEnd} onChange={(e) => setCtEnd(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 focus:border-blue-600 outline-none" />
+              </div>
+            </div>
+
+            {/* Quick period buttons */}
+            <div className="flex gap-1 mb-2">
+              {[
+                { label: "Last Month", s: lastMonth.start, e: lastMonth.end },
+                { label: "This Month", s: fmtDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), e: fmtDate(new Date()) },
+              ].map((p) => (
+                <button key={p.label} onClick={() => { setCtStart(p.s); setCtEnd(p.e); }}
+                  className={`px-2.5 py-1 text-[11px] font-bold rounded-md border transition ${
+                    ctStart === p.s && ctEnd === p.e ? "bg-blue-700 text-white border-blue-700" : "bg-white text-slate-600 border-slate-300 hover:border-blue-500"
+                  }`}>{p.label}</button>
+              ))}
+            </div>
+
+            <div className="flex items-end gap-2">
+              <div className="flex-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1 block">1 USD = INR</label>
+                <div className="flex items-center border border-slate-300 rounded-lg overflow-hidden focus-within:border-blue-600">
+                  <div className="px-2 py-1.5 bg-slate-50 border-r border-slate-200"><IndianRupee className="w-3 h-3 text-slate-400" /></div>
+                  <input type="number" value={ctInrRate} onChange={(e) => setCtInrRate(e.target.value)}
+                    placeholder="84.50" className="flex-1 px-2 py-1.5 text-xs font-semibold text-slate-700 outline-none" />
+                </div>
+              </div>
+              <button onClick={handleCtDownload} disabled={ctLoading || !selectedCtId || !ctInrRate}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold rounded-lg transition disabled:opacity-50 whitespace-nowrap">
+                {ctLoading ? <><RefreshCw className="w-3 h-3 animate-spin" />Generating...</> : <><Download className="w-3 h-3" />Download CT Excel</>}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Master Sheet Table */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+
+          {/* Table toolbar */}
+          <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-3">
+            <div>
+              <span className="text-sm font-bold text-slate-800">Master Sheet — Application Cost</span>
+              <span className="ml-2 text-[11px] text-slate-400">Note hidden in UI · visible in Excel</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {/* SFL filter */}
+              <div className="flex gap-0.5 bg-slate-100 rounded-lg p-0.5">
+                {(["all", "SFL", "Non - SFL"] as const).map((f) => (
+                  <button key={f} onClick={() => setSflFilter(f)}
+                    className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition ${
+                      sflFilter === f ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                    }`}>{f === "all" ? "All" : f}</button>
+                ))}
+              </div>
+              <button onClick={resetMappings} className="px-2.5 py-1 text-[11px] font-bold border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 transition">Reset</button>
+              <button onClick={addMapping} className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold bg-blue-700 text-white rounded-lg hover:bg-blue-800 transition">
+                <Plus className="w-3 h-3" />Add Row
+              </button>
+            </div>
+          </div>
+
+          {/* Table */}
+          <table className="w-full table-fixed">
+            <colgroup>
+              <col className="w-[38%]" />
+              <col className="w-[18%]" />
+              <col className="w-[18%]" />
+              <col className="w-[18%]" />
+              <col className="w-[8%]" />
+            </colgroup>
+            <thead>
+              <tr style={{ background: "linear-gradient(90deg,#0f2d5e 0%,#1a6fa8 100%)" }}>
+                <th className="text-left text-[11px] font-bold uppercase tracking-wide text-white px-4 py-2.5">Application</th>
+                <th className="text-left text-[11px] font-bold uppercase tracking-wide text-white px-3 py-2.5">Vertical</th>
+                <th className="text-right text-[11px] font-bold uppercase tracking-wide text-white px-4 py-2.5">Cost (USD)</th>
+                <th className="text-right text-[11px] font-bold uppercase tracking-wide text-white px-4 py-2.5">
+                  Cost (INR){costLoading && <span className="ml-1 text-[9px] text-blue-200 font-normal animate-pulse">loading...</span>}
+                </th>
+                <th className="px-3 py-2.5" />
+              </tr>
+            </thead>
+            <tbody>
+              {filteredMappings.map((row, i) => {
+                const globalIndex = mappings.indexOf(row);
+                const usdCost = ctDataCache.length > 0 ? computeMappingCostUSD(row, ctDataCache) : null;
+                const inrCost = rate > 0 && ctDataCache.length > 0 ? computeMappingCost(row, ctDataCache, rate) : null;
+                return (
+                  <MappingRow key={globalIndex} row={row} index={globalIndex} onUpdate={updateMapping} onDelete={deleteMapping} allAccounts={[]}
+                    usdCost={usdCost} inrCost={inrCost} rate={rate} />
+                );
+              })}
+              {ctDataCache.length > 0 && (
+                <tr className="border-t-2 border-blue-200" style={{ background: "#eef2ff" }}>
+                  <td className="px-4 py-2.5 text-xs font-extrabold text-slate-800" colSpan={2}>
+                    Total {sflFilter !== "all" && <span className="ml-1 text-[10px] font-semibold text-blue-600">({sflFilter})</span>}
+                  </td>
+                  <td className="px-4 py-2.5 text-right text-xs font-extrabold font-mono text-blue-800">
+                    ${filteredGrandUSD.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </td>
+                  <td className="px-4 py-2.5 text-right text-xs font-extrabold font-mono text-emerald-700">
+                    {rate > 0 ? `₹${filteredGrandINR.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : <span className="text-[10px] text-slate-300">enter rate</span>}
+                  </td>
+                  <td />
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </div>
+  );
+}
 
         {/* ── Page Header ── */}
         <div className="rounded-xl px-6 py-4 flex items-center justify-between" style={{ background: "linear-gradient(135deg,#0f2d5e 0%,#1a6fa8 100%)" }}>
