@@ -188,7 +188,12 @@ export default function DashboardPage() {
   const [reportCustom, setReportCustom] = useState(false); // false = month picker, true = custom range
   const [inrRate, setInrRate]           = useState("");
   const [reportLoading, setReportLoading] = useState(false);
-  const [mappings, setMappings]         = useState<AppMapping[]>(DEFAULT_APP_MAPPINGS);
+  const [mappings, setMappings] = useState<AppMapping[]>(() => {
+    try {
+      const saved = localStorage.getItem("finops_app_mappings");
+      return saved ? JSON.parse(saved) : DEFAULT_APP_MAPPINGS;
+    } catch { return DEFAULT_APP_MAPPINGS; }
+  });
   const [ctDataCache, setCtDataCache]   = useState<CTData[]>([]);
   const [costLoading, setCostLoading]   = useState(false);
   const [sflFilter, setSflFilter]       = useState<"all" | "SFL" | "Non - SFL">("all");
@@ -363,11 +368,27 @@ export default function DashboardPage() {
   };
 
   const updateMapping = (i: number, updated: AppMapping) => {
-    setMappings((prev) => prev.map((m, idx) => idx === i ? updated : m));
+    setMappings((prev) => {
+      const next = prev.map((m, idx) => idx === i ? updated : m);
+      localStorage.setItem("finops_app_mappings", JSON.stringify(next));
+      return next;
+    });
   };
-  const deleteMapping = (i: number) => setMappings((prev) => prev.filter((_, idx) => idx !== i));
-  const addMapping    = () => setMappings((prev) => [...prev, { appName: "New App", note: "", accounts: [{ accountId: "", fraction: 1 }] }]);
-  const resetMappings = () => { setMappings(DEFAULT_APP_MAPPINGS); toast.success("Reset to defaults"); };
+  const deleteMapping = (i: number) => setMappings((prev) => {
+    const next = prev.filter((_, idx) => idx !== i);
+    localStorage.setItem("finops_app_mappings", JSON.stringify(next));
+    return next;
+  });
+  const addMapping = () => setMappings((prev) => {
+    const next = [...prev, { appName: "New App", note: "", accounts: [{ accountId: "", fraction: 1 }] }];
+    localStorage.setItem("finops_app_mappings", JSON.stringify(next));
+    return next;
+  });
+  const resetMappings = () => {
+    setMappings(DEFAULT_APP_MAPPINGS);
+    localStorage.setItem("finops_app_mappings", JSON.stringify(DEFAULT_APP_MAPPINGS));
+    toast.success("Reset to defaults");
+  };
 
   const filteredMappings = sflFilter === "all" ? mappings : mappings.filter((m) => (APP_VERTICAL_MAP[m.appName] || "Non - SFL") === sflFilter);
 
