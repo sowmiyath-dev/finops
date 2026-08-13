@@ -174,7 +174,10 @@ export default function DashboardPage() {
   const lastMonth    = getLastMonth();
 
   // ── Monthly report state ──────────────────────────────────────────────────
-  const [reportMonth, setReportMonth]   = useState(monthOptions[0]); // monthOptions[0] = last month (i starts at 1)
+  const [reportMonth, setReportMonth]   = useState(monthOptions[0]);
+  const [reportStart, setReportStart]   = useState(monthOptions[0].start);
+  const [reportEnd, setReportEnd]       = useState(monthOptions[0].end);
+  const [reportCustom, setReportCustom] = useState(false); // false = month picker, true = custom range
   const [inrRate, setInrRate]           = useState("");
   const [reportLoading, setReportLoading] = useState(false);
   const [mappings, setMappings]         = useState<AppMapping[]>(DEFAULT_APP_MAPPINGS);
@@ -230,15 +233,19 @@ export default function DashboardPage() {
   }
 
   // Load CT data whenever month changes and rate is set
+  const reportEffectiveStart = reportCustom ? reportStart : reportMonth.start;
+  const reportEffectiveEnd   = reportCustom ? reportEnd   : reportMonth.end;
+  const reportEffectiveLabel = reportCustom ? `${reportStart}_${reportEnd}` : reportMonth.label.replace(" ", "");
+
   const loadCostPreview = async () => {
     if (!inrRate || parseFloat(inrRate) <= 0 || awsTowers.length === 0) return;
     setCostLoading(true);
-    try { const data = await fetchCtData(awsTowers, reportMonth.start, reportMonth.end); setCtDataCache(data); }
+    try { const data = await fetchCtData(awsTowers, reportEffectiveStart, reportEffectiveEnd); setCtDataCache(data); }
     catch (e) { console.error(e); }
     finally { setCostLoading(false); }
   };
 
-  useEffect(() => { if (inrRate && parseFloat(inrRate) > 0) loadCostPreview(); }, [reportMonth.start, inrRate]);
+  useEffect(() => { if (inrRate && parseFloat(inrRate) > 0) loadCostPreview(); }, [reportEffectiveStart, reportEffectiveEnd, inrRate]);
 
   const rate = parseFloat(inrRate) || 0;
   const grandTotal = rate > 0 && ctDataCache.length > 0
@@ -251,8 +258,8 @@ export default function DashboardPage() {
     if (!rate || rate <= 0) { toast.error("Enter a valid INR rate"); return; }
     setReportLoading(true);
     try {
-      const ctDataList = await fetchCtData(awsTowers, reportMonth.start, reportMonth.end);
-      generateAwsMonthlyReport(ctDataList, rate, reportMonth.label.replace(" ", ""), mappings);
+      const ctDataList = await fetchCtData(awsTowers, reportEffectiveStart, reportEffectiveEnd);
+      generateAwsMonthlyReport(ctDataList, rate, reportEffectiveLabel, mappings);
       toast.success("Report downloaded");
     } catch (e) { console.error(e); toast.error("Failed to generate report"); }
     finally { setReportLoading(false); }
@@ -349,27 +356,55 @@ export default function DashboardPage() {
               <h2 className="text-sm font-bold text-slate-800">Full Monthly Report</h2>
             </div>
             <p className="text-xs text-slate-400 mb-4">All control towers · shared cost split · Master + per-CT sheets</p>
-            <div className="flex items-end gap-3 flex-wrap">
-              <div>
-                <label className="text-xs font-bold text-slate-600 mb-1 block">Month</label>
-                <select value={reportMonth.start}
-                  onChange={(e) => setReportMonth(monthOptions.find((m) => m.start === e.target.value) || monthOptions[0])}
-                  className="border border-slate-300 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:border-blue-600 outline-none bg-white">
-                  {monthOptions.map((m) => <option key={m.start} value={m.start}>{m.label}</option>)}
-                </select>
+            <div className="space-y-3">
+              {/* Month / Custom toggle */}
+              <div className="flex gap-1 bg-slate-100 rounded-lg p-1 w-fit">
+                {([false, true] as const).map((isCustom) => (
+                  <button key={String(isCustom)} onClick={() => setReportCustom(isCustom)}
+                    className={`px-3 py-1 text-xs font-bold rounded-md transition ${
+                      reportCustom === isCustom ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                    }`}>
+                    {isCustom ? "Custom Range" : "By Month"}
+                  </button>
+                ))}
               </div>
-              <div>
-                <label className="text-xs font-bold text-slate-600 mb-1 block">1 USD = INR</label>
-                <div className="flex items-center border border-slate-300 rounded-lg overflow-hidden focus-within:border-blue-600">
-                  <div className="px-2 py-2 bg-slate-50 border-r border-slate-300"><IndianRupee className="w-3.5 h-3.5 text-slate-500" /></div>
-                  <input type="number" value={inrRate} onChange={(e) => setInrRate(e.target.value)}
-                    placeholder="e.g. 84.50" className="w-24 px-2 py-2 text-xs font-semibold text-slate-700 outline-none" />
+              <div className="flex items-end gap-3 flex-wrap">
+                {!reportCustom ? (
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 mb-1 block">Month</label>
+                    <select value={reportMonth.start}
+                      onChange={(e) => { const m = monthOptions.find((m) => m.start === e.target.value) || monthOptions[0]; setReportMonth(m); setReportStart(m.start); setReportEnd(m.end); }}
+                      className="border border-slate-300 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:border-blue-600 outline-none bg-white">
+                      {monthOptions.map((m) => <option key={m.start} value={m.start}>{m.label}</option>)}
+                    </select>
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 mb-1 block">From</label>
+                      <input type="date" value={reportStart} onChange={(e) => setReportStart(e.target.value)}
+                        className="border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-700 focus:border-blue-600 outline-none" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 mb-1 block">To</label>
+                      <input type="date" value={reportEnd} onChange={(e) => setReportEnd(e.target.value)}
+                        className="border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-700 focus:border-blue-600 outline-none" />
+                    </div>
+                  </>
+                )}
+                <div>
+                  <label className="text-xs font-bold text-slate-600 mb-1 block">1 USD = INR</label>
+                  <div className="flex items-center border border-slate-300 rounded-lg overflow-hidden focus-within:border-blue-600">
+                    <div className="px-2 py-2 bg-slate-50 border-r border-slate-300"><IndianRupee className="w-3.5 h-3.5 text-slate-500" /></div>
+                    <input type="number" value={inrRate} onChange={(e) => setInrRate(e.target.value)}
+                      placeholder="e.g. 84.50" className="w-24 px-2 py-2 text-xs font-semibold text-slate-700 outline-none" />
+                  </div>
                 </div>
+                <button onClick={handleDownload} disabled={reportLoading || awsTowers.length === 0 || !inrRate}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-50 shadow-sm">
+                  {reportLoading ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Generating...</> : <><Download className="w-3.5 h-3.5" /> Download Excel</>}
+                </button>
               </div>
-              <button onClick={handleDownload} disabled={reportLoading || awsTowers.length === 0 || !inrRate}
-                className="flex items-center gap-1.5 px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-50 shadow-sm">
-                {reportLoading ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Generating...</> : <><Download className="w-3.5 h-3.5" /> Download Excel</>}
-              </button>
             </div>
           </div>
 
@@ -380,41 +415,55 @@ export default function DashboardPage() {
               <h2 className="text-sm font-bold text-slate-800">Individual CT Report</h2>
             </div>
             <p className="text-xs text-slate-400 mb-4">Account-wise + service-wise per sub-account · custom period</p>
-            <div className="flex items-end gap-3 flex-wrap">
-              <div>
-                <label className="text-xs font-bold text-slate-600 mb-1 block">Control Tower</label>
-                <select value={selectedCtId} onChange={(e) => setSelectedCtId(e.target.value)}
-                  className="border border-slate-300 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:border-blue-600 outline-none bg-white min-w-[160px]">
-                  <option value="">Select CT</option>
-                  {awsTowers.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-600 mb-1 block">Period</label>
-                <div className="flex gap-1">
-                  {[
-                    { label: "Last Month", s: lastMonth.start, e: lastMonth.end },
-                    { label: "This Month", s: fmtDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), e: fmtDate(new Date()) },
-                  ].map((p) => (
-                    <button key={p.label} onClick={() => { setCtStart(p.s); setCtEnd(p.e); }}
-                      className={`px-2.5 py-2 text-xs font-bold rounded-lg border transition ${
-                        ctStart === p.s ? "bg-blue-700 text-white border-blue-700" : "bg-white text-slate-600 border-slate-300 hover:border-blue-600"
-                      }`}>{p.label}</button>
-                  ))}
+            <div className="space-y-3">
+              <div className="flex items-end gap-3 flex-wrap">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 mb-1 block">Control Tower</label>
+                  <select value={selectedCtId} onChange={(e) => setSelectedCtId(e.target.value)}
+                    className="border border-slate-300 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:border-blue-600 outline-none bg-white min-w-[160px]">
+                    <option value="">Select CT</option>
+                    {awsTowers.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 mb-1 block">Quick Period</label>
+                  <div className="flex gap-1">
+                    {[
+                      { label: "Last Month", s: lastMonth.start, e: lastMonth.end },
+                      { label: "This Month", s: fmtDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), e: fmtDate(new Date()) },
+                    ].map((p) => (
+                      <button key={p.label} onClick={() => { setCtStart(p.s); setCtEnd(p.e); }}
+                        className={`px-2.5 py-2 text-xs font-bold rounded-lg border transition ${
+                          ctStart === p.s && ctEnd === p.e ? "bg-blue-700 text-white border-blue-700" : "bg-white text-slate-600 border-slate-300 hover:border-blue-600"
+                        }`}>{p.label}</button>
+                    ))}
+                  </div>
                 </div>
               </div>
-              <div>
-                <label className="text-xs font-bold text-slate-600 mb-1 block">1 USD = INR</label>
-                <div className="flex items-center border border-slate-300 rounded-lg overflow-hidden focus-within:border-blue-600">
-                  <div className="px-2 py-2 bg-slate-50 border-r border-slate-300"><IndianRupee className="w-3.5 h-3.5 text-slate-500" /></div>
-                  <input type="number" value={ctInrRate} onChange={(e) => setCtInrRate(e.target.value)}
-                    placeholder="e.g. 84.50" className="w-24 px-2 py-2 text-xs font-semibold text-slate-700 outline-none" />
+              <div className="flex items-end gap-3 flex-wrap">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 mb-1 block">From</label>
+                  <input type="date" value={ctStart} onChange={(e) => setCtStart(e.target.value)}
+                    className="border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-700 focus:border-blue-600 outline-none" />
                 </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 mb-1 block">To</label>
+                  <input type="date" value={ctEnd} onChange={(e) => setCtEnd(e.target.value)}
+                    className="border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-700 focus:border-blue-600 outline-none" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 mb-1 block">1 USD = INR</label>
+                  <div className="flex items-center border border-slate-300 rounded-lg overflow-hidden focus-within:border-blue-600">
+                    <div className="px-2 py-2 bg-slate-50 border-r border-slate-300"><IndianRupee className="w-3.5 h-3.5 text-slate-500" /></div>
+                    <input type="number" value={ctInrRate} onChange={(e) => setCtInrRate(e.target.value)}
+                      placeholder="e.g. 84.50" className="w-24 px-2 py-2 text-xs font-semibold text-slate-700 outline-none" />
+                  </div>
+                </div>
+                <button onClick={handleCtDownload} disabled={ctLoading || !selectedCtId || !ctInrRate}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold rounded-lg transition disabled:opacity-50 shadow-sm">
+                  {ctLoading ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Generating...</> : <><Download className="w-3.5 h-3.5" /> Download CT Excel</>}
+                </button>
               </div>
-              <button onClick={handleCtDownload} disabled={ctLoading || !selectedCtId || !ctInrRate}
-                className="flex items-center gap-1.5 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold rounded-lg transition disabled:opacity-50 shadow-sm">
-                {ctLoading ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Generating...</> : <><Download className="w-3.5 h-3.5" /> Download CT Excel</>}
-              </button>
             </div>
           </div>
         </div>
