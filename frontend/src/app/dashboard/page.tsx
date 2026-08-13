@@ -93,11 +93,24 @@ function MappingRow({
 
   if (!editing) {
     return (
-      <tr className="hover:bg-blue-50 transition" style={{ borderBottom: "1px solid #e2e8f0" }}>
-        <td className="px-4 py-3 text-sm font-semibold text-slate-800 whitespace-nowrap">{row.appName}</td>
+      <tr className="hover:bg-slate-50 transition" style={{ borderBottom: "1px solid #e2e8f0" }}>
+        <td className="px-4 py-3">
+          <div className="flex items-center gap-3">
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-white flex-shrink-0 ${
+              vertical === "SFL" ? "bg-indigo-600" : "bg-blue-800"
+            }`}>
+              {(row.appName || "?")[0].toUpperCase()}
+            </div>
+            <span className="text-sm font-semibold text-slate-800">{row.appName}</span>
+          </div>
+        </td>
         <td className="px-4 py-3 text-center">
-          <span className={`inline-block text-xs font-bold px-2.5 py-0.5 rounded-full whitespace-nowrap ${
-            vertical === "SFL" ? "bg-blue-100 text-blue-700" : vertical === "Non - SFL" ? "bg-violet-100 text-violet-700" : "bg-gray-100 text-gray-500"
+          <span className={`inline-block text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap ${
+            vertical === "SFL"
+              ? "bg-indigo-100 text-indigo-700 ring-1 ring-indigo-300"
+              : vertical === "Non - SFL"
+              ? "bg-sky-100 text-sky-700 ring-1 ring-sky-300"
+              : "bg-gray-100 text-gray-500"
           }`}>{vertical}</span>
         </td>
         <td className="px-4 py-3 text-right text-sm font-bold font-mono text-blue-700">{fmtUSD(usdCost)}</td>
@@ -106,8 +119,8 @@ function MappingRow({
         </td>
         <td className="px-4 py-3">
           <div className="flex gap-1 justify-end">
-            <button onClick={() => setEditing(true)} className="p-1.5 rounded hover:bg-blue-100 text-blue-600"><Pencil className="w-3.5 h-3.5" /></button>
-            <button onClick={() => onDelete(index)} className="p-1.5 rounded hover:bg-red-100 text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>
+            <button onClick={() => setEditing(true)} className="p-1.5 rounded hover:bg-blue-100 text-blue-600 transition"><Pencil className="w-3.5 h-3.5" /></button>
+            <button onClick={() => onDelete(index)} className="p-1.5 rounded hover:bg-red-100 text-red-500 transition"><Trash2 className="w-3.5 h-3.5" /></button>
           </div>
         </td>
       </tr>
@@ -179,6 +192,7 @@ export default function DashboardPage() {
   const [ctDataCache, setCtDataCache]   = useState<CTData[]>([]);
   const [costLoading, setCostLoading]   = useState(false);
   const [sflFilter, setSflFilter]       = useState<"all" | "SFL" | "Non - SFL">("all");
+  const [dlDone, setDlDone]             = useState(false);
 
   // ── Individual CT download state ──────────────────────────────────────────
   const [ctStart, setCtStart]           = useState(lastMonth.start);
@@ -296,6 +310,7 @@ export default function DashboardPage() {
       const ctDataList = await fetchCtData(awsTowers, reportEffectiveStart, reportEffectiveEnd);
       generateAwsMonthlyReport(ctDataList, rate, reportEffectiveLabel, mappings);
       toast.success("Report downloaded");
+      setDlDone(true); setTimeout(() => setDlDone(false), 2000);
     } catch (e) { console.error(e); toast.error("Failed to generate report"); }
     finally { setReportLoading(false); }
   };
@@ -342,6 +357,7 @@ export default function DashboardPage() {
         selectedSubAccounts.length > 0 ? selectedSubAccounts : undefined,
       );
       toast.success(`${ct.name} report downloaded`);
+      setDlDone(true); setTimeout(() => setDlDone(false), 2000);
     } catch (e) { console.error(e); toast.error("Failed to generate CT report"); }
     finally { setCtLoading(false); }
   };
@@ -452,8 +468,14 @@ export default function DashboardPage() {
                 </div>
               </div>
               <button onClick={handleDownload} disabled={reportLoading || awsTowers.length === 0 || !inrRate}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-50 whitespace-nowrap">
-                {reportLoading ? <><RefreshCw className="w-3 h-3 animate-spin" />Generating...</> : <><Download className="w-3 h-3" />Download Excel</>}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-bold rounded-lg transition disabled:opacity-50 whitespace-nowrap ${
+                  dlDone ? "bg-emerald-600 hover:bg-emerald-700" : "bg-blue-700 hover:bg-blue-800"
+                }`}>
+                {reportLoading
+                  ? <><RefreshCw className="w-3 h-3 animate-spin" />Generating...</>
+                  : dlDone
+                  ? <><Check className="w-3 h-3" />Downloaded!</>
+                  : <><Download className="w-3 h-3" />Download Excel</>}
               </button>
             </div>
           </div>
@@ -569,8 +591,14 @@ export default function DashboardPage() {
                 </div>
               </div>
               <button onClick={handleCtDownload} disabled={ctLoading || !selectedCtId || !ctInrRate}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold rounded-lg transition disabled:opacity-50 whitespace-nowrap">
-                {ctLoading ? <><RefreshCw className="w-3 h-3 animate-spin" />Generating...</> : <><Download className="w-3 h-3" />Download CT Excel</>}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-bold rounded-lg transition disabled:opacity-50 whitespace-nowrap ${
+                  dlDone ? "bg-emerald-600 hover:bg-emerald-700" : "bg-orange-500 hover:bg-orange-600"
+                }`}>
+                {ctLoading
+                  ? <><RefreshCw className="w-3 h-3 animate-spin" />Generating...</>
+                  : dlDone
+                  ? <><Check className="w-3 h-3" />Downloaded!</>
+                  : <><Download className="w-3 h-3" />Download CT Excel</>}
               </button>
             </div>
           </div>
@@ -581,10 +609,7 @@ export default function DashboardPage() {
 
           {/* Table toolbar */}
           <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between gap-3" style={{ background: "#f8faff" }}>
-            <div>
-              <span className="text-sm font-bold text-slate-800">Master Sheet — Application Cost</span>
-              <span className="ml-2 text-xs text-slate-400">Note hidden in UI · visible in Excel</span>
-            </div>
+            <span className="text-sm font-bold text-slate-800">Application Cost</span>
             <div className="flex items-center gap-2">
               <div className="flex gap-0.5 bg-slate-100 rounded-lg p-0.5">
                 {(["all", "SFL", "Non - SFL"] as const).map((f) => (
@@ -611,7 +636,7 @@ export default function DashboardPage() {
               <col style={{ width: "14%" }} />
             </colgroup>
             <thead>
-              <tr style={{ background: "linear-gradient(90deg,#0f2d5e 0%,#1e4d8c 100%)" }}>
+              <tr style={{ background: "linear-gradient(90deg,#0f2d5e 0%,#1e4d8c 50%,#0f2d5e 100%)", backgroundSize: "200% 100%", animation: "headerShimmer 4s ease infinite" }}>
                 <th className="text-left text-xs font-bold uppercase tracking-wider text-white px-4 py-3">Application Name</th>
                 <th className="text-center text-xs font-bold uppercase tracking-wider text-white px-4 py-3">Vertical</th>
                 <th className="text-right text-xs font-bold uppercase tracking-wider text-white px-4 py-3">Cost (USD)</th>

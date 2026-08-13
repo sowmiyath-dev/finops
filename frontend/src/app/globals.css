@@ -280,6 +280,12 @@ body {
 .animate-slide-up { animation: slide-up 0.3s ease-out both; }
 .animate-fade-in  { animation: fade-in  0.2s ease-out both; }
 
+/* ── Header shimmer ── */
+@keyframes headerShimmer {
+  0%   { background-position: 200% center; }
+  100% { background-position: -200% center; }
+}
+
 /* ── Stat Cards (AWS Console style) ── */
 .stat-card {
   background: white;
