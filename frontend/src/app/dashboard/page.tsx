@@ -71,13 +71,14 @@ async function fetchCtData(towers: any[], start: string, end: string): Promise<C
 
 // ── Editable mapping row ──────────────────────────────────────────────────────
 function MappingRow({
-  row, index, onUpdate, onDelete, allAccounts, cost, rate,
+  row, index, onUpdate, onDelete, allAccounts, usdCost, inrCost, rate,
 }: {
   row: AppMapping; index: number;
   onUpdate: (i: number, updated: AppMapping) => void;
   onDelete: (i: number) => void;
   allAccounts: { accountId: string; accountName: string }[];
-  cost: number | null;
+  usdCost: number | null;
+  inrCost: number | null;
   rate: number;
 }) {
   const [editing, setEditing] = useState(false);
@@ -87,7 +88,6 @@ function MappingRow({
   const cancel = () => { setDraft(row); setEditing(false); };
 
   const vertical = APP_VERTICAL_MAP[row.appName] || "—";
-  const usd = cost != null && rate > 0 ? cost / rate : null;
   const fmtUSD = (v: number | null) => v != null ? `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—";
   const fmtINR = (v: number | null) => v != null ? `₹${v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—";
 
@@ -100,9 +100,9 @@ function MappingRow({
             vertical === "SFL" ? "bg-blue-100 text-blue-700" : vertical === "Non - SFL" ? "bg-violet-100 text-violet-700" : "bg-gray-100 text-gray-500"
           }`}>{vertical}</span>
         </td>
-        <td className="px-3 py-2 text-right text-sm font-bold font-mono text-blue-700 w-36">{fmtUSD(usd)}</td>
+        <td className="px-3 py-2 text-right text-sm font-bold font-mono text-blue-700 w-36">{fmtUSD(usdCost)}</td>
         <td className="px-3 py-2 text-right text-sm font-bold font-mono text-emerald-700 w-36">
-          {rate > 0 ? fmtINR(cost) : <span className="text-xs text-slate-300">enter rate</span>}
+          {rate > 0 ? fmtINR(inrCost) : <span className="text-xs text-slate-300">enter rate</span>}
         </td>
         <td className="px-3 py-2 w-16">
           <div className="flex gap-1">
@@ -144,8 +144,8 @@ function MappingRow({
           vertical === "SFL" ? "bg-blue-100 text-blue-700" : "bg-violet-100 text-violet-700"
         }`}>{vertical}</span>
       </td>
-      <td className="px-3 py-2 text-right text-xs font-mono text-blue-700">{fmtUSD(usd)}</td>
-      <td className="px-3 py-2 text-right text-xs font-mono text-emerald-700">{rate > 0 ? fmtINR(cost) : "—"}</td>
+      <td className="px-3 py-2 text-right text-xs font-mono text-blue-700">{fmtUSD(usdCost)}</td>
+      <td className="px-3 py-2 text-right text-xs font-mono text-emerald-700">{rate > 0 ? fmtINR(inrCost) : "—"}</td>
       <td className="px-3 py-2">
         <div className="flex gap-1">
           <button onClick={save} className="p-1 rounded hover:bg-green-100 text-green-700"><Check className="w-3 h-3" /></button>
@@ -197,6 +197,37 @@ export default function DashboardPage() {
 
   const awsTowers = towers.filter((t: any) => t.cloud_provider === "aws");
 
+  // ── Compute USD cost directly from trueCost (no rate needed) ──────────────
+  function computeMappingCostUSD(m: AppMapping, ctData: CTData[]): number {
+    const accMap = new Map<string, number>();
+    for (const ct of ctData) for (const acc of ct.accounts) accMap.set(acc.accountId, (accMap.get(acc.accountId) || 0) + acc.trueCost);
+
+    const novacCT = ctData.find((c) => c.ctName.toLowerCase().includes("novac") && !c.ctName.toLowerCase().includes("wonder") && !c.ctName.toLowerCase().includes("credit"));
+    const novacSharedMap = new Map<string, number>();
+    if (novacCT) {
+      const SFL_IDS = new Set(["833660969797", "683092765314", "400487655910"]);
+      const sharedAcc = novacCT.accounts.find((a) => a.accountId === "240329355338");
+      const regularAccs = novacCT.accounts.filter((a) => a.accountId !== "240329355338" && a.accountId !== "010241470425" && !SFL_IDS.has(a.accountId));
+      const sharedUsd = sharedAcc?.trueCost || 0;
+      const totalRegularUsd = regularAccs.reduce((s, a) => s + a.trueCost, 0);
+      for (const acc of regularAccs) {
+        const pct = totalRegularUsd > 0 ? acc.trueCost / totalRegularUsd : 0;
+        novacSharedMap.set(acc.accountId, acc.trueCost + sharedUsd * pct);
+      }
+      const payerAcc = novacCT.accounts.find((a) => a.accountId === "010241470425");
+      if (payerAcc) novacSharedMap.set(payerAcc.accountId, payerAcc.trueCost);
+    }
+
+    let costUsd = 0;
+    for (const { accountId, fraction = 1 } of m.accounts) {
+      if (accountId === "__CT_AUTOMALL__") { const ct = ctData.find((c) => c.ctName.toLowerCase().includes("automall")); costUsd += (ct ? ct.accounts.reduce((s, a) => s + a.trueCost, 0) : 0) * fraction; }
+      else if (accountId === "__CT_INDOSTAR__") { const ct = ctData.find((c) => c.ctName.toLowerCase().includes("indostar")); costUsd += (ct ? ct.accounts.reduce((s, a) => s + a.trueCost, 0) : 0) * fraction; }
+      else if (novacSharedMap.has(accountId)) costUsd += (novacSharedMap.get(accountId) || 0) * fraction;
+      else costUsd += (accMap.get(accountId) || 0) * fraction;
+    }
+    return costUsd;
+  }
+
   // ── Compute live cost for a mapping row (mirrors buildMasterSheet logic) ──
   function computeMappingCost(m: AppMapping, ctData: CTData[], rate: number): number {
     // Build raw trueCost map
@@ -237,20 +268,21 @@ export default function DashboardPage() {
   const reportEffectiveEnd   = reportCustom ? reportEnd   : reportMonth.end;
   const reportEffectiveLabel = reportCustom ? `${reportStart}_${reportEnd}` : reportMonth.label.replace(" ", "");
 
-  const loadCostPreview = async () => {
-    if (!inrRate || parseFloat(inrRate) <= 0 || awsTowers.length === 0) return;
+  // Load CT data whenever date range changes — no rate needed for USD
+  const loadCostPreview = async (start: string, end: string) => {
+    if (awsTowers.length === 0) return;
     setCostLoading(true);
-    try { const data = await fetchCtData(awsTowers, reportEffectiveStart, reportEffectiveEnd); setCtDataCache(data); }
+    try { const data = await fetchCtData(awsTowers, start, end); setCtDataCache(data); }
     catch (e) { console.error(e); }
     finally { setCostLoading(false); }
   };
 
-  useEffect(() => { if (inrRate && parseFloat(inrRate) > 0) loadCostPreview(); }, [reportEffectiveStart, reportEffectiveEnd, inrRate]);
+  // Auto-load when towers ready or date range changes
+  useEffect(() => {
+    if (awsTowers.length > 0) loadCostPreview(reportEffectiveStart, reportEffectiveEnd);
+  }, [awsTowers.length, reportEffectiveStart, reportEffectiveEnd]); // eslint-disable-line
 
   const rate = parseFloat(inrRate) || 0;
-  const grandTotal = rate > 0 && ctDataCache.length > 0
-    ? mappings.reduce((s, m) => s + computeMappingCost(m, ctDataCache, rate), 0)
-    : 0;
 
   // ── Download full monthly report ──────────────────────────────────────────
   const handleDownload = async () => {
@@ -324,7 +356,10 @@ export default function DashboardPage() {
 
   const filteredMappings = sflFilter === "all" ? mappings : mappings.filter((m) => (APP_VERTICAL_MAP[m.appName] || "Non - SFL") === sflFilter);
 
-  const filteredGrandTotal = rate > 0 && ctDataCache.length > 0
+  const filteredGrandUSD = ctDataCache.length > 0
+    ? filteredMappings.reduce((s, m) => s + computeMappingCostUSD(m, ctDataCache), 0)
+    : 0;
+  const filteredGrandINR = rate > 0 && ctDataCache.length > 0
     ? filteredMappings.reduce((s, m) => s + computeMappingCost(m, ctDataCache, rate), 0)
     : 0;
 
@@ -520,22 +555,23 @@ export default function DashboardPage() {
               <tbody>
                 {filteredMappings.map((row, i) => {
                   const globalIndex = mappings.indexOf(row);
+                  const usdCost = ctDataCache.length > 0 ? computeMappingCostUSD(row, ctDataCache) : null;
+                  const inrCost = rate > 0 && ctDataCache.length > 0 ? computeMappingCost(row, ctDataCache, rate) : null;
                   return (
                     <MappingRow key={globalIndex} row={row} index={globalIndex} onUpdate={updateMapping} onDelete={deleteMapping} allAccounts={[]}
-                      cost={rate > 0 && ctDataCache.length > 0 ? computeMappingCost(row, ctDataCache, rate) : null}
-                      rate={rate} />
+                      usdCost={usdCost} inrCost={inrCost} rate={rate} />
                   );
                 })}
-                {rate > 0 && ctDataCache.length > 0 && (
+                {ctDataCache.length > 0 && (
                   <tr className="border-t-2 border-slate-200" style={{ background: "#e8f0fe" }}>
                     <td className="px-3 py-2.5 text-sm font-extrabold text-slate-800" colSpan={2}>
                       Total {sflFilter !== "all" && <span className="ml-1 text-xs font-semibold text-blue-600">({sflFilter})</span>}
                     </td>
                     <td className="px-3 py-2.5 text-right text-sm font-extrabold font-mono text-blue-800">
-                      ${(filteredGrandTotal / rate).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ${filteredGrandUSD.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                     <td className="px-3 py-2.5 text-right text-sm font-extrabold font-mono text-emerald-800">
-                      ₹{filteredGrandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {rate > 0 ? `₹${filteredGrandINR.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : <span className="text-xs text-slate-300">enter rate</span>}
                     </td>
                     <td />
                   </tr>
