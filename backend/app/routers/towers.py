@@ -339,6 +339,7 @@ async def _refresh_azure_monthly_summary(ct_id: str):
                       AND control_tower_id = :ct_id
                     GROUP BY TO_CHAR(date, 'YYYY-MM'), subscription_id
                 ) m ON a.month = m.month AND a.subscription_id = m.subscription_id
+                      AND a.control_tower_id::text = :ct_id::text
             """).bindparams(ct_id=_uuid.UUID(ct_id)))
             await db.commit()
             logger.info(f"Azure monthly summary refreshed for CT {ct_id}")
@@ -475,9 +476,10 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
             end_date = today.isoformat()
             logger.info(f"Azure full sync for CT {ct_id}: {start_date} to {end_date}")
         else:
-            start_date = today.replace(day=1).isoformat()
+            # Cover last 3 days of previous month to catch late Azure billing finalization
+            start_date = min(today.replace(day=1), today - timedelta(days=3)).isoformat()
             end_date = today.isoformat()
-            logger.info(f"Azure daily sync for CT {ct_id}: {start_date} to {end_date} (current month only)")
+            logger.info(f"Azure daily sync for CT {ct_id}: {start_date} to {end_date}")
 
         # Step 3 -- load sub_map
         async with AsyncSessionLocal() as db:
@@ -566,29 +568,19 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
             ct_ref = result.scalar_one_or_none()
 
         for blob_idx, blob_entry in enumerate(csv_blobs):
-            # blob_entry is either (container, blob_name) tuple or plain blob_name string
-            if isinstance(blob_entry, tuple):
-                blob_container, blob_name = blob_entry
-            else:
-                blob_name = blob_entry
-                # Infer container from blob path: Jun-Jul blobs start with "cost-exports/"
-                blob_container = "finoptixcostexports" if blob_name.startswith("cost-exports/") else "cost-exports"
+            # blob_entry is always a (container, blob_name) tuple from find_azure_export_blobs
+            blob_container, blob_name = blob_entry
 
             _sync_progress[ct_id]["message"] = f"Processing file {blob_idx+1}/{len(csv_blobs)}"
             _sync_progress[ct_id]["percent"] = 30 + int(60 * blob_idx / len(csv_blobs))
             logger.info(f"Azure processing blob {blob_idx+1}/{len(csv_blobs)}: [{blob_container}] {blob_name}")
 
             try:
-                batch_gen = await loop.run_in_executor(
-                    _executor,
-                    lambda bc=blob_container, bn=blob_name: stream_azure_cost_batches(ct_ref, bn, stream_start, stream_end, 500, bc)
-                )
+                # Run generator in thread, collect all batches, insert each immediately
+                def _fill_one(bc=blob_container, bn=blob_name):
+                    return list(stream_azure_cost_batches(ct_ref, bn, stream_start, stream_end, 500, bc))
 
-                # Consume generator batches and insert immediately — avoids OOM on large blobs
-                def _collect_batches(gen):
-                    return list(gen)
-
-                batches = await loop.run_in_executor(_executor, _collect_batches, batch_gen)
+                batches = await loop.run_in_executor(_executor, _fill_one)
 
                 for batch in batches:
                     if not batch:

@@ -130,7 +130,9 @@ def stream_azure_cost_batches(ct: ControlTower, blob_name: str, start_date: str,
     import gzip as _gzip
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
-    cost_type = "amortized" if "amortized" in blob_name.lower() else "actual"
+    # Determine cost_type from the first path segment (directory name), not the full path
+    first_segment = blob_name.lower().split("/")[0]
+    cost_type = "amortized" if "amortized" in first_segment and "actualcost" not in first_segment else "actual"
     batch = []
 
     try:
@@ -219,23 +221,6 @@ def stream_azure_cost_batches(ct: ControlTower, blob_name: str, start_date: str,
             yield batch
 
 
-def get_azure_billing_periods(start_date: str, end_date: str) -> list[str]:
-    """Generate billing period folder names for Azure export."""
-    start = date.fromisoformat(start_date)
-    end = date.fromisoformat(end_date)
-    periods = []
-    current = start.replace(day=1)
-    while current <= end:
-        if current.month == 12:
-            month_end = current.replace(year=current.year + 1, month=1)
-        else:
-            month_end = current.replace(month=current.month + 1)
-        period_str = f"{current.strftime('%Y%m%d')}-{month_end.strftime('%Y%m%d')}"
-        periods.append(period_str)
-        current = month_end
-    return periods
-
-
 def _get_month_folder_variants(month_start: date) -> list[str]:
     """Return all possible Azure export folder name variants for a given month."""
     if month_start.month == 12:
@@ -290,7 +275,8 @@ def find_azure_export_blobs(ct: ControlTower, start_date: str, end_date: str, is
         month_starts.append(cur)
         cur = cur.replace(year=cur.year + 1, month=1, day=1) if cur.month == 12 else cur.replace(month=cur.month + 1, day=1)
 
-    def _scan(container_name: str, prefixes: list[str]) -> list[str]:
+    def _scan(container_name: str, prefixes: list[str]) -> list[tuple[str, str]]:
+        """Returns list of (container_name, blob_name) tuples."""
         found = []
         try:
             container = blob_svc.get_container_client(container_name)
@@ -303,7 +289,7 @@ def find_azure_export_blobs(ct: ControlTower, start_date: str, end_date: str, is
                     blobs = list(container.list_blobs(name_starts_with=prefix))
                     matched = [b.name for b in blobs if b.name.endswith(".csv") or b.name.endswith(".csv.gz")]
                     if matched:
-                        found += matched
+                        found += [(container_name, name) for name in matched]
                         logger.info(f"Container '{container_name}' prefix '{prefix}': {len(matched)} blob(s)")
                 except Exception as e:
                     logger.warning(f"Prefix '{prefix}' scan failed: {e}")
@@ -345,6 +331,7 @@ def find_azure_export_blobs(ct: ControlTower, start_date: str, end_date: str, is
     csv_blobs = _scan("cost-exports", cost_exports_prefixes)
     csv_blobs += _scan("finoptixcostexports", finoptix_container_prefixes)
 
+    # Deduplicate by (container, blob_name) pair
     csv_blobs = list(set(csv_blobs))
     logger.info(f"Total blobs found for {start_date} to {end_date}: {len(csv_blobs)}")
     return csv_blobs
