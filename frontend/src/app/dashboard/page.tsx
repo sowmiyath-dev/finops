@@ -187,9 +187,9 @@ export default function DashboardPage() {
   const [selectedCtId, setSelectedCtId] = useState<string>("");
   const [ctLoading, setCtLoading]       = useState(false);
   const [selectedSubAccounts, setSelectedSubAccounts] = useState<string[]>([]);
+  const [subAccSearch, setSubAccSearch] = useState("");
 
-  // When CT changes, reset sub-account selection
-  const handleCtChange = (id: string) => { setSelectedCtId(id); setSelectedSubAccounts([]); };
+  const handleCtChange = (id: string) => { setSelectedCtId(id); setSelectedSubAccounts([]); setSubAccSearch(""); };
 
   // Auto-sync CT rate from monthly report rate when CT rate not yet set
   useEffect(() => { if (inrRate && !ctInrRate) setCtInrRate(inrRate); }, [inrRate]); // eslint-disable-line
@@ -505,6 +505,12 @@ export default function DashboardPage() {
               const ctTower = awsTowers.find((t: any) => t.id === selectedCtId);
               const subAccounts: { aws_account_id: string; account_name: string }[] = ctTower?.sub_accounts || [];
               if (subAccounts.length === 0) return null;
+              const filtered = subAccSearch.trim()
+                ? subAccounts.filter((a) =>
+                    a.account_name.toLowerCase().includes(subAccSearch.toLowerCase()) ||
+                    a.aws_account_id.includes(subAccSearch)
+                  )
+                : subAccounts;
               const allSelected = selectedSubAccounts.length === 0;
               return (
                 <div className="mb-2">
@@ -516,8 +522,19 @@ export default function DashboardPage() {
                       <button onClick={() => setSelectedSubAccounts([])} className="text-[10px] font-bold px-2 py-0.5 rounded text-slate-400 hover:text-red-500 transition">Clear</button>
                     </div>
                   </div>
+                  {/* Search box */}
+                  <input
+                    type="text"
+                    value={subAccSearch}
+                    onChange={(e) => setSubAccSearch(e.target.value)}
+                    placeholder="Search by name or account ID..."
+                    className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 outline-none focus:border-blue-600 mb-1 bg-white"
+                  />
                   <div className="border border-slate-200 rounded-lg max-h-36 overflow-y-auto bg-slate-50">
-                    {subAccounts.map((acc) => {
+                    {filtered.length === 0 && (
+                      <p className="text-[11px] text-slate-400 px-3 py-2">No accounts match</p>
+                    )}
+                    {filtered.map((acc) => {
                       const checked = selectedSubAccounts.includes(acc.aws_account_id);
                       return (
                         <label key={acc.aws_account_id} className="flex items-center gap-2 px-3 py-1.5 hover:bg-white cursor-pointer transition border-b border-slate-100 last:border-0">
@@ -532,9 +549,12 @@ export default function DashboardPage() {
                       );
                     })}
                   </div>
-                  {selectedSubAccounts.length > 0 && (
-                    <p className="text-[10px] text-blue-600 font-semibold mt-1">{selectedSubAccounts.length} of {subAccounts.length} selected</p>
-                  )}
+                  <p className="text-[10px] mt-1 font-semibold">
+                    {selectedSubAccounts.length > 0
+                      ? <span className="text-blue-600">{selectedSubAccounts.length} of {subAccounts.length} selected</span>
+                      : <span className="text-slate-400">All accounts will be included</span>
+                    }
+                  </p>
                 </div>
               );
             })()}
