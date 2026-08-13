@@ -122,14 +122,7 @@ function MappingRow({
       <td className="px-4 py-2.5">
         <input value={draft.appName} onChange={(e) => setDraft({ ...draft, appName: e.target.value })}
           className="w-full border border-gray-300 rounded px-2 py-1 text-xs outline-none focus:border-blue-700" />
-      </td>
-      <td className="px-4 py-2.5">
-        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-          vertical === "SFL" ? "bg-blue-100 text-blue-700" : "bg-violet-100 text-violet-700"
-        }`}>{vertical}</span>
-      </td>
-      <td className="px-4 py-2.5">
-        <div className="space-y-1">
+        <div className="mt-1 space-y-1">
           {draft.accounts.map((a, ai) => (
             <div key={ai} className="flex gap-1 items-center">
               <input value={a.accountId} onChange={(e) => {
@@ -139,7 +132,7 @@ function MappingRow({
               <input value={a.fraction != null ? String(a.fraction * 100) : "100"} onChange={(e) => {
                 const accs = [...draft.accounts]; accs[ai] = { ...accs[ai], fraction: parseFloat(e.target.value) / 100 };
                 setDraft({ ...draft, accounts: accs });
-              }} placeholder="%" className="w-14 border border-gray-300 rounded px-2 py-1 text-xs outline-none focus:border-blue-700" />
+              }} placeholder="%" className="w-12 border border-gray-300 rounded px-2 py-1 text-xs outline-none focus:border-blue-700" />
               <span className="text-xs text-gray-400">%</span>
               <button onClick={() => { const accs = draft.accounts.filter((_, i) => i !== ai); setDraft({ ...draft, accounts: accs }); }}
                 className="text-red-400 hover:text-red-600"><X className="w-3 h-3" /></button>
@@ -148,6 +141,11 @@ function MappingRow({
           <button onClick={() => setDraft({ ...draft, accounts: [...draft.accounts, { accountId: "", fraction: 1 }] })}
             className="text-xs text-blue-700 hover:underline flex items-center gap-1"><Plus className="w-3 h-3" /> Add account</button>
         </div>
+      </td>
+      <td className="px-4 py-2.5">
+        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+          vertical === "SFL" ? "bg-blue-100 text-blue-700" : "bg-violet-100 text-violet-700"
+        }`}>{vertical}</span>
       </td>
       <td className="px-4 py-2.5 text-right text-xs text-gray-400">{fmtCostVal(cost)}</td>
       <td className="px-4 py-2.5">
