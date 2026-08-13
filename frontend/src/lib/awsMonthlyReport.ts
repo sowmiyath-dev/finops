@@ -257,11 +257,15 @@ export function generateCtReport(
   ct: CTData,
   rate: number,
   monthLabel: string,
-  servicesByCt: Map<string, ServiceCost[]>, // accountId → service rows
+  servicesByCt: Map<string, ServiceCost[]>,
+  selectedAccountIds?: string[], // if provided, only include these accounts
 ) {
   const wb = XLSX.utils.book_new();
+  const accounts = selectedAccountIds && selectedAccountIds.length > 0
+    ? ct.accounts.filter((a) => selectedAccountIds.includes(a.accountId))
+    : ct.accounts;
 
-  // Sheet 1: account-wise
+  // Sheet 1: Summary (account-wise)
   const accRows: any[][] = [
     [
       boldStr("Account ID"), boldStr("Account"),
@@ -270,7 +274,7 @@ export function generateCtReport(
     ],
   ];
   let totUsage = 0, totTrue = 0, totInr = 0;
-  for (const acc of ct.accounts) {
+  for (const acc of accounts) {
     const costInr = acc.trueCost * rate;
     totUsage += acc.usageCost; totTrue += acc.trueCost; totInr += costInr;
     accRows.push([acc.accountId, acc.accountName, usdCell(acc.usageCost), usdCell(acc.trueCost), inrCell(costInr)]);
@@ -278,10 +282,10 @@ export function generateCtReport(
   accRows.push([boldStr(""), boldStr("Total"), usdCell(totUsage), usdCell(totTrue), inrCell(totInr)]);
   const accWs = XLSX.utils.aoa_to_sheet(accRows);
   setWidths(accWs, [18, 26, 16, 16, 16]);
-  XLSX.utils.book_append_sheet(wb, accWs, "Accounts");
+  XLSX.utils.book_append_sheet(wb, accWs, "Summary");
 
   // One sheet per sub-account: service-wise
-  for (const acc of ct.accounts) {
+  for (const acc of accounts) {
     const services = servicesByCt.get(acc.accountId) || [];
     const svcRows: any[][] = [
       [
@@ -299,11 +303,11 @@ export function generateCtReport(
     svcRows.push([boldStr("Total"), usdCell(sTotUsage), usdCell(sTotTrue), inrCell(sTotInr)]);
     const svcWs = XLSX.utils.aoa_to_sheet(svcRows);
     setWidths(svcWs, [30, 16, 16, 16]);
-    const sheetName = acc.accountName.slice(0, 31);
-    XLSX.utils.book_append_sheet(wb, svcWs, sheetName);
+    XLSX.utils.book_append_sheet(wb, svcWs, acc.accountName.slice(0, 31));
   }
 
-  XLSX.writeFile(wb, `${ct.ctName}-Cost-${monthLabel}.xlsx`);
+  const suffix = selectedAccountIds && selectedAccountIds.length > 0 ? `-${selectedAccountIds.length}accts` : "";
+  XLSX.writeFile(wb, `${ct.ctName}-Cost-${monthLabel}${suffix}.xlsx`);
 }
 
 // ── Main multi-CT report ──────────────────────────────────────────────────────

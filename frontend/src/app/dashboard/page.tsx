@@ -186,6 +186,10 @@ export default function DashboardPage() {
   const [ctInrRate, setCtInrRate]       = useState("");
   const [selectedCtId, setSelectedCtId] = useState<string>("");
   const [ctLoading, setCtLoading]       = useState(false);
+  const [selectedSubAccounts, setSelectedSubAccounts] = useState<string[]>([]);
+
+  // When CT changes, reset sub-account selection
+  const handleCtChange = (id: string) => { setSelectedCtId(id); setSelectedSubAccounts([]); };
 
   // Auto-sync CT rate from monthly report rate when CT rate not yet set
   useEffect(() => { if (inrRate && !ctInrRate) setCtInrRate(inrRate); }, [inrRate]); // eslint-disable-line
@@ -306,24 +310,17 @@ export default function DashboardPage() {
       const ct = awsTowers.find((t: any) => t.id === selectedCtId);
       if (!ct) throw new Error("CT not found");
 
-      const [ctDataList, svcRes] = await Promise.all([
-        fetchCtData([ct], ctStart, ctEnd),
-        api.post("/reports/service-wise", {
-          control_tower_ids: [selectedCtId],
-          start_date: ctStart, end_date: ctEnd,
-          granularity: "monthly", metric: "unblended_cost",
-          group_by: "service",
-          charge_types: ["Usage", "SavingsPlanCoveredUsage", "DiscountedUsage", "RIFee"],
-        }).catch(() => ({ data: [] })),
-      ]);
-
+      const ctDataList = await fetchCtData([ct], ctStart, ctEnd);
       const ctData = ctDataList[0];
 
-      // Build service map per account from service-wise API
-      // We need per-account service breakdown — call account-filtered service-wise for each account
+      // Use selected sub-accounts or all if none selected
+      const accountsToDownload = selectedSubAccounts.length > 0
+        ? ctData.accounts.filter((a) => selectedSubAccounts.includes(a.accountId))
+        : ctData.accounts;
+
       const servicesByCt = new Map<string, ServiceCost[]>();
       await Promise.all(
-        ctData.accounts.map(async (acc) => {
+        accountsToDownload.map(async (acc) => {
           const res = await api.post("/reports/service-wise", {
             control_tower_ids: [selectedCtId],
             account_ids: [acc.accountId],
@@ -340,7 +337,10 @@ export default function DashboardPage() {
       );
 
       const monthLabel = new Date(ctStart).toLocaleString("en-US", { month: "long", year: "numeric" }).replace(" ", "");
-      generateCtReport(ctData, rate, monthLabel, servicesByCt);
+      generateCtReport(
+        ctData, rate, monthLabel, servicesByCt,
+        selectedSubAccounts.length > 0 ? selectedSubAccounts : undefined,
+      );
       toast.success(`${ct.name} report downloaded`);
     } catch (e) { console.error(e); toast.error("Failed to generate CT report"); }
     finally { setCtLoading(false); }
@@ -469,7 +469,7 @@ export default function DashboardPage() {
             <div className="grid grid-cols-2 gap-2 mb-2">
               <div className="col-span-2">
                 <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1 block">Control Tower</label>
-                <select value={selectedCtId} onChange={(e) => setSelectedCtId(e.target.value)}
+                <select value={selectedCtId} onChange={(e) => handleCtChange(e.target.value)}
                   className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-700 focus:border-blue-600 outline-none bg-white">
                   <option value="">Select CT</option>
                   {awsTowers.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -499,6 +499,45 @@ export default function DashboardPage() {
                   }`}>{p.label}</button>
               ))}
             </div>
+
+            {/* Sub-account multi-select */}
+            {selectedCtId && (() => {
+              const ctTower = awsTowers.find((t: any) => t.id === selectedCtId);
+              const subAccounts: { aws_account_id: string; account_name: string }[] = ctTower?.sub_accounts || [];
+              if (subAccounts.length === 0) return null;
+              const allSelected = selectedSubAccounts.length === 0;
+              return (
+                <div className="mb-2">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Sub-accounts</label>
+                    <div className="flex gap-1">
+                      <button onClick={() => setSelectedSubAccounts([])} className={`text-[10px] font-bold px-2 py-0.5 rounded transition ${ allSelected ? "bg-blue-700 text-white" : "text-slate-500 hover:text-blue-600" }`}>All</button>
+                      <button onClick={() => setSelectedSubAccounts(subAccounts.map((a) => a.aws_account_id))} className={`text-[10px] font-bold px-2 py-0.5 rounded transition ${ !allSelected && selectedSubAccounts.length === subAccounts.length ? "bg-blue-700 text-white" : "text-slate-500 hover:text-blue-600" }`}>Select All</button>
+                      <button onClick={() => setSelectedSubAccounts([])} className="text-[10px] font-bold px-2 py-0.5 rounded text-slate-400 hover:text-red-500 transition">Clear</button>
+                    </div>
+                  </div>
+                  <div className="border border-slate-200 rounded-lg max-h-36 overflow-y-auto bg-slate-50">
+                    {subAccounts.map((acc) => {
+                      const checked = selectedSubAccounts.includes(acc.aws_account_id);
+                      return (
+                        <label key={acc.aws_account_id} className="flex items-center gap-2 px-3 py-1.5 hover:bg-white cursor-pointer transition border-b border-slate-100 last:border-0">
+                          <input type="checkbox" checked={checked}
+                            onChange={() => setSelectedSubAccounts((prev) =>
+                              checked ? prev.filter((id) => id !== acc.aws_account_id) : [...prev, acc.aws_account_id]
+                            )}
+                            className="w-3 h-3 accent-blue-700 flex-shrink-0" />
+                          <span className="text-[11px] font-semibold text-slate-700 truncate">{acc.account_name}</span>
+                          <span className="text-[10px] font-mono text-slate-400 ml-auto flex-shrink-0">{acc.aws_account_id}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {selectedSubAccounts.length > 0 && (
+                    <p className="text-[10px] text-blue-600 font-semibold mt-1">{selectedSubAccounts.length} of {subAccounts.length} selected</p>
+                  )}
+                </div>
+              );
+            })()}
 
             <div className="flex items-end gap-2">
               <div className="flex-1">
