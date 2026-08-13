@@ -71,14 +71,13 @@ async function fetchCtData(towers: any[], start: string, end: string): Promise<C
 
 // ── Editable mapping row ──────────────────────────────────────────────────────
 function MappingRow({
-  row, index, onUpdate, onDelete, allAccounts, cost, showINR, rate,
+  row, index, onUpdate, onDelete, allAccounts, cost, rate,
 }: {
   row: AppMapping; index: number;
   onUpdate: (i: number, updated: AppMapping) => void;
   onDelete: (i: number) => void;
   allAccounts: { accountId: string; accountName: string }[];
   cost: number | null;
-  showINR: boolean;
   rate: number;
 }) {
   const [editing, setEditing] = useState(false);
@@ -88,26 +87,24 @@ function MappingRow({
   const cancel = () => { setDraft(row); setEditing(false); };
 
   const vertical = APP_VERTICAL_MAP[row.appName] || "—";
-  const fmtCostVal = (inr: number | null) => {
-    if (inr == null) return "—";
-    if (showINR) return `₹${inr.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    const usd = rate > 0 ? inr / rate : 0;
-    return `$${usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  };
+  const usd = cost != null && rate > 0 ? cost / rate : null;
+  const fmtUSD = (v: number | null) => v != null ? `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—";
+  const fmtINR = (v: number | null) => v != null ? `₹${v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—";
 
   if (!editing) {
     return (
       <tr className="border-b border-gray-100 hover:bg-slate-50 transition">
-        <td className="px-4 py-2.5 text-sm font-semibold text-gray-800">{row.appName}</td>
-        <td className="px-4 py-2.5">
+        <td className="px-3 py-2 text-sm font-semibold text-gray-800 w-48">{row.appName}</td>
+        <td className="px-3 py-2 w-28">
           <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
             vertical === "SFL" ? "bg-blue-100 text-blue-700" : vertical === "Non - SFL" ? "bg-violet-100 text-violet-700" : "bg-gray-100 text-gray-500"
           }`}>{vertical}</span>
         </td>
-        <td className="px-4 py-2.5 text-right text-sm font-bold font-mono text-emerald-700">
-          {fmtCostVal(cost)}
+        <td className="px-3 py-2 text-right text-sm font-bold font-mono text-blue-700 w-36">{fmtUSD(usd)}</td>
+        <td className="px-3 py-2 text-right text-sm font-bold font-mono text-emerald-700 w-36">
+          {rate > 0 ? fmtINR(cost) : <span className="text-xs text-slate-300">enter rate</span>}
         </td>
-        <td className="px-4 py-2.5">
+        <td className="px-3 py-2 w-16">
           <div className="flex gap-1">
             <button onClick={() => setEditing(true)} className="p-1 rounded hover:bg-blue-100 text-blue-700"><Pencil className="w-3 h-3" /></button>
             <button onClick={() => onDelete(index)} className="p-1 rounded hover:bg-red-100 text-red-500"><Trash2 className="w-3 h-3" /></button>
@@ -119,10 +116,10 @@ function MappingRow({
 
   return (
     <tr className="border-b border-blue-100 bg-blue-50">
-      <td className="px-4 py-2.5">
+      <td className="px-3 py-2">
         <input value={draft.appName} onChange={(e) => setDraft({ ...draft, appName: e.target.value })}
-          className="w-full border border-gray-300 rounded px-2 py-1 text-xs outline-none focus:border-blue-700" />
-        <div className="mt-1 space-y-1">
+          className="w-full border border-gray-300 rounded px-2 py-1 text-xs outline-none focus:border-blue-700 mb-1" />
+        <div className="space-y-1">
           {draft.accounts.map((a, ai) => (
             <div key={ai} className="flex gap-1 items-center">
               <input value={a.accountId} onChange={(e) => {
@@ -139,16 +136,17 @@ function MappingRow({
             </div>
           ))}
           <button onClick={() => setDraft({ ...draft, accounts: [...draft.accounts, { accountId: "", fraction: 1 }] })}
-            className="text-xs text-blue-700 hover:underline flex items-center gap-1"><Plus className="w-3 h-3" /> Add account</button>
+            className="text-xs text-blue-700 hover:underline flex items-center gap-1"><Plus className="w-3 h-3" /> Add</button>
         </div>
       </td>
-      <td className="px-4 py-2.5">
+      <td className="px-3 py-2">
         <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
           vertical === "SFL" ? "bg-blue-100 text-blue-700" : "bg-violet-100 text-violet-700"
         }`}>{vertical}</span>
       </td>
-      <td className="px-4 py-2.5 text-right text-xs text-gray-400">{fmtCostVal(cost)}</td>
-      <td className="px-4 py-2.5">
+      <td className="px-3 py-2 text-right text-xs font-mono text-blue-700">{fmtUSD(usd)}</td>
+      <td className="px-3 py-2 text-right text-xs font-mono text-emerald-700">{rate > 0 ? fmtINR(cost) : "—"}</td>
+      <td className="px-3 py-2">
         <div className="flex gap-1">
           <button onClick={save} className="p-1 rounded hover:bg-green-100 text-green-700"><Check className="w-3 h-3" /></button>
           <button onClick={cancel} className="p-1 rounded hover:bg-gray-100 text-gray-500"><X className="w-3 h-3" /></button>
@@ -182,7 +180,6 @@ export default function DashboardPage() {
   const [mappings, setMappings]         = useState<AppMapping[]>(DEFAULT_APP_MAPPINGS);
   const [ctDataCache, setCtDataCache]   = useState<CTData[]>([]);
   const [costLoading, setCostLoading]   = useState(false);
-  const [showINR, setShowINR]           = useState(false);
   const [sflFilter, setSflFilter]       = useState<"all" | "SFL" | "Non - SFL">("all");
 
   // ── Individual CT download state ──────────────────────────────────────────
@@ -324,12 +321,6 @@ export default function DashboardPage() {
     ? filteredMappings.reduce((s, m) => s + computeMappingCost(m, ctDataCache, rate), 0)
     : 0;
 
-  const fmtCost = (inr: number) => {
-    if (showINR) return `₹${inr.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    const usd = rate > 0 ? inr / rate : 0;
-    return `$${usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  };
-
   return (
     <div className="min-h-screen" style={{ background: "#f4f6fb" }}>
       <div className="p-6 space-y-5">
@@ -451,14 +442,6 @@ export default function DashboardPage() {
                 ))}
               </div>
 
-              {/* USD / INR toggle */}
-              <button onClick={() => setShowINR((p) => !p)}
-                className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition ${
-                  showINR ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-emerald-700 border-emerald-400 hover:bg-emerald-50"
-                }`}>
-                {showINR ? "₹ INR" : "$ USD"}
-              </button>
-
               <button onClick={resetMappings}
                 className="px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 transition">
                 Reset
@@ -475,13 +458,14 @@ export default function DashboardPage() {
             <table className="w-full">
               <thead>
                 <tr style={{ background: "linear-gradient(90deg,#0f2d5e 0%,#1a6fa8 100%)" }}>
-                  <th className="text-left text-xs font-bold uppercase tracking-wider text-white px-4 py-3 w-44">Application</th>
-                  <th className="text-left text-xs font-bold uppercase tracking-wider text-white px-4 py-3 w-32">Vertical</th>
-                  <th className="text-right text-xs font-bold uppercase tracking-wider text-white px-4 py-3 w-40">
-                    Cost ({showINR ? "INR" : "USD"})
+                  <th className="text-left text-xs font-bold uppercase tracking-wider text-white px-3 py-3">Application</th>
+                  <th className="text-left text-xs font-bold uppercase tracking-wider text-white px-3 py-3 w-28">Vertical</th>
+                  <th className="text-right text-xs font-bold uppercase tracking-wider text-white px-3 py-3 w-36">Cost (USD)</th>
+                  <th className="text-right text-xs font-bold uppercase tracking-wider text-white px-3 py-3 w-36">
+                    Cost (INR)
                     {costLoading && <span className="ml-1 text-[10px] text-blue-200 font-normal">loading...</span>}
                   </th>
-                  <th className="px-4 py-3 w-16" />
+                  <th className="px-3 py-3 w-16" />
                 </tr>
               </thead>
               <tbody>
@@ -490,16 +474,19 @@ export default function DashboardPage() {
                   return (
                     <MappingRow key={globalIndex} row={row} index={globalIndex} onUpdate={updateMapping} onDelete={deleteMapping} allAccounts={[]}
                       cost={rate > 0 && ctDataCache.length > 0 ? computeMappingCost(row, ctDataCache, rate) : null}
-                      showINR={showINR} rate={rate} />
+                      rate={rate} />
                   );
                 })}
                 {rate > 0 && ctDataCache.length > 0 && (
                   <tr className="border-t-2 border-slate-200" style={{ background: "#e8f0fe" }}>
-                    <td className="px-4 py-3 text-sm font-extrabold text-slate-800" colSpan={2}>
+                    <td className="px-3 py-2.5 text-sm font-extrabold text-slate-800" colSpan={2}>
                       Total {sflFilter !== "all" && <span className="ml-1 text-xs font-semibold text-blue-600">({sflFilter})</span>}
                     </td>
-                    <td className="px-4 py-3 text-right text-sm font-extrabold font-mono text-blue-800">
-                      {fmtCost(filteredGrandTotal)}
+                    <td className="px-3 py-2.5 text-right text-sm font-extrabold font-mono text-blue-800">
+                      ${(filteredGrandTotal / rate).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-sm font-extrabold font-mono text-emerald-800">
+                      ₹{filteredGrandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                     <td />
                   </tr>
