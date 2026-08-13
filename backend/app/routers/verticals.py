@@ -83,6 +83,15 @@ class BusinessCreate(BaseModel):
     owner_email: Optional[str] = None
     cost_type: Optional[str] = "resource"  # resource | account
 
+class BusinessUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    color: Optional[str] = None
+    owner_name: Optional[str] = None
+    owner_email: Optional[str] = None
+    cost_type: Optional[str] = None
+    vertical_id: Optional[str] = None  # move business to a different vertical
+
 
 class AppCreate(BaseModel):
     name: str
@@ -1271,7 +1280,7 @@ async def get_business(
 @router.patch("/businesses/{business_id}", status_code=200)
 async def update_business(
     business_id: str,
-    payload: BusinessCreate,
+    payload: BusinessUpdate,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -1280,19 +1289,26 @@ async def update_business(
     b = (await db.execute(select(Business).where(Business.id == business_id))).scalar_one_or_none()
     if not b:
         raise HTTPException(404)
-    if payload.name:
+    if payload.name is not None:
         b.name = payload.name
     if payload.owner_name is not None:
         b.owner_name = payload.owner_name
     if payload.owner_email is not None:
         b.owner_email = payload.owner_email
-    if payload.color:
+    if payload.color is not None:
         b.color = payload.color
     if payload.cost_type is not None:
         b.cost_type = payload.cost_type
+    if payload.vertical_id is not None:
+        # Verify target vertical exists
+        v = (await db.execute(select(Vertical).where(Vertical.id == payload.vertical_id))).scalar_one_or_none()
+        if not v:
+            raise HTTPException(404, "Target vertical not found")
+        b.vertical_id = payload.vertical_id
     await db.commit()
     await db.refresh(b)
-    return {"id": str(b.id), "name": b.name, "owner_name": b.owner_name, "owner_email": b.owner_email, "cost_type": b.cost_type}
+    return {"id": str(b.id), "name": b.name, "owner_name": b.owner_name, "owner_email": b.owner_email,
+            "cost_type": b.cost_type, "vertical_id": str(b.vertical_id)}
 
 
 @router.delete("/businesses/{business_id}", status_code=204)

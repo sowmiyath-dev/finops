@@ -88,12 +88,14 @@ export default function BusinessDetailPage() {
 
   const [vertical, setVertical] = useState<any>(null);
   const [business, setBusiness] = useState<any>(null);
+  const [allVerticals, setAllVerticals] = useState<{id: string; name: string}[]>([]);
   const [costData, setCostData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   // Owner modal
   const [showAddOwner, setShowAddOwner] = useState(false);
   const [ownerName, setOwnerName] = useState("");
+  const [editVerticalId, setEditVerticalId] = useState("");
   const [saving, setSaving] = useState(false);
   const [savingCostType, setSavingCostType] = useState(false);
 
@@ -200,7 +202,9 @@ export default function BusinessDetailPage() {
           params: { granularity: "monthly", start_date: start, end_date: end },
         }),
       ]);
-      const v = (vertsRes.data as any[]).find((x: any) => x.id === verticalId);
+      const allVerts = vertsRes.data as any[];
+      setAllVerticals(allVerts.map((v: any) => ({ id: v.id, name: v.name })));
+      const v = allVerts.find((x: any) => x.id === verticalId);
       setVertical(v || null);
       setBusiness(bizRes.data);
       setCostData(costRes.data);
@@ -222,13 +226,17 @@ export default function BusinessDetailPage() {
     if (!ownerName.trim()) return;
     setSaving(true);
     try {
-      await axios.patch(`${BASE}/api/verticals/businesses/${bizId}`,
-        { name: business?.name, owner_name: ownerName.trim() },
-        { headers }
-      );
+      const patch: any = { owner_name: ownerName.trim() };
+      if (editVerticalId && editVerticalId !== verticalId) patch.vertical_id = editVerticalId;
+      await axios.patch(`${BASE}/api/verticals/businesses/${bizId}`, patch, { headers });
       setShowAddOwner(false);
       setOwnerName("");
-      await load();
+      // If vertical changed, navigate to the new vertical's page
+      if (editVerticalId && editVerticalId !== verticalId) {
+        router.push(`/verticals/${editVerticalId}/business/${bizId}`);
+      } else {
+        await load();
+      }
     } finally { setSaving(false); }
   };
 
@@ -236,10 +244,7 @@ export default function BusinessDetailPage() {
     const newType = business?.cost_type === "account" ? "resource" : "account";
     setSavingCostType(true);
     try {
-      await axios.patch(`${BASE}/api/verticals/businesses/${bizId}`,
-        { name: business?.name, cost_type: newType },
-        { headers }
-      );
+      await axios.patch(`${BASE}/api/verticals/businesses/${bizId}`, { cost_type: newType }, { headers });
       await load();
     } finally { setSavingCostType(false); }
   };
@@ -312,7 +317,7 @@ export default function BusinessDetailPage() {
               {business?.owner_name
                 ? <span className="text-xs text-black">Owner: <span className="font-semibold">{business.owner_name}</span></span>
                 : <span className="text-xs text-gray-400">No owner</span>}
-              <button onClick={() => { setOwnerName(business?.owner_name || ""); setShowAddOwner(true); }}
+              <button onClick={() => { setOwnerName(business?.owner_name || ""); setEditVerticalId(verticalId); setShowAddOwner(true); }}
                 className="text-xs font-bold text-blue-900 hover:underline flex items-center gap-1">
                 <Users className="w-3 h-3" />{business?.owner_name ? "Edit" : "Add Owner"}
               </button>
@@ -644,11 +649,29 @@ export default function BusinessDetailPage() {
               <h3 className="text-sm font-bold text-black">{business?.owner_name ? "Edit Owner" : "Add Owner"} — {business?.name}</h3>
               <button onClick={() => setShowAddOwner(false)}><X className="w-4 h-4 text-black" /></button>
             </div>
-            <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">Owner Name *</label>
-            <input value={ownerName} onChange={(e) => setOwnerName(e.target.value)}
-              className="w-full border border-gray-400 rounded-md px-3 py-2 text-sm text-black focus:border-blue-900 outline-none mb-4"
-              placeholder="e.g. John Doe" autoFocus />
-            <div className="flex justify-end gap-3">
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">Owner Name *</label>
+                <input value={ownerName} onChange={(e) => setOwnerName(e.target.value)}
+                  className="w-full border border-gray-400 rounded-md px-3 py-2 text-sm text-black focus:border-blue-900 outline-none"
+                  placeholder="e.g. John Doe" autoFocus />
+              </div>
+              <div>
+                <label className="text-xs font-bold uppercase tracking-wide text-black block mb-1">Vertical</label>
+                <select value={editVerticalId} onChange={(e) => setEditVerticalId(e.target.value)}
+                  className="w-full border border-gray-400 rounded-md px-3 py-2 text-sm text-black focus:border-blue-900 outline-none">
+                  {allVerticals.map((v) => (
+                    <option key={v.id} value={v.id}>{v.name}</option>
+                  ))}
+                </select>
+                {editVerticalId && editVerticalId !== verticalId && (
+                  <p className="text-[10px] text-orange-700 font-semibold mt-1">
+                    ⚠ This will move the business to <span className="font-bold">{allVerticals.find(v => v.id === editVerticalId)?.name}</span>
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-5">
               <button onClick={() => setShowAddOwner(false)}
                 className="px-4 py-2 border border-gray-300 rounded-md text-xs font-bold text-black hover:bg-gray-50 transition">
                 Cancel
