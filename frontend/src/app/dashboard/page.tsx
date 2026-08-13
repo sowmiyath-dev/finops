@@ -259,9 +259,13 @@ export default function DashboardPage() {
   }
 
   // Load CT data whenever month changes and rate is set
-  const reportEffectiveStart = reportCustom ? reportStart : reportMonth.start;
-  const reportEffectiveEnd   = reportCustom ? reportEnd   : reportMonth.end;
-  const reportEffectiveLabel = reportCustom ? `${reportStart}_${reportEnd}` : reportMonth.label.replace(" ", "");
+  const reportEffectiveStart = reportCustom ? reportStart : reportStart;
+  const reportEffectiveEnd   = reportCustom ? reportEnd   : reportEnd;
+  const reportEffectiveLabel = reportCustom
+    ? `${reportStart}_${reportEnd}`
+    : reportStart === fmtDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1))
+      ? `ThisMonth_${reportEnd}`
+      : reportMonth.label.replace(" ", "");
 
   // Load CT data whenever date range changes — no rate needed for USD
   const loadCostPreview = async (start: string, end: string) => {
@@ -399,6 +403,23 @@ export default function DashboardPage() {
               {!reportCustom ? (
                 <div className="col-span-2">
                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1 block">Month</label>
+                  {/* Quick buttons */}
+                  <div className="flex gap-1 mb-1.5">
+                    {[
+                      { label: "Last Month", s: lastMonth.start, e: lastMonth.end, m: monthOptions[0] },
+                      { label: "This Month", s: fmtDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), e: fmtDate(new Date()), m: null },
+                    ].map((p) => (
+                      <button key={p.label} onClick={() => {
+                        setReportStart(p.s); setReportEnd(p.e);
+                        if (p.m) setReportMonth(p.m);
+                      }}
+                        className={`px-2.5 py-1 text-[11px] font-bold rounded-md border transition ${
+                          reportStart === p.s && reportEnd === p.e
+                            ? "bg-blue-700 text-white border-blue-700"
+                            : "bg-white text-slate-600 border-slate-300 hover:border-blue-500"
+                        }`}>{p.label}</button>
+                    ))}
+                  </div>
                   <select value={reportMonth.start}
                     onChange={(e) => { const m = monthOptions.find((m) => m.start === e.target.value) || monthOptions[0]; setReportMonth(m); setReportStart(m.start); setReportEnd(m.end); }}
                     className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-700 focus:border-blue-600 outline-none bg-white">
