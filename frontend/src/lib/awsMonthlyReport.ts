@@ -8,7 +8,7 @@ import {
 export interface AccountCost {
   accountId: string;
   accountName: string;
-  usageCost: number;   // USD — cost without SP
+  usageCost: number;   // USD — cost without SP (Usage only)
   trueCost: number;    // USD — usage + SP allocated
 }
 export interface CTData { ctName: string; ctId: string; accounts: AccountCost[]; }
@@ -18,6 +18,7 @@ export interface ServiceCost { service: string; usageCost: number; trueCost: num
 function inrCell(v: number): XLSX.CellObject {
   return { t: "n", v, z: "₹#,##0.00", s: { alignment: { horizontal: "left" } } };
 }
+// Plain USD number — no currency symbol
 function usdCell(v: number): XLSX.CellObject {
   return { t: "n", v, z: "#,##0.00", s: { alignment: { horizontal: "left" } } };
 }
@@ -36,13 +37,12 @@ function ctTotal(ct: CTData) {
 }
 
 // ── Sheet 1: Master ───────────────────────────────────────────────────────────
-// cost = totalCost column (costInINR + sharedCost) for regular accounts
-// For payer/CT-level entries = trueCost × rate
+// Cost = totalCost column (costInINR + sharedCost) for regular Novac accounts
+// For Redington (payer): trueCost × rate
 function buildMasterSheet(
   ctDataList: CTData[],
   rate: number,
   mappings: AppMapping[],
-  // totalCostByAccountId: map of accountId → total cost in INR (after shared split)
   novacTotalCostMap: Map<string, number>,
 ): XLSX.WorkSheet {
   const accMap = new Map<string, number>();
@@ -67,7 +67,7 @@ function buildMasterSheet(
         const ct = ctDataList.find((c) => c.ctName.toLowerCase().includes("indostar"));
         costInr += (ct ? ctTotal(ct) : 0) * rate * fraction;
       } else if (accountId === NOVAC_PAYER_ID) {
-        // Payer: trueCost × rate (no shared split)
+        // Redington: trueCost × rate (its own USD cost converted to INR)
         costInr += (accMap.get(accountId) || 0) * rate * fraction;
       } else if (novacTotalCostMap.has(accountId)) {
         // Regular Novac account: use total cost (after shared split) from Novac sheet
@@ -88,15 +88,18 @@ function buildMasterSheet(
 
 // ── Sheet: Novac ──────────────────────────────────────────────────────────────
 // Returns sheet + map of accountId → totalCostINR (for master sheet)
+// Redington (payer) shown as LAST row: Cost in INR = 0, Shared = 0, Total = trueCost × rate
 function buildNovacSheet(
   novacCT: CTData,
   rate: number,
 ): { ws: XLSX.WorkSheet; totalCostMap: Map<string, number> } {
   const accounts = novacCT.accounts;
 
+  // 240329355338 = shared pool for regular accounts
   const sharedAcc   = accounts.find((a) => a.accountId === NOVAC_SHARED_SERVICES_ID);
   const payerAcc    = accounts.find((a) => a.accountId === NOVAC_PAYER_ID);
   const sflIds      = new Set([SFL_PROD_ID, SFL_UAT_ID, SFL_SHARED_ID]);
+  // Regular accounts: exclude shared-services, payer (Redington), and SFL accounts
   const regularAccs = accounts.filter((a) =>
     a.accountId !== NOVAC_SHARED_SERVICES_ID &&
     a.accountId !== NOVAC_PAYER_ID &&
@@ -112,6 +115,7 @@ function buildNovacSheet(
   rows.push(["Dollar", rate, "", "", "", "Total cost", inrCell(totalRegularInr)]);
   rows.push(["", "", "", "", "", "Shared cost", inrCell(sharedUsd * rate)]);
   rows.push([]);
+  // Headers: Usage Cost (USD) and True Cost (USD) — no ₹ symbol on those columns
   rows.push([
     boldStr("Account ID"), boldStr("Account"),
     boldStr("Usage Cost (USD)"), boldStr("True Cost (USD)"),
@@ -132,17 +136,22 @@ function buildNovacSheet(
     totShared += sharedCost;
     totFinal  += finalCost;
     totalCostMap.set(acc.accountId, finalCost);
-    rows.push([acc.accountId, acc.accountName, usdCell(acc.usageCost), usdCell(acc.trueCost), inrCell(costInr), pctCell(pct), inrCell(sharedCost), inrCell(finalCost)]);
+    rows.push([
+      acc.accountId, acc.accountName,
+      usdCell(acc.usageCost), usdCell(acc.trueCost),
+      inrCell(costInr), pctCell(pct),
+      inrCell(sharedCost), inrCell(finalCost),
+    ]);
   }
 
-  // Total row (regular accounts only — payer excluded)
+  // Total row (regular accounts only)
   rows.push([
     boldStr(""), boldStr("Total Cost"),
     usdCell(totUsage), usdCell(totTrue), inrCell(totInr),
     pctCell(100), inrCell(totShared), inrCell(totFinal),
   ]);
 
-  // Payer row — Cost in INR = 0, Shared = 0, Total = trueCost × rate
+  // Redington (payer) — LAST row: Cost in INR = 0, Percentage = 0, Shared = 0, Total = trueCost × rate
   if (payerAcc) {
     const payerTotal = payerAcc.trueCost * rate;
     totalCostMap.set(payerAcc.accountId, payerTotal);
@@ -159,6 +168,7 @@ function buildNovacSheet(
 }
 
 // ── Sheet: SFL ────────────────────────────────────────────────────────────────
+// SFL-SHARED-SERVICE (833660969797) cost split proportionally to PROD and UAT
 function buildSflSheet(novacCT: CTData, rate: number): XLSX.WorkSheet {
   const accounts   = novacCT.accounts;
   const sflShared  = accounts.find((a) => a.accountId === SFL_SHARED_ID);
@@ -192,12 +202,20 @@ function buildSflSheet(novacCT: CTData, rate: number): XLSX.WorkSheet {
     const sharedCost = sharedUsd * rate * share;
     const finalCost  = costInr + sharedCost;
     totFinal += finalCost;
-    rows.push([acc.accountId, acc.accountName, usdCell(acc.usageCost), usdCell(acc.trueCost), inrCell(costInr), inrCell(sharedCost), inrCell(finalCost)]);
+    rows.push([
+      acc.accountId, acc.accountName,
+      usdCell(acc.usageCost), usdCell(acc.trueCost),
+      inrCell(costInr), inrCell(sharedCost), inrCell(finalCost),
+    ]);
   }
 
-  // SFL-SHARED row for reference
+  // SFL-SHARED row for reference (split above, not added to total)
   if (sflShared) {
-    rows.push([sflShared.accountId, sflShared.accountName, usdCell(sflShared.usageCost), usdCell(sflShared.trueCost), inrCell(sflShared.trueCost * rate), boldStr("(split above)"), inrCell(0)]);
+    rows.push([
+      sflShared.accountId, sflShared.accountName,
+      usdCell(sflShared.usageCost), usdCell(sflShared.trueCost),
+      inrCell(sflShared.trueCost * rate), boldStr("(split above)"), inrCell(0),
+    ]);
   }
 
   rows.push([boldStr(""), boldStr("Total"), usdCell(0), usdCell(0), inrCell(0), inrCell(0), inrCell(totFinal)]);
@@ -210,7 +228,11 @@ function buildSflSheet(novacCT: CTData, rate: number): XLSX.WorkSheet {
 // ── Sheet: Generic CT ─────────────────────────────────────────────────────────
 function buildGenericSheet(ct: CTData, rate: number): XLSX.WorkSheet {
   const rows: any[][] = [
-    [boldStr("Account ID"), boldStr("Account"), boldStr("Usage Cost (USD)"), boldStr("True Cost (USD)"), boldStr("Cost in INR")],
+    [
+      boldStr("Account ID"), boldStr("Account"),
+      boldStr("Usage Cost (USD)"), boldStr("True Cost (USD)"),
+      boldStr("Cost in INR"),
+    ],
   ];
   let totUsage = 0, totTrue = 0, totInr = 0;
   for (const acc of ct.accounts) {
@@ -227,6 +249,8 @@ function buildGenericSheet(ct: CTData, rate: number): XLSX.WorkSheet {
 }
 
 // ── Individual CT download ────────────────────────────────────────────────────
+// Sheet 1: account-wise summary
+// Sheet per sub-account: service-wise breakdown
 export function generateCtReport(
   ct: CTData,
   rate: number,
@@ -237,7 +261,11 @@ export function generateCtReport(
 
   // Sheet 1: account-wise
   const accRows: any[][] = [
-    [boldStr("Account ID"), boldStr("Account"), boldStr("Usage Cost (USD)"), boldStr("True Cost (USD)"), boldStr("Cost in INR")],
+    [
+      boldStr("Account ID"), boldStr("Account"),
+      boldStr("Usage Cost (USD)"), boldStr("True Cost (USD)"),
+      boldStr("Cost in INR"),
+    ],
   ];
   let totUsage = 0, totTrue = 0, totInr = 0;
   for (const acc of ct.accounts) {
@@ -254,7 +282,11 @@ export function generateCtReport(
   for (const acc of ct.accounts) {
     const services = servicesByCt.get(acc.accountId) || [];
     const svcRows: any[][] = [
-      [boldStr("Service"), boldStr("Usage Cost (USD)"), boldStr("True Cost (USD)"), boldStr("Cost in INR")],
+      [
+        boldStr("Service"),
+        boldStr("Usage Cost (USD)"), boldStr("True Cost (USD)"),
+        boldStr("Cost in INR"),
+      ],
     ];
     let sTotUsage = 0, sTotTrue = 0, sTotInr = 0;
     for (const svc of services) {
@@ -265,7 +297,6 @@ export function generateCtReport(
     svcRows.push([boldStr("Total"), usdCell(sTotUsage), usdCell(sTotTrue), inrCell(sTotInr)]);
     const svcWs = XLSX.utils.aoa_to_sheet(svcRows);
     setWidths(svcWs, [30, 16, 16, 16]);
-    // Sheet name max 31 chars
     const sheetName = acc.accountName.slice(0, 31);
     XLSX.utils.book_append_sheet(wb, svcWs, sheetName);
   }
@@ -283,14 +314,19 @@ export function generateAwsMonthlyReport(
   const wb = XLSX.utils.book_new();
 
   // Build Novac sheet first to get totalCostMap for master
-  const novacCT = ctDataList.find((c) => c.ctName.toLowerCase().includes("novac") && !c.ctName.toLowerCase().includes("wonder") && !c.ctName.toLowerCase().includes("credit"));
+  const novacCT = ctDataList.find(
+    (c) => c.ctName.toLowerCase().includes("novac") &&
+           !c.ctName.toLowerCase().includes("wonder") &&
+           !c.ctName.toLowerCase().includes("credit")
+  );
   let novacTotalCostMap = new Map<string, number>();
 
-  // Sheet 1: Master
   if (novacCT) {
     const { totalCostMap } = buildNovacSheet(novacCT, rate);
     novacTotalCostMap = totalCostMap;
   }
+
+  // Sheet 1: Master — cost pulled from totalCost (costInINR + sharedCost)
   XLSX.utils.book_append_sheet(wb, buildMasterSheet(ctDataList, rate, mappings, novacTotalCostMap), "Master");
 
   // Remaining sheets
@@ -299,7 +335,7 @@ export function generateAwsMonthlyReport(
     if (nameL.includes("novac") && !nameL.includes("wonder") && !nameL.includes("credit")) {
       const { ws } = buildNovacSheet(ct, rate);
       XLSX.utils.book_append_sheet(wb, ws, ct.ctName.slice(0, 31));
-      // SFL sheet
+      // SFL sheet — separate sheet for SFL-PROD and SFL-UAT with shared split
       XLSX.utils.book_append_sheet(wb, buildSflSheet(ct, rate), "SFL");
     } else {
       XLSX.utils.book_append_sheet(wb, buildGenericSheet(ct, rate), ct.ctName.slice(0, 31));

@@ -166,7 +166,7 @@ export default function DashboardPage() {
   const lastMonth    = getLastMonth();
 
   // ── Monthly report state ──────────────────────────────────────────────────
-  const [reportMonth, setReportMonth]   = useState(monthOptions[0]);
+  const [reportMonth, setReportMonth]   = useState(monthOptions[0]); // monthOptions[0] = last month (i starts at 1)
   const [inrRate, setInrRate]           = useState("");
   const [reportLoading, setReportLoading] = useState(false);
   const [mappings, setMappings]         = useState<AppMapping[]>(DEFAULT_APP_MAPPINGS);
@@ -180,16 +180,41 @@ export default function DashboardPage() {
   const [selectedCtId, setSelectedCtId] = useState<string>("");
   const [ctLoading, setCtLoading]       = useState(false);
 
+  // Auto-sync CT rate from monthly report rate when CT rate not yet set
+  useEffect(() => { if (inrRate && !ctInrRate) setCtInrRate(inrRate); }, [inrRate]); // eslint-disable-line
+
   const awsTowers = towers.filter((t: any) => t.cloud_provider === "aws");
 
-  // ── Compute live cost for a mapping row ─────────────────────────────────
+  // ── Compute live cost for a mapping row (mirrors buildMasterSheet logic) ──
   function computeMappingCost(m: AppMapping, ctData: CTData[], rate: number): number {
+    // Build raw trueCost map
     const accMap = new Map<string, number>();
     for (const ct of ctData) for (const acc of ct.accounts) accMap.set(acc.accountId, (accMap.get(acc.accountId) || 0) + acc.trueCost);
+
+    // Build Novac shared-cost totalCostMap (mirrors buildNovacSheet)
+    const novacTotalCostMap = new Map<string, number>();
+    const novacCT = ctData.find((c) => c.ctName.toLowerCase().includes("novac") && !c.ctName.toLowerCase().includes("wonder") && !c.ctName.toLowerCase().includes("credit"));
+    if (novacCT && rate > 0) {
+      const SFL_IDS = new Set(["833660969797", "683092765314", "400487655910"]);
+      const sharedAcc = novacCT.accounts.find((a) => a.accountId === "240329355338");
+      const regularAccs = novacCT.accounts.filter((a) => a.accountId !== "240329355338" && a.accountId !== "010241470425" && !SFL_IDS.has(a.accountId));
+      const sharedUsd = sharedAcc?.trueCost || 0;
+      const totalRegularInr = regularAccs.reduce((s, a) => s + a.trueCost * rate, 0);
+      for (const acc of regularAccs) {
+        const costInr = acc.trueCost * rate;
+        const pct = totalRegularInr > 0 ? costInr / totalRegularInr : 0;
+        novacTotalCostMap.set(acc.accountId, costInr + sharedUsd * rate * pct);
+      }
+      // Payer (Redington): trueCost × rate
+      const payerAcc = novacCT.accounts.find((a) => a.accountId === "010241470425");
+      if (payerAcc) novacTotalCostMap.set(payerAcc.accountId, payerAcc.trueCost * rate);
+    }
+
     let costInr = 0;
     for (const { accountId, fraction = 1 } of m.accounts) {
       if (accountId === "__CT_AUTOMALL__") { const ct = ctData.find((c) => c.ctName.toLowerCase().includes("automall")); costInr += (ct ? ct.accounts.reduce((s,a)=>s+a.trueCost,0) : 0) * rate * fraction; }
       else if (accountId === "__CT_INDOSTAR__") { const ct = ctData.find((c) => c.ctName.toLowerCase().includes("indostar")); costInr += (ct ? ct.accounts.reduce((s,a)=>s+a.trueCost,0) : 0) * rate * fraction; }
+      else if (novacTotalCostMap.has(accountId)) costInr += (novacTotalCostMap.get(accountId) || 0) * fraction;
       else costInr += (accMap.get(accountId) || 0) * rate * fraction;
     }
     return costInr;
@@ -315,7 +340,7 @@ export default function DashboardPage() {
       {/* ── Individual CT Download Card ── */}
       <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5">
         <h2 className="text-sm font-bold text-black mb-1">Individual CT Report</h2>
-        <p className="text-xs text-gray-500 mb-4">Account-wise + service-wise breakdown for a single control tower</p>
+        <p className="text-xs text-gray-500 mb-4">Account-wise (Sheet 1) + service-wise per sub-account (each sheet). Period is customizable.</p>
         <div className="flex items-end gap-3 flex-wrap">
           <div>
             <label className="text-xs font-bold text-black mb-1 block">Control Tower</label>
@@ -324,6 +349,24 @@ export default function DashboardPage() {
               <option value="">Select CT</option>
               {awsTowers.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
+          </div>
+          <div>
+            <label className="text-xs font-bold text-black mb-1 block">Quick Period</label>
+            <div className="flex gap-1">
+              {[
+                { label: "Last Month", s: lastMonth.start, e: lastMonth.end },
+                { label: "This Month", s: fmtDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), e: fmtDate(new Date()) },
+              ].map((p) => (
+                <button key={p.label} onClick={() => { setCtStart(p.s); setCtEnd(p.e); }}
+                  className={`px-2.5 py-2 text-xs font-bold rounded-md border transition ${
+                    ctStart === p.s && ctEnd === p.e
+                      ? "bg-blue-900 text-white border-blue-900"
+                      : "bg-white text-black border-gray-300 hover:border-blue-900"
+                  }`}>
+                  {p.label}
+                </button>
+              ))}
+            </div>
           </div>
           <div>
             <label className="text-xs font-bold text-black mb-1 block">From</label>
