@@ -5,9 +5,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
-import { RefreshCw, Download, IndianRupee, Plus, Trash2, Pencil, Check, X, ChevronDown } from "lucide-react";
+import { RefreshCw, Download, IndianRupee, Plus, Trash2, Pencil, Check, X } from "lucide-react";
 import { generateAwsMonthlyReport, generateCtReport, CTData, ServiceCost } from "@/lib/awsMonthlyReport";
-import { DEFAULT_APP_MAPPINGS, AppMapping } from "@/lib/awsMonthlyReportConfig";
+import { DEFAULT_APP_MAPPINGS, AppMapping, APP_VERTICAL_MAP } from "@/lib/awsMonthlyReportConfig";
 
 function fmtDate(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -71,13 +71,15 @@ async function fetchCtData(towers: any[], start: string, end: string): Promise<C
 
 // ── Editable mapping row ──────────────────────────────────────────────────────
 function MappingRow({
-  row, index, onUpdate, onDelete, allAccounts, cost,
+  row, index, onUpdate, onDelete, allAccounts, cost, showINR, rate,
 }: {
   row: AppMapping; index: number;
   onUpdate: (i: number, updated: AppMapping) => void;
   onDelete: (i: number) => void;
   allAccounts: { accountId: string; accountName: string }[];
   cost: number | null;
+  showINR: boolean;
+  rate: number;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<AppMapping>(row);
@@ -85,19 +87,30 @@ function MappingRow({
   const save = () => { onUpdate(index, draft); setEditing(false); };
   const cancel = () => { setDraft(row); setEditing(false); };
 
+  const vertical = APP_VERTICAL_MAP[row.appName] || "—";
+  const fmtCostVal = (inr: number | null) => {
+    if (inr == null) return "—";
+    if (showINR) return `₹${inr.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const usd = rate > 0 ? inr / rate : 0;
+    return `$${usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+
   if (!editing) {
     return (
-      <tr className="border-b border-gray-100 hover:bg-gray-50">
-        <td className="px-3 py-2 text-xs font-semibold text-black">{row.appName}</td>
-        <td className="px-3 py-2 text-xs text-gray-500">{row.accounts.map((a) => `${a.accountId}${a.fraction && a.fraction !== 1 ? ` (${(a.fraction * 100).toFixed(0)}%)` : ""}`).join(", ")}</td>
-        <td className="px-3 py-2 text-xs text-gray-400">{row.note}</td>
-        <td className="px-3 py-2 text-right text-xs font-semibold text-blue-900">
-          {cost != null ? `₹${cost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+      <tr className="border-b border-gray-100 hover:bg-slate-50 transition">
+        <td className="px-4 py-2.5 text-sm font-semibold text-gray-800">{row.appName}</td>
+        <td className="px-4 py-2.5">
+          <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+            vertical === "SFL" ? "bg-blue-100 text-blue-700" : vertical === "Non - SFL" ? "bg-violet-100 text-violet-700" : "bg-gray-100 text-gray-500"
+          }`}>{vertical}</span>
         </td>
-        <td className="px-3 py-2">
+        <td className="px-4 py-2.5 text-right text-sm font-bold font-mono text-emerald-700">
+          {fmtCostVal(cost)}
+        </td>
+        <td className="px-4 py-2.5">
           <div className="flex gap-1">
-            <button onClick={() => setEditing(true)} className="p-1 rounded hover:bg-blue-100 text-blue-900"><Pencil className="w-3 h-3" /></button>
-            <button onClick={() => onDelete(index)} className="p-1 rounded hover:bg-red-100 text-red-600"><Trash2 className="w-3 h-3" /></button>
+            <button onClick={() => setEditing(true)} className="p-1 rounded hover:bg-blue-100 text-blue-700"><Pencil className="w-3 h-3" /></button>
+            <button onClick={() => onDelete(index)} className="p-1 rounded hover:bg-red-100 text-red-500"><Trash2 className="w-3 h-3" /></button>
           </div>
         </td>
       </tr>
@@ -106,39 +119,38 @@ function MappingRow({
 
   return (
     <tr className="border-b border-blue-100 bg-blue-50">
-      <td className="px-3 py-2">
+      <td className="px-4 py-2.5">
         <input value={draft.appName} onChange={(e) => setDraft({ ...draft, appName: e.target.value })}
-          className="w-full border border-gray-300 rounded px-2 py-1 text-xs outline-none focus:border-blue-900" />
+          className="w-full border border-gray-300 rounded px-2 py-1 text-xs outline-none focus:border-blue-700" />
       </td>
-      <td className="px-3 py-2">
+      <td className="px-4 py-2.5">
+        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+          vertical === "SFL" ? "bg-blue-100 text-blue-700" : "bg-violet-100 text-violet-700"
+        }`}>{vertical}</span>
+      </td>
+      <td className="px-4 py-2.5">
         <div className="space-y-1">
           {draft.accounts.map((a, ai) => (
             <div key={ai} className="flex gap-1 items-center">
               <input value={a.accountId} onChange={(e) => {
                 const accs = [...draft.accounts]; accs[ai] = { ...accs[ai], accountId: e.target.value };
                 setDraft({ ...draft, accounts: accs });
-              }} placeholder="Account ID" className="w-32 border border-gray-300 rounded px-2 py-1 text-xs outline-none focus:border-blue-900" />
+              }} placeholder="Account ID" className="w-32 border border-gray-300 rounded px-2 py-1 text-xs outline-none focus:border-blue-700" />
               <input value={a.fraction != null ? String(a.fraction * 100) : "100"} onChange={(e) => {
                 const accs = [...draft.accounts]; accs[ai] = { ...accs[ai], fraction: parseFloat(e.target.value) / 100 };
                 setDraft({ ...draft, accounts: accs });
-              }} placeholder="%" className="w-14 border border-gray-300 rounded px-2 py-1 text-xs outline-none focus:border-blue-900" />
+              }} placeholder="%" className="w-14 border border-gray-300 rounded px-2 py-1 text-xs outline-none focus:border-blue-700" />
               <span className="text-xs text-gray-400">%</span>
               <button onClick={() => { const accs = draft.accounts.filter((_, i) => i !== ai); setDraft({ ...draft, accounts: accs }); }}
                 className="text-red-400 hover:text-red-600"><X className="w-3 h-3" /></button>
             </div>
           ))}
           <button onClick={() => setDraft({ ...draft, accounts: [...draft.accounts, { accountId: "", fraction: 1 }] })}
-            className="text-xs text-blue-900 hover:underline flex items-center gap-1"><Plus className="w-3 h-3" /> Add account</button>
+            className="text-xs text-blue-700 hover:underline flex items-center gap-1"><Plus className="w-3 h-3" /> Add account</button>
         </div>
       </td>
-      <td className="px-3 py-2">
-        <input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })}
-          className="w-full border border-gray-300 rounded px-2 py-1 text-xs outline-none focus:border-blue-900" />
-      </td>
-      <td className="px-3 py-2 text-right text-xs text-gray-400">
-        {cost != null ? `₹${cost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
-      </td>
-      <td className="px-3 py-2">
+      <td className="px-4 py-2.5 text-right text-xs text-gray-400">{fmtCostVal(cost)}</td>
+      <td className="px-4 py-2.5">
         <div className="flex gap-1">
           <button onClick={save} className="p-1 rounded hover:bg-green-100 text-green-700"><Check className="w-3 h-3" /></button>
           <button onClick={cancel} className="p-1 rounded hover:bg-gray-100 text-gray-500"><X className="w-3 h-3" /></button>
@@ -172,6 +184,8 @@ export default function DashboardPage() {
   const [mappings, setMappings]         = useState<AppMapping[]>(DEFAULT_APP_MAPPINGS);
   const [ctDataCache, setCtDataCache]   = useState<CTData[]>([]);
   const [costLoading, setCostLoading]   = useState(false);
+  const [showINR, setShowINR]           = useState(false);
+  const [sflFilter, setSflFilter]       = useState<"all" | "SFL" | "Non - SFL">("all");
 
   // ── Individual CT download state ──────────────────────────────────────────
   const [ctStart, setCtStart]           = useState(lastMonth.start);
@@ -306,144 +320,198 @@ export default function DashboardPage() {
   const addMapping    = () => setMappings((prev) => [...prev, { appName: "New App", note: "", accounts: [{ accountId: "", fraction: 1 }] }]);
   const resetMappings = () => { setMappings(DEFAULT_APP_MAPPINGS); toast.success("Reset to defaults"); };
 
+  const filteredMappings = sflFilter === "all" ? mappings : mappings.filter((m) => (APP_VERTICAL_MAP[m.appName] || "Non - SFL") === sflFilter);
+
+  const filteredGrandTotal = rate > 0 && ctDataCache.length > 0
+    ? filteredMappings.reduce((s, m) => s + computeMappingCost(m, ctDataCache, rate), 0)
+    : 0;
+
+  const fmtCost = (inr: number) => {
+    if (showINR) return `₹${inr.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const usd = rate > 0 ? inr / rate : 0;
+    return `$${usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+
   return (
-    <div className="p-6 space-y-6">
+    <div className="min-h-screen" style={{ background: "#f4f6fb" }}>
+      <div className="p-6 space-y-5">
 
-      {/* ── Monthly Report Card ── */}
-      <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5">
-        <h2 className="text-sm font-bold text-black mb-1">AWS Monthly Cost Report</h2>
-        <p className="text-xs text-gray-500 mb-4">Download full multi-sheet Excel with shared cost split across all control towers</p>
-        <div className="flex items-end gap-3 flex-wrap">
+        {/* ── Page Header ── */}
+        <div className="rounded-xl px-6 py-4 flex items-center justify-between" style={{ background: "linear-gradient(135deg,#0f2d5e 0%,#1a6fa8 100%)" }}>
           <div>
-            <label className="text-xs font-bold text-black mb-1 block">Month</label>
-            <select value={reportMonth.start}
-              onChange={(e) => setReportMonth(monthOptions.find((m) => m.start === e.target.value) || monthOptions[0])}
-              className="border border-gray-300 rounded-md px-3 py-2 text-xs font-semibold text-black focus:border-blue-900 outline-none bg-white">
-              {monthOptions.map((m) => <option key={m.start} value={m.start}>{m.label}</option>)}
-            </select>
+            <h1 className="text-xl font-extrabold text-white tracking-tight">AWS Monthly Cost Report</h1>
+            <p className="text-blue-200 text-xs mt-0.5">Download multi-sheet Excel · Master sheet with shared cost split</p>
           </div>
-          <div>
-            <label className="text-xs font-bold text-black mb-1 block">1 USD = INR</label>
-            <div className="flex items-center border border-gray-300 rounded-md overflow-hidden focus-within:border-blue-900">
-              <div className="px-2 py-2 bg-gray-50 border-r border-gray-300"><IndianRupee className="w-3.5 h-3.5 text-black" /></div>
-              <input type="number" value={inrRate} onChange={(e) => setInrRate(e.target.value)}
-                placeholder="e.g. 84.50" className="w-24 px-2 py-2 text-xs font-semibold text-black outline-none" />
+          <div className="flex items-center gap-3">
+            <div className="text-right">
+              <div className="text-blue-200 text-[10px] font-semibold uppercase tracking-wider">Control Towers</div>
+              <div className="text-white text-lg font-extrabold">{awsTowers.length}</div>
             </div>
           </div>
-          <button onClick={handleDownload} disabled={reportLoading || awsTowers.length === 0 || !inrRate}
-            className="flex items-center gap-1.5 px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold rounded-md transition disabled:opacity-50">
-            {reportLoading ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Generating...</> : <><Download className="w-3.5 h-3.5" /> Download Excel</>}
-          </button>
         </div>
-      </div>
 
-      {/* ── Individual CT Download Card ── */}
-      <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-5">
-        <h2 className="text-sm font-bold text-black mb-1">Individual CT Report</h2>
-        <p className="text-xs text-gray-500 mb-4">Account-wise (Sheet 1) + service-wise per sub-account (each sheet). Period is customizable.</p>
-        <div className="flex items-end gap-3 flex-wrap">
-          <div>
-            <label className="text-xs font-bold text-black mb-1 block">Control Tower</label>
-            <select value={selectedCtId} onChange={(e) => setSelectedCtId(e.target.value)}
-              className="border border-gray-300 rounded-md px-3 py-2 text-xs font-semibold text-black focus:border-blue-900 outline-none bg-white min-w-[180px]">
-              <option value="">Select CT</option>
-              {awsTowers.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs font-bold text-black mb-1 block">Quick Period</label>
-            <div className="flex gap-1">
-              {[
-                { label: "Last Month", s: lastMonth.start, e: lastMonth.end },
-                { label: "This Month", s: fmtDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), e: fmtDate(new Date()) },
-              ].map((p) => (
-                <button key={p.label} onClick={() => { setCtStart(p.s); setCtEnd(p.e); }}
-                  className={`px-2.5 py-2 text-xs font-bold rounded-md border transition ${
-                    ctStart === p.s && ctEnd === p.e
-                      ? "bg-blue-900 text-white border-blue-900"
-                      : "bg-white text-black border-gray-300 hover:border-blue-900"
-                  }`}>
-                  {p.label}
-                </button>
-              ))}
+        {/* ── Monthly Report + CT Download side by side ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+          {/* Monthly Report Card */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-1 h-5 rounded-full bg-blue-600" />
+              <h2 className="text-sm font-bold text-slate-800">Full Monthly Report</h2>
+            </div>
+            <p className="text-xs text-slate-400 mb-4">All control towers · shared cost split · Master + per-CT sheets</p>
+            <div className="flex items-end gap-3 flex-wrap">
+              <div>
+                <label className="text-xs font-bold text-slate-600 mb-1 block">Month</label>
+                <select value={reportMonth.start}
+                  onChange={(e) => setReportMonth(monthOptions.find((m) => m.start === e.target.value) || monthOptions[0])}
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:border-blue-600 outline-none bg-white">
+                  {monthOptions.map((m) => <option key={m.start} value={m.start}>{m.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 mb-1 block">1 USD = INR</label>
+                <div className="flex items-center border border-slate-300 rounded-lg overflow-hidden focus-within:border-blue-600">
+                  <div className="px-2 py-2 bg-slate-50 border-r border-slate-300"><IndianRupee className="w-3.5 h-3.5 text-slate-500" /></div>
+                  <input type="number" value={inrRate} onChange={(e) => setInrRate(e.target.value)}
+                    placeholder="e.g. 84.50" className="w-24 px-2 py-2 text-xs font-semibold text-slate-700 outline-none" />
+                </div>
+              </div>
+              <button onClick={handleDownload} disabled={reportLoading || awsTowers.length === 0 || !inrRate}
+                className="flex items-center gap-1.5 px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-50 shadow-sm">
+                {reportLoading ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Generating...</> : <><Download className="w-3.5 h-3.5" /> Download Excel</>}
+              </button>
             </div>
           </div>
-          <div>
-            <label className="text-xs font-bold text-black mb-1 block">From</label>
-            <input type="date" value={ctStart} onChange={(e) => setCtStart(e.target.value)}
-              className="border border-gray-300 rounded-md px-3 py-2 text-xs text-black focus:border-blue-900 outline-none" />
-          </div>
-          <div>
-            <label className="text-xs font-bold text-black mb-1 block">To</label>
-            <input type="date" value={ctEnd} onChange={(e) => setCtEnd(e.target.value)}
-              className="border border-gray-300 rounded-md px-3 py-2 text-xs text-black focus:border-blue-900 outline-none" />
-          </div>
-          <div>
-            <label className="text-xs font-bold text-black mb-1 block">1 USD = INR</label>
-            <div className="flex items-center border border-gray-300 rounded-md overflow-hidden focus-within:border-blue-900">
-              <div className="px-2 py-2 bg-gray-50 border-r border-gray-300"><IndianRupee className="w-3.5 h-3.5 text-black" /></div>
-              <input type="number" value={ctInrRate} onChange={(e) => setCtInrRate(e.target.value)}
-                placeholder="e.g. 84.50" className="w-24 px-2 py-2 text-xs font-semibold text-black outline-none" />
+
+          {/* Individual CT Card */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-1 h-5 rounded-full bg-orange-500" />
+              <h2 className="text-sm font-bold text-slate-800">Individual CT Report</h2>
+            </div>
+            <p className="text-xs text-slate-400 mb-4">Account-wise + service-wise per sub-account · custom period</p>
+            <div className="flex items-end gap-3 flex-wrap">
+              <div>
+                <label className="text-xs font-bold text-slate-600 mb-1 block">Control Tower</label>
+                <select value={selectedCtId} onChange={(e) => setSelectedCtId(e.target.value)}
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:border-blue-600 outline-none bg-white min-w-[160px]">
+                  <option value="">Select CT</option>
+                  {awsTowers.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 mb-1 block">Period</label>
+                <div className="flex gap-1">
+                  {[
+                    { label: "Last Month", s: lastMonth.start, e: lastMonth.end },
+                    { label: "This Month", s: fmtDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), e: fmtDate(new Date()) },
+                  ].map((p) => (
+                    <button key={p.label} onClick={() => { setCtStart(p.s); setCtEnd(p.e); }}
+                      className={`px-2.5 py-2 text-xs font-bold rounded-lg border transition ${
+                        ctStart === p.s ? "bg-blue-700 text-white border-blue-700" : "bg-white text-slate-600 border-slate-300 hover:border-blue-600"
+                      }`}>{p.label}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 mb-1 block">1 USD = INR</label>
+                <div className="flex items-center border border-slate-300 rounded-lg overflow-hidden focus-within:border-blue-600">
+                  <div className="px-2 py-2 bg-slate-50 border-r border-slate-300"><IndianRupee className="w-3.5 h-3.5 text-slate-500" /></div>
+                  <input type="number" value={ctInrRate} onChange={(e) => setCtInrRate(e.target.value)}
+                    placeholder="e.g. 84.50" className="w-24 px-2 py-2 text-xs font-semibold text-slate-700 outline-none" />
+                </div>
+              </div>
+              <button onClick={handleCtDownload} disabled={ctLoading || !selectedCtId || !ctInrRate}
+                className="flex items-center gap-1.5 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold rounded-lg transition disabled:opacity-50 shadow-sm">
+                {ctLoading ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Generating...</> : <><Download className="w-3.5 h-3.5" /> Download CT Excel</>}
+              </button>
             </div>
           </div>
-          <button onClick={handleCtDownload} disabled={ctLoading || !selectedCtId || !ctInrRate}
-            className="flex items-center gap-1.5 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-md transition disabled:opacity-50">
-            {ctLoading ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Generating...</> : <><Download className="w-3.5 h-3.5" /> Download CT Excel</>}
-          </button>
         </div>
-      </div>
 
-      {/* ── Master Mapping Editor ── */}
-      <div className="bg-white rounded-lg border border-gray-300 shadow-sm">
-        <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between">
-          <div>
-            <h2 className="text-sm font-bold text-black">Master Sheet Mapping</h2>
-            <p className="text-xs text-gray-500 mt-0.5">Edit application names, account IDs and cost fractions. Changes apply to next download.</p>
+        {/* ── Master Sheet Mapping Table ── */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
+
+          {/* Table Header */}
+          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h2 className="text-sm font-bold text-slate-800">Master Sheet — Application Cost</h2>
+              <p className="text-xs text-slate-400 mt-0.5">Note column hidden in UI · visible in downloaded Excel</p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+
+              {/* SFL Filter */}
+              <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
+                {(["all", "SFL", "Non - SFL"] as const).map((f) => (
+                  <button key={f} onClick={() => setSflFilter(f)}
+                    className={`px-3 py-1 text-xs font-bold rounded-md transition ${
+                      sflFilter === f ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                    }`}>
+                    {f === "all" ? "All" : f}
+                  </button>
+                ))}
+              </div>
+
+              {/* USD / INR toggle */}
+              <button onClick={() => setShowINR((p) => !p)}
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition ${
+                  showINR ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-emerald-700 border-emerald-400 hover:bg-emerald-50"
+                }`}>
+                {showINR ? "₹ INR" : "$ USD"}
+              </button>
+
+              <button onClick={resetMappings}
+                className="px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 transition">
+                Reset
+              </button>
+              <button onClick={addMapping}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold bg-blue-700 text-white rounded-lg hover:bg-blue-800 transition">
+                <Plus className="w-3 h-3" /> Add Row
+              </button>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <button onClick={resetMappings}
-              className="px-3 py-1.5 text-xs font-bold border border-gray-300 rounded-md text-black hover:bg-gray-50 transition">
-              Reset Defaults
-            </button>
-            <button onClick={addMapping}
-              className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold bg-blue-900 text-white rounded-md hover:bg-blue-800 transition">
-              <Plus className="w-3 h-3" /> Add Row
-            </button>
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-3 py-2 w-40">Application</th>
-                <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-3 py-2">Account IDs (fraction %)</th>
-                <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-3 py-2">Note</th>
-                <th className="text-right text-xs font-bold uppercase tracking-wider text-black px-3 py-2 w-36">
-                  Cost in INR
-                  {costLoading && <span className="ml-1 text-[10px] text-gray-400 font-normal">loading...</span>}
-                </th>
-                <th className="px-3 py-2 w-16" />
-              </tr>
-            </thead>
-            <tbody>
-              {mappings.map((row, i) => (
-                <MappingRow key={i} row={row} index={i} onUpdate={updateMapping} onDelete={deleteMapping} allAccounts={[]}
-                  cost={rate > 0 && ctDataCache.length > 0 ? computeMappingCost(row, ctDataCache, rate) : null} />
-              ))}
-              {rate > 0 && ctDataCache.length > 0 && (
-                <tr className="border-t-2 border-gray-300 bg-gray-50">
-                  <td className="px-3 py-2 text-xs font-bold text-black" colSpan={3}>Total</td>
-                  <td className="px-3 py-2 text-right text-xs font-bold text-blue-900">
-                    ₹{grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </td>
-                  <td />
+
+          {/* Table */}
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr style={{ background: "linear-gradient(90deg,#0f2d5e 0%,#1a6fa8 100%)" }}>
+                  <th className="text-left text-xs font-bold uppercase tracking-wider text-white px-4 py-3 w-44">Application</th>
+                  <th className="text-left text-xs font-bold uppercase tracking-wider text-white px-4 py-3 w-32">Vertical</th>
+                  <th className="text-right text-xs font-bold uppercase tracking-wider text-white px-4 py-3 w-40">
+                    Cost ({showINR ? "INR" : "USD"})
+                    {costLoading && <span className="ml-1 text-[10px] text-blue-200 font-normal">loading...</span>}
+                  </th>
+                  <th className="px-4 py-3 w-16" />
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {filteredMappings.map((row, i) => {
+                  const globalIndex = mappings.indexOf(row);
+                  return (
+                    <MappingRow key={globalIndex} row={row} index={globalIndex} onUpdate={updateMapping} onDelete={deleteMapping} allAccounts={[]}
+                      cost={rate > 0 && ctDataCache.length > 0 ? computeMappingCost(row, ctDataCache, rate) : null}
+                      showINR={showINR} rate={rate} />
+                  );
+                })}
+                {rate > 0 && ctDataCache.length > 0 && (
+                  <tr className="border-t-2 border-slate-200" style={{ background: "#e8f0fe" }}>
+                    <td className="px-4 py-3 text-sm font-extrabold text-slate-800" colSpan={2}>
+                      Total {sflFilter !== "all" && <span className="ml-1 text-xs font-semibold text-blue-600">({sflFilter})</span>}
+                    </td>
+                    <td className="px-4 py-3 text-right text-sm font-extrabold font-mono text-blue-800">
+                      {fmtCost(filteredGrandTotal)}
+                    </td>
+                    <td />
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
 
+      </div>
     </div>
   );
 }
