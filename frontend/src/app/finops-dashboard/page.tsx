@@ -7,7 +7,10 @@ import { RefreshCw, ChevronDown, ChevronRight, Calendar, Download } from "lucide
 function fmtDate(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
-function fmt(n: number) {
+function fmtUSD(n: number) {
+  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+function fmtINR(n: number) {
   return `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 function getMonthOptions() {
@@ -42,6 +45,27 @@ export default function FinOpsDashboard() {
   const [costs, setCosts] = useState<Record<string, CostRow>>({});
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [showINR, setShowINR] = useState(false);
+  const [inrRate, setInrRate] = useState<number | null>(null);
+  const [rateLoading, setRateLoading] = useState(false);
+  const [sflFilter, setSflFilter] = useState<"all" | "SFL" | "Non - SFL">("all");
+
+  const loadINRRate = async () => {
+    if (inrRate !== null) { setShowINR(true); return; }
+    setRateLoading(true);
+    try {
+      const res = await fetch("https://api.exchangerate-api.com/v4/latest/USD");
+      const data = await res.json();
+      setInrRate(data.rates?.INR || 84);
+    } catch {
+      setInrRate(84);
+    } finally {
+      setRateLoading(false);
+      setShowINR(true);
+    }
+  };
+
+  const fmt = (n: number) => showINR && inrRate ? fmtINR(n * inrRate) : fmtUSD(n);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -121,16 +145,30 @@ export default function FinOpsDashboard() {
     return { aws, azure_actual, azure_savings, azure_true, total: aws + azure_true };
   };
 
-  const grandTotal = verticals.reduce((acc, v) => {
+  const VERTICAL_SFL_MAP: Record<string, "SFL" | "Non - SFL"> = {
+    "Finergy": "Non - SFL", "Pahal": "Non - SFL", "SLIC": "Non - SFL", "SGIC": "Non - SFL",
+    "LMS": "Non - SFL", "Nestavia": "Non - SFL", "SFL - Credacc": "SFL", "Immerz": "Non - SFL",
+    "IDC": "Non - SFL", "Devops": "SFL", "Digital": "SFL", "SFL-RnD": "SFL",
+    "NTS-Development": "Non - SFL", "Payer account Novac": "Non - SFL", "SFL": "SFL",
+    "Automall": "Non - SFL", "Indostar": "Non - SFL", "NOVACwonderlendhubs": "SFL", "Novac Credit Nirvana": "SFL",
+  };
+
+  const filteredVerticals = sflFilter === "all" ? verticals : verticals.map((v) => ({
+    ...v,
+    businesses: v.businesses.filter((b) => (VERTICAL_SFL_MAP[b.name] || "Non - SFL") === sflFilter),
+  })).filter((v) => v.businesses.length > 0);
+
+  const grandTotal = filteredVerticals.reduce((acc, v) => {
     const t = verticalTotals(v);
     return { aws: acc.aws + t.aws, azure_actual: acc.azure_actual + t.azure_actual, azure_savings: acc.azure_savings + t.azure_savings, azure_true: acc.azure_true + t.azure_true, total: acc.total + t.total };
   }, { aws: 0, azure_actual: 0, azure_savings: 0, azure_true: 0, total: 0 });
 
   const downloadCSV = () => {
+    const costLabel = showINR && inrRate ? "Cost (INR)" : "Cost (USD)";
     const rows: string[][] = [
-      ["Vertical", "Business", "Owner", "Cost Type", "AWS Cost", "Azure Actual", "Azure Savings", "Azure True Cost", "Total Cost", "Period"],
+      ["Vertical", "Business", "Owner", "Cost Type", `AWS ${costLabel}`, `Azure Actual ${costLabel}`, `Azure Savings ${costLabel}`, `Azure True ${costLabel}`, `Total ${costLabel}`, "Period"],
     ];
-    for (const v of verticals) {
+    for (const v of filteredVerticals) {
       const vT = verticalTotals(v);
       rows.push([v.name, "", "", "", fmt(vT.aws), fmt(vT.azure_actual), fmt(vT.azure_savings), fmt(vT.azure_true), fmt(vT.total), selectedMonth.label]);
       for (const b of v.businesses) {
@@ -145,7 +183,7 @@ export default function FinOpsDashboard() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `finops-cost-${selectedMonth.start}.csv`;
+    a.download = `finops-cost-${selectedMonth.start}${sflFilter !== "all" ? `-${sflFilter.replace(" ", "")}` : ""}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -162,34 +200,34 @@ export default function FinOpsDashboard() {
   ];
 
   return (
-    <div className="p-6">
+    <div className="p-6 min-h-screen" style={{ background: "#f0f4ff" }}>
       {/* Header */}
-      <div className="flex items-center justify-between mb-5">
+      <div className="rounded-xl mb-5 px-6 py-4 flex items-center justify-between" style={{ background: "linear-gradient(135deg,#1e3a8a 0%,#2563eb 100%)" }}>
         <div>
-          <h1 className="text-2xl font-bold text-black">FinOps Dashboard</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Multi-cloud cost by Vertical &amp; Business · {selectedMonth.label}</p>
+          <h1 className="text-2xl font-extrabold text-white tracking-tight">FinOps Dashboard</h1>
+          <p className="text-blue-200 text-sm mt-0.5">Multi-cloud cost by Vertical &amp; Business &middot; {selectedMonth.label}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
           <button onClick={() => setCollapsed({})}
-            className="px-3 py-2 text-xs font-bold border border-gray-300 rounded-md text-black hover:bg-gray-50 transition">
+            className="px-3 py-2 text-xs font-bold border border-blue-300 rounded-md text-white hover:bg-blue-700 transition">
             Expand All
           </button>
           <button onClick={() => {
             const all: Record<string, boolean> = {};
             verticals.forEach((v) => { all[v.id] = true; });
             setCollapsed(all);
-          }} className="px-3 py-2 text-xs font-bold border border-gray-300 rounded-md text-black hover:bg-gray-50 transition">
+          }} className="px-3 py-2 text-xs font-bold border border-blue-300 rounded-md text-white hover:bg-blue-700 transition">
             Collapse All
           </button>
 
           <div className="relative" ref={dropRef}>
             <button onClick={() => setShowMonthDrop((p) => !p)}
-              className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-md bg-white text-xs font-bold text-black hover:border-blue-900 transition min-w-[160px] justify-between">
+              className="flex items-center gap-2 px-3 py-2 border border-blue-300 rounded-md bg-blue-800 text-xs font-bold text-white hover:bg-blue-700 transition min-w-[160px] justify-between">
               <div className="flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                <Calendar className="w-3.5 h-3.5 text-blue-200" />
                 {selectedMonth.label}
               </div>
-              <ChevronDown className="w-3 h-3 text-gray-400" />
+              <ChevronDown className="w-3 h-3 text-blue-200" />
             </button>
             {showMonthDrop && (
               <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-[160px] max-h-64 overflow-y-auto">
@@ -207,25 +245,57 @@ export default function FinOpsDashboard() {
           </div>
 
           <button onClick={() => loadData(selectedMonth.start, selectedMonth.end, true)}
-            className="p-2 border border-gray-300 rounded-md hover:bg-gray-50 transition">
-            <RefreshCw className={`w-4 h-4 text-black ${loading ? "animate-spin" : ""}`} />
+            className="p-2 border border-blue-300 rounded-md hover:bg-blue-700 transition">
+            <RefreshCw className={`w-4 h-4 text-white ${loading ? "animate-spin" : ""}`} />
+          </button>
+
+          {/* USD / INR toggle */}
+          <button
+            onClick={() => { if (showINR) { setShowINR(false); } else { loadINRRate(); } }}
+            disabled={rateLoading}
+            className={`px-3 py-2 text-xs font-bold rounded-md border transition disabled:opacity-50 ${
+              showINR
+                ? "bg-emerald-500 text-white border-emerald-400 hover:bg-emerald-600"
+                : "bg-white text-emerald-700 border-emerald-400 hover:bg-emerald-50"
+            }`}>
+            {rateLoading ? "Loading…" : showINR ? "₹ INR" : "$ USD"}
           </button>
 
           <button onClick={downloadCSV} disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-2 bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold rounded-md transition disabled:opacity-50">
+            className="flex items-center gap-1.5 px-3 py-2 bg-amber-500 hover:bg-amber-400 text-white text-xs font-bold rounded-md transition disabled:opacity-50 shadow">
             <Download className="w-3.5 h-3.5" /> Export CSV
           </button>
         </div>
       </div>
 
+      {/* SFL Filter */}
+      <div className="flex items-center gap-2 mb-4">
+        <span className="text-xs font-bold text-blue-800 uppercase tracking-wider">Filter:</span>
+        {(["all", "SFL", "Non - SFL"] as const).map((f) => (
+          <button key={f} onClick={() => setSflFilter(f)}
+            className={`px-4 py-1.5 text-xs font-bold rounded-full border transition ${
+              sflFilter === f
+                ? "bg-blue-700 text-white border-blue-700 shadow"
+                : "bg-white text-blue-700 border-blue-300 hover:border-blue-600 hover:bg-blue-50"
+            }`}>
+            {f === "all" ? "Total" : f}
+          </button>
+        ))}
+        {sflFilter !== "all" && (
+          <span className="ml-2 text-xs text-blue-500 font-semibold">
+            {filteredVerticals.reduce((s, v) => s + v.businesses.length, 0)} businesses
+          </span>
+        )}
+      </div>
+
       {/* Table */}
-      <div className="bg-white rounded-lg border border-gray-300 shadow-sm overflow-x-auto">
+      <div className="bg-white rounded-xl border border-blue-100 shadow-lg overflow-x-auto">
         <table className="w-full min-w-[900px]">
           <thead>
-            <tr className="bg-gray-100 border-b-2 border-gray-300">
+            <tr style={{ background: "linear-gradient(90deg,#1e3a8a 0%,#2563eb 100%)" }}>
               {headers.map((h) => (
                 <th key={h.label}
-                  className={`text-${h.align} text-xs font-bold uppercase tracking-wider text-gray-700 px-4 py-3 whitespace-nowrap`}>
+                  className={`text-${h.align} text-xs font-bold uppercase tracking-wider text-white px-4 py-3 whitespace-nowrap`}>
                   {h.dot ? (
                     <div className={`flex items-center ${h.align === "right" ? "justify-end" : ""} gap-1.5`}>
                       <div className={`w-2 h-2 rounded-full ${h.dot}`} />
@@ -249,30 +319,30 @@ export default function FinOpsDashboard() {
                 </tr>
               ))
             ) : (
-              verticals.map((v) => {
+              filteredVerticals.map((v) => {
                 const vTotals = verticalTotals(v);
                 const isCollapsed = collapsed[v.id];
                 return [
                   <tr key={`v-${v.id}`}
-                    className="border-b border-gray-200 cursor-pointer hover:bg-gray-50 transition"
-                    style={{ background: `${v.color}0d` }}
+                    className="border-b border-blue-100 cursor-pointer hover:brightness-95 transition"
+                    style={{ background: `${v.color}22` }}
                     onClick={() => toggleCollapse(v.id)}>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: v.color }} />
-                        <span className="text-sm font-bold text-black">{v.name}</span>
+                        <span className="text-sm font-bold" style={{ color: v.color }}>{v.name}</span>
                         {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400" />}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-xs text-gray-400 font-semibold">{v.businesses.length} business{v.businesses.length !== 1 ? "es" : ""}</td>
+                    <td className="px-4 py-3 text-xs font-semibold" style={{ color: v.color }}>{v.businesses.length} business{v.businesses.length !== 1 ? "es" : ""}</td>
                     <td className="px-4 py-3" />
-                    <td className="px-4 py-3 text-right text-sm font-bold font-mono text-orange-700">
+                    <td className="px-4 py-3 text-right text-sm font-bold font-mono text-orange-600">
                       {vTotals.aws > 0 ? fmt(vTotals.aws) : <span className="text-gray-300 font-normal">—</span>}
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-bold font-mono text-blue-500">
                       {vTotals.azure_actual > 0 ? fmt(vTotals.azure_actual) : <span className="text-gray-300 font-normal">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-right text-sm font-bold font-mono text-green-700">
+                    <td className="px-4 py-3 text-right text-sm font-bold font-mono text-emerald-600">
                       {vTotals.azure_savings > 0 ? fmt(vTotals.azure_savings) : <span className="text-gray-300 font-normal">—</span>}
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-bold font-mono text-blue-700">
@@ -287,34 +357,34 @@ export default function FinOpsDashboard() {
                     const c = costs[b.id] || { aws: 0, azure_actual: 0, azure_savings: 0, azure_true: 0, total: 0 };
                     const isAccount = (b.cost_type || "resource") === "account";
                     return (
-                      <tr key={`b-${b.id}`} className="border-b border-gray-100 hover:bg-blue-50 transition">
+                      <tr key={`b-${b.id}`} className="border-b border-blue-50 hover:bg-blue-50 transition">
                         <td className="px-4 py-2.5" />
                         <td className="px-4 py-2.5">
                           <div className="flex items-center gap-2">
-                            <div className="w-1 h-3.5 rounded-full flex-shrink-0" style={{ background: `${v.color}50` }} />
-                            <span className="text-sm font-semibold text-black">{b.name}</span>
+                            <div className="w-1 h-3.5 rounded-full flex-shrink-0" style={{ background: v.color }} />
+                            <span className="text-sm font-semibold text-gray-800">{b.name}</span>
                             {isAccount && (
-                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border bg-green-50 text-green-700 border-green-200 uppercase tracking-wide">Acct</span>
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-300 uppercase tracking-wide">Acct</span>
                             )}
                           </div>
                         </td>
                         <td className="px-4 py-2.5 text-xs text-gray-500 font-medium">
                           {b.owner_name || <span className="text-gray-300">—</span>}
                         </td>
-                        <td className="px-4 py-2.5 text-right text-sm font-mono text-orange-700">
-                          {c.aws > 0 ? fmt(c.aws) : <span className="text-gray-300">—</span>}
+                        <td className="px-4 py-2.5 text-right text-sm font-mono font-semibold text-orange-600">
+                          {c.aws > 0 ? fmt(c.aws) : <span className="text-gray-200">—</span>}
                         </td>
-                        <td className="px-4 py-2.5 text-right text-sm font-mono text-blue-500">
-                          {c.azure_actual > 0 ? fmt(c.azure_actual) : <span className="text-gray-300">—</span>}
+                        <td className="px-4 py-2.5 text-right text-sm font-mono font-semibold text-blue-500">
+                          {c.azure_actual > 0 ? fmt(c.azure_actual) : <span className="text-gray-200">—</span>}
                         </td>
-                        <td className="px-4 py-2.5 text-right text-sm font-mono text-green-700">
-                          {c.azure_savings > 0 ? fmt(c.azure_savings) : <span className="text-gray-300">—</span>}
+                        <td className="px-4 py-2.5 text-right text-sm font-mono font-semibold text-emerald-600">
+                          {c.azure_savings > 0 ? fmt(c.azure_savings) : <span className="text-gray-200">—</span>}
                         </td>
-                        <td className="px-4 py-2.5 text-right text-sm font-mono text-blue-700">
-                          {c.azure_true > 0 ? fmt(c.azure_true) : <span className="text-gray-300">—</span>}
+                        <td className="px-4 py-2.5 text-right text-sm font-mono font-semibold text-blue-700">
+                          {c.azure_true > 0 ? fmt(c.azure_true) : <span className="text-gray-200">—</span>}
                         </td>
-                        <td className="px-4 py-2.5 text-right text-sm font-semibold font-mono text-black">
-                          {c.total > 0 ? fmt(c.total) : <span className="text-gray-300">—</span>}
+                        <td className="px-4 py-2.5 text-right text-sm font-bold font-mono text-blue-900">
+                          {c.total > 0 ? fmt(c.total) : <span className="text-gray-200">—</span>}
                         </td>
                       </tr>
                     );
@@ -323,23 +393,25 @@ export default function FinOpsDashboard() {
               })
             )}
 
-            {!loading && verticals.length > 0 && (
-              <tr className="border-t-2 border-gray-300 bg-gray-100">
-                <td className="px-4 py-3 text-sm font-bold text-black">Grand Total</td>
+            {!loading && filteredVerticals.length > 0 && (
+              <tr className="border-t-2 border-blue-200" style={{ background: "#e0e7ff" }}>
+                <td className="px-4 py-3 text-sm font-extrabold text-blue-900">Grand Total</td>
                 <td className="px-4 py-3" colSpan={2} />
-                <td className="px-4 py-3 text-right text-sm font-bold font-mono text-orange-700">{fmt(grandTotal.aws)}</td>
-                <td className="px-4 py-3 text-right text-sm font-bold font-mono text-blue-500">{fmt(grandTotal.azure_actual)}</td>
-                <td className="px-4 py-3 text-right text-sm font-bold font-mono text-green-700">{fmt(grandTotal.azure_savings)}</td>
-                <td className="px-4 py-3 text-right text-sm font-bold font-mono text-blue-700">{fmt(grandTotal.azure_true)}</td>
-                <td className="px-4 py-3 text-right text-sm font-bold font-mono text-blue-900">{fmt(grandTotal.total)}</td>
+                <td className="px-4 py-3 text-right text-sm font-extrabold font-mono text-orange-600">{fmt(grandTotal.aws)}</td>
+                <td className="px-4 py-3 text-right text-sm font-extrabold font-mono text-blue-500">{fmt(grandTotal.azure_actual)}</td>
+                <td className="px-4 py-3 text-right text-sm font-extrabold font-mono text-emerald-600">{fmt(grandTotal.azure_savings)}</td>
+                <td className="px-4 py-3 text-right text-sm font-extrabold font-mono text-blue-700">{fmt(grandTotal.azure_true)}</td>
+                <td className="px-4 py-3 text-right text-sm font-extrabold font-mono text-blue-900">{fmt(grandTotal.total)}</td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
 
-      <p className="text-xs text-gray-400 mt-3">
-        {selectedMonth.start} → {selectedMonth.end} · <span className="text-green-600 font-semibold">Acct</span> = account-level · Azure True Cost = amortized (RI/SP allocated)
+      <p className="text-xs text-blue-400 mt-3 font-medium">
+        {selectedMonth.start} → {selectedMonth.end}
+        {showINR && inrRate && <span className="ml-2 text-emerald-500">· 1 USD = ₹{inrRate.toFixed(2)}</span>}
+        {sflFilter !== "all" && <span className="ml-2 text-blue-500">· Filtered: {sflFilter}</span>}
       </p>
     </div>
   );

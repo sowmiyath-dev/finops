@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx";
 import {
   AppMapping,
+  APP_VERTICAL_MAP,
   NOVAC_SHARED_SERVICES_ID, NOVAC_PAYER_ID,
   SFL_SHARED_ID, SFL_PROD_ID, SFL_UAT_ID,
 } from "./awsMonthlyReportConfig";
@@ -37,8 +38,6 @@ function ctTotal(ct: CTData) {
 }
 
 // ── Sheet 1: Master ───────────────────────────────────────────────────────────
-// Cost = totalCost column (costInINR + sharedCost) for regular Novac accounts
-// For Redington (payer): trueCost × rate
 function buildMasterSheet(
   ctDataList: CTData[],
   rate: number,
@@ -53,36 +52,39 @@ function buildMasterSheet(
   }
 
   const rows: any[][] = [
-    [boldStr("Application Name"), boldStr("Cost in INR"), boldStr("Note")],
+    [boldStr("Application Name"), boldStr("Vertical"), boldStr("Cost (USD)"), boldStr("Cost in INR"), boldStr("Note")],
   ];
 
-  let grandTotal = 0;
+  let grandTotalUsd = 0;
+  let grandTotalInr = 0;
   for (const m of mappings) {
-    let costInr = 0;
+    let costUsd = 0;
     for (const { accountId, fraction = 1 } of m.accounts) {
       if (accountId === "__CT_AUTOMALL__") {
         const ct = ctDataList.find((c) => c.ctName.toLowerCase().includes("automall"));
-        costInr += (ct ? ctTotal(ct) : 0) * rate * fraction;
+        costUsd += (ct ? ctTotal(ct) : 0) * fraction;
       } else if (accountId === "__CT_INDOSTAR__") {
         const ct = ctDataList.find((c) => c.ctName.toLowerCase().includes("indostar"));
-        costInr += (ct ? ctTotal(ct) : 0) * rate * fraction;
+        costUsd += (ct ? ctTotal(ct) : 0) * fraction;
       } else if (accountId === NOVAC_PAYER_ID) {
-        // Redington: trueCost × rate (its own USD cost converted to INR)
-        costInr += (accMap.get(accountId) || 0) * rate * fraction;
+        costUsd += (accMap.get(accountId) || 0) * fraction;
       } else if (novacTotalCostMap.has(accountId)) {
-        // Regular Novac account: use total cost (after shared split) from Novac sheet
-        costInr += (novacTotalCostMap.get(accountId) || 0) * fraction;
+        // totalCostMap stores INR already — convert back to USD for USD column
+        costUsd += ((novacTotalCostMap.get(accountId) || 0) / rate) * fraction;
       } else {
-        costInr += (accMap.get(accountId) || 0) * rate * fraction;
+        costUsd += (accMap.get(accountId) || 0) * fraction;
       }
     }
-    grandTotal += costInr;
-    rows.push([m.appName, inrCell(costInr), m.note]);
+    const costInr = costUsd * rate;
+    grandTotalUsd += costUsd;
+    grandTotalInr += costInr;
+    const vertical = APP_VERTICAL_MAP[m.appName] || "";
+    rows.push([m.appName, vertical, usdCell(costUsd), inrCell(costInr), m.note]);
   }
-  rows.push([boldStr("Total"), inrCell(grandTotal), ""]);
+  rows.push([boldStr("Total"), "", usdCell(grandTotalUsd), inrCell(grandTotalInr), ""]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  setWidths(ws, [28, 18, 52]);
+  setWidths(ws, [28, 14, 16, 18, 52]);
   return ws;
 }
 

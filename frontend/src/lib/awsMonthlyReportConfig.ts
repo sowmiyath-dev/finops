@@ -14,6 +14,29 @@ export const WH_CT_ACCOUNT_ID         = "339712884147";
 export const CN_ACCOUNT_IDS           = ["730335499592", "890742572706", "471112760393"];
 export const SFL_RND_ID               = "078418245182";  // SFL-RnD (leading zero)
 
+// SFL / Non-SFL vertical classification
+export const APP_VERTICAL_MAP: Record<string, "SFL" | "Non - SFL"> = {
+  "Finergy":              "Non - SFL",
+  "Pahal":               "Non - SFL",
+  "SLIC":                "Non - SFL",
+  "SGIC":                "Non - SFL",
+  "LMS":                 "Non - SFL",
+  "Nestavia":            "Non - SFL",
+  "SFL - Credacc":       "SFL",
+  "Immerz":              "Non - SFL",
+  "IDC":                 "Non - SFL",
+  "Devops":              "SFL",
+  "Digital":             "SFL",
+  "SFL-RnD":             "SFL",
+  "NTS-Development":     "Non - SFL",
+  "Payer account Novac": "Non - SFL",
+  "SFL":                 "SFL",
+  "Automall":            "Non - SFL",
+  "Indostar":            "Non - SFL",
+  "NOVACwonderlendhubs": "SFL",
+  "Novac Credit Nirvana":"SFL",
+};
+
 export const DEFAULT_APP_MAPPINGS: AppMapping[] = [
   { appName: "Finergy",              note: "Novac-EBS 80%",                                         accounts: [{ accountId: "583617605382", fraction: 0.8 }] },
   { appName: "Pahal",                note: "Novac-EBS 20%",                                         accounts: [{ accountId: "583617605382", fraction: 0.2 }] },
