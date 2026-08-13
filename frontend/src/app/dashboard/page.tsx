@@ -94,8 +94,8 @@ function MappingRow({
   if (!editing) {
     return (
       <tr className="hover:bg-blue-50 transition" style={{ borderBottom: "1px solid #e2e8f0" }}>
-        <td className="px-4 py-3 text-sm font-semibold text-slate-800">{row.appName}</td>
-        <td className="px-4 py-3">
+        <td className="px-4 py-3 text-sm font-semibold text-slate-800 whitespace-nowrap">{row.appName}</td>
+        <td className="px-4 py-3 text-center">
           <span className={`inline-block text-xs font-bold px-2.5 py-0.5 rounded-full whitespace-nowrap ${
             vertical === "SFL" ? "bg-blue-100 text-blue-700" : vertical === "Non - SFL" ? "bg-violet-100 text-violet-700" : "bg-gray-100 text-gray-500"
           }`}>{vertical}</span>
@@ -604,16 +604,16 @@ export default function DashboardPage() {
           {/* Table */}
           <table className="w-full" style={{ borderCollapse: "collapse" }}>
             <colgroup>
-              <col style={{ width: "38%" }} />
+              <col style={{ width: "30%" }} />
+              <col style={{ width: "12%" }} />
+              <col style={{ width: "22%" }} />
+              <col style={{ width: "22%" }} />
               <col style={{ width: "14%" }} />
-              <col style={{ width: "20%" }} />
-              <col style={{ width: "20%" }} />
-              <col style={{ width: "8%" }} />
             </colgroup>
             <thead>
               <tr style={{ background: "linear-gradient(90deg,#0f2d5e 0%,#1e4d8c 100%)" }}>
                 <th className="text-left text-xs font-bold uppercase tracking-wider text-white px-4 py-3">Application Name</th>
-                <th className="text-left text-xs font-bold uppercase tracking-wider text-white px-4 py-3">Vertical</th>
+                <th className="text-center text-xs font-bold uppercase tracking-wider text-white px-4 py-3">Vertical</th>
                 <th className="text-right text-xs font-bold uppercase tracking-wider text-white px-4 py-3">Cost (USD)</th>
                 <th className="text-right text-xs font-bold uppercase tracking-wider text-white px-4 py-3">
                   Cost (INR){costLoading && <span className="ml-1 text-[9px] text-blue-200 font-normal animate-pulse">loading...</span>}
