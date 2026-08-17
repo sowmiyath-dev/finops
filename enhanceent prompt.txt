@@ -62,3 +62,30 @@ Total	₹ 1,30,86,333.73
 
 
 
+this storage account 	
+finoptixcostexports(storage account name)have 2 conatiners
+
+1. cost-exports
+2.finoptixcostexports
+
+
+1. cost-exports(container name)
+
+and here jan -may and augist cost is in cost-exports containers inside this container we have 4 folders 
+finoptix-actualcost - jan -may actual cost
+finoptix-amortizedcost - jan- may amortized cost
+finoptix-daily/all-subs-daily-actualcost - actualcost august daiy cost  --------------this is a folder daily sync has to check and update n-7 days daily as delete and update for actual cost 
+finoptix-daily-amortizedcost/all-subs-daily-amortizedcost - amotized august cost--------------this is a folder daily sync has to check and update n-7 days daily as delete and update for amortized cost 
+
+2.finoptixcostexports(container name)
+
+and the finoptixcostexports container have cost exports folder inside we have 
+
+1. finoptix-actualcost - this have 2 folder finoptix-actualcost-july2026 - July actual cost
+finoptix-actualcost-june2026 - June actual cost 
+2. finoptix-amortizedcost this have 2 folder finoptix-amortizedcost-july2026 -July amortized cost
+finoptix-amortizedcost-june2026 - June amortized cost 
+
+
+
+

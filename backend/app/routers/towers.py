@@ -476,8 +476,11 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
             end_date = today.isoformat()
             logger.info(f"Azure full sync for CT {ct_id}: {start_date} to {end_date}")
         else:
-            # Cover last 3 days of previous month to catch late Azure billing finalization
-            start_date = min(today.replace(day=1), today - timedelta(days=3)).isoformat()
+            # Incremental daily sync: cover last 7 days + start of current month
+            # to catch late Azure billing finalization.
+            # Use n-7 so daily blobs (which accumulate in one month folder) are
+            # deleted and re-inserted for exactly the days we re-fetch.
+            start_date = (today - timedelta(days=7)).isoformat()
             end_date = today.isoformat()
             logger.info(f"Azure daily sync for CT {ct_id}: {start_date} to {end_date}")
 
@@ -531,33 +534,31 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
             _sync_progress[ct_id] = {"percent": 0, "status": "failed", "message": "No export files found"}
             return
 
-        # Delete only the months in the sync range (exact, no over/under deletion)
-        full_month_start, full_month_end = get_full_month_range_for_dates(start_date, end_date)
-        blob_months: set[tuple] = set()
-        cur = full_month_start
-        while cur <= full_month_end:
-            blob_months.add((cur.year, cur.month))
-            cur = cur.replace(year=cur.year + 1, month=1, day=1) if cur.month == 12 else cur.replace(month=cur.month + 1, day=1)
+        # For daily/incremental syncs delete only the exact date range being re-fetched.
+        # For full-month syncs (month_only or first sync) delete the full calendar months.
+        # This prevents wiping Jan-May monthly data when doing an August daily sync.
+        if month_only:
+            # month_only: delete the exact calendar month
+            delete_start = date.fromisoformat(start_date)
+            delete_end = date.fromisoformat(end_date)
+        else:
+            # incremental/forced: delete only the exact requested date range
+            delete_start = date.fromisoformat(start_date)
+            delete_end = date.fromisoformat(end_date)
 
-        for yr, mo in sorted(blob_months):
-            mo_start = date(yr, mo, 1)
-            if mo == 12:
-                mo_end = date(yr + 1, 1, 1) - timedelta(days=1)
-            else:
-                mo_end = date(yr, mo + 1, 1) - timedelta(days=1)
-            logger.info(f"Azure sync -- deleting month {mo_start} to {mo_end} before re-insert")
-            async with SyncSessionLocal() as db:
-                await db.execute(
-                    delete(AzureCostRecord).where(
-                        AzureCostRecord.control_tower_id == ct_id,
-                        AzureCostRecord.date >= mo_start,
-                        AzureCostRecord.date <= mo_end,
-                    )
+        logger.info(f"Azure sync -- deleting {delete_start} to {delete_end} before re-insert")
+        async with SyncSessionLocal() as db:
+            await db.execute(
+                delete(AzureCostRecord).where(
+                    AzureCostRecord.control_tower_id == ct_id,
+                    AzureCostRecord.date >= delete_start,
+                    AzureCostRecord.date <= delete_end,
                 )
-                await db.commit()
+            )
+            await db.commit()
 
-        stream_start = full_month_start.isoformat()
-        stream_end = full_month_end.isoformat()
+        stream_start = delete_start.isoformat()
+        stream_end = delete_end.isoformat()
 
         total_inserted = 0
         import uuid as _uuid3

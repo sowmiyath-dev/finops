@@ -251,8 +251,8 @@ async def check_delete_timeout():
     from sqlalchemy import text
     import uuid as _uuid
     today = date.today()
-    start = (today.replace(day=1)).isoformat()
-    end = today.isoformat()
+    start = today.replace(day=1)
+    end = today
     try:
         async with SyncSessionLocal() as db:
             t0 = time.time()
