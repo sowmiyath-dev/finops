@@ -1133,6 +1133,93 @@ async def sync_all_azure(
     return {"message": f"Sync triggered for {len(cts)} Azure control tower(s)", "ids": [str(ct.id) for ct in cts]}
 
 
+@router.post("/{ct_id}/sync-months-parallel")
+async def sync_months_parallel(
+    ct_id: str,
+    bg: BackgroundTasks,
+    year: int = Query(..., description="Year, e.g. 2026"),
+    months: str = Query(..., description="Comma-separated months, e.g. 1,2,3,4,5 or 'all'"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Sync multiple Azure months in parallel — each month runs as its own background task.
+    Use months=all to sync Jan through current month.
+    Example: months=1,2,3,4,5,6,7,8
+    """
+    if user.role == "viewer":
+        raise HTTPException(status_code=403, detail="Viewers cannot sync")
+    result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
+    ct = result.scalar_one_or_none()
+    if not ct or ct.cloud_provider != "azure":
+        raise HTTPException(status_code=404, detail="Azure control tower not found")
+
+    from datetime import date as dt_date
+    today = dt_date.today()
+
+    if months.strip().lower() == "all":
+        last_mo = today.month if today.year == year else 12
+        month_list = list(range(1, last_mo + 1))
+    else:
+        try:
+            month_list = [int(m.strip()) for m in months.split(",") if m.strip()]
+        except ValueError:
+            raise HTTPException(status_code=400, detail="months must be comma-separated integers or 'all'")
+
+    if not month_list:
+        raise HTTPException(status_code=400, detail="No months specified")
+
+    # Each month gets its own independent background task — truly parallel
+    for mo in month_list:
+        mo_start = dt_date(year, mo, 1).isoformat()
+        if mo == 12:
+            mo_end = dt_date(year + 1, 1, 1) - timedelta(days=1)
+        else:
+            mo_end = dt_date(year, mo + 1, 1) - timedelta(days=1)
+        bg.add_task(_do_azure_sync, ct_id, "parallel-month", mo_start, mo_end.isoformat())
+
+    labels = [f"{year}-{mo:02d}" for mo in month_list]
+    logger.info(f"Parallel month sync triggered for CT {ct_id}: {labels}")
+    return {"message": f"Parallel sync started for {len(month_list)} month(s)", "months": labels}
+
+
+@router.post("/{ct_id}/clear-stale-sync")
+async def clear_stale_sync(
+    ct_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Clear any stuck/stale sync state for a CT so a new sync can be triggered.
+    Marks all 'started' sync logs as failed and resets in-memory progress.
+    """
+    if user.role == "viewer":
+        raise HTTPException(status_code=403)
+    result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
+    ct = result.scalar_one_or_none()
+    if not ct:
+        raise HTTPException(status_code=404)
+
+    from sqlalchemy import text
+    import uuid as _uuid
+    async with SyncSessionLocal() as sdb:
+        r = await sdb.execute(
+            text("""
+                UPDATE sync_logs
+                SET status = 'failed',
+                    error_message = 'Manually cleared stale sync',
+                    finished_at = NOW()
+                WHERE control_tower_id = :ct_id AND status = 'started'
+            """)
+            .bindparams(ct_id=_uuid.UUID(ct_id))
+        )
+        await sdb.commit()
+        cleared_logs = r.rowcount
+
+    # Reset in-memory progress so new sync can start
+    _sync_progress.pop(ct_id, None)
+    logger.info(f"Cleared stale sync for CT {ct_id}: {cleared_logs} log(s) marked failed")
+    return {"message": f"Stale sync cleared. {cleared_logs} log(s) marked failed.", "ct_id": ct_id}
+
+
 @router.get("/{ct_id}/sync-status")
 async def sync_status(ct_id: str, user: User = Depends(get_current_user)):
     return _sync_progress.get(ct_id, {"percent": 0, "status": "idle", "message": ""})
