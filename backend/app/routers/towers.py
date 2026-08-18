@@ -406,6 +406,11 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
     """Sync cost data from Azure Cost Management Export.
     If month_only=(year, month) is given, syncs only that calendar month.
     """
+    # Guard against duplicate concurrent syncs for the same CT
+    current = _sync_progress.get(ct_id, {})
+    if current.get("status") == "running":
+        logger.warning(f"Azure sync already running for CT {ct_id} — skipping duplicate trigger")
+        return
     _sync_progress[ct_id] = {"percent": 0, "status": "running", "message": "Starting Azure sync"}
     sync_log_id = None
 
