@@ -17,8 +17,12 @@ router = APIRouter(prefix="/azure-costs", tags=["azure-costs"])
 
 # Simple in-memory cache
 _cache: dict = {}
-_CACHE_TTL = 3600  # 1 hour
-_CT_IDS_TTL = 300  # 5 min for user CT ids
+_CACHE_TTL = 300        # 5 min (was 1 hour — too stale after restart/sync)
+_CT_IDS_TTL = 300
+_HIST_CACHE_TTL = 3600  # 1 hour for historical closed months
+
+def _is_historical(start: date, end: date) -> bool:
+    return end < date.today().replace(day=1)
 
 def _cache_get(key: str, ttl: int = _CACHE_TTL):
     e = _cache.get(key)
@@ -26,8 +30,8 @@ def _cache_get(key: str, ttl: int = _CACHE_TTL):
         return e["d"]
     return None
 
-def _cache_set(key: str, data):
-    _cache[key] = {"d": data, "t": time.time()}
+def _cache_set(key: str, data, ttl: int = _CACHE_TTL):
+    _cache[key] = {"d": data, "t": time.time(), "ttl": ttl}
 
 
 def _parse_dates(start_date: Optional[str], end_date: Optional[str]):
@@ -146,7 +150,7 @@ async def cost_overview(
         },
         "subscriptions": subscriptions,
     }
-    _cache_set(cache_key, result)
+    _cache_set(cache_key, result, _HIST_CACHE_TTL if _is_historical(start, end) else _CACHE_TTL)
     return result
 
 
@@ -200,7 +204,7 @@ async def cost_summary(
     savings = max(0, actual - amortized)
     result = {"actual_cost": actual, "amortized_cost": amortized, "savings": savings,
               "sp_allocated": amortized, "true_cost": amortized if amortized > 0 else actual}
-    _cache_set(cache_key, result)
+    _cache_set(cache_key, result, _HIST_CACHE_TTL if _is_historical(start, end) else _CACHE_TTL)
     return result
 
 
@@ -238,7 +242,7 @@ async def cost_by_subscription(
             "actual_cost": actual, "amortized_cost": amortized,
             "savings": savings, "true_cost": true_cost,
         })
-    _cache_set(cache_key, result)
+    _cache_set(cache_key, result, _HIST_CACHE_TTL if _is_historical(start, end) else _CACHE_TTL)
     return result
 
 
@@ -283,7 +287,7 @@ async def cost_by_resource_group(
             "sp_allocated": amortized,
             "savings": savings, "true_cost": true_cost,
         })
-    _cache_set(cache_key, result)
+    _cache_set(cache_key, result, _HIST_CACHE_TTL if _is_historical(start, end) else _CACHE_TTL)
     return result
 
 
@@ -327,7 +331,7 @@ async def cost_by_service(
             "actual_cost": actual, "amortized_cost": amortized,
             "savings": savings, "true_cost": true_cost,
         })
-    _cache_set(cache_key, result)
+    _cache_set(cache_key, result, _HIST_CACHE_TTL if _is_historical(start, end) else _CACHE_TTL)
     return result
 
 
@@ -394,7 +398,7 @@ async def cost_by_tag(
             "actual_cost": actual, "amortized_cost": amortized,
             "savings": savings, "true_cost": amortized if amortized > 0 else actual,
         })
-    _cache_set(cache_key, result)
+    _cache_set(cache_key, result, _HIST_CACHE_TTL if _is_historical(start, end) else _CACHE_TTL)
     return result
 
 
@@ -464,7 +468,7 @@ async def daily_trend(
         }
         for r in actual_rows
     ]
-    _cache_set(cache_key, result)
+    _cache_set(cache_key, result, _HIST_CACHE_TTL if _is_historical(start, end) else _CACHE_TTL)
     return result
 
 
