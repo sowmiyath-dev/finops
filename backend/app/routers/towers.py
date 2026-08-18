@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 _sync_progress: dict = {}
 _executor = ThreadPoolExecutor(max_workers=8)
-_sync_semaphore = asyncio.Semaphore(3)
+_sync_semaphore = asyncio.Semaphore(5)
 
 
 # â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
