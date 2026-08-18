@@ -406,11 +406,17 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
     """Sync cost data from Azure Cost Management Export.
     If month_only=(year, month) is given, syncs only that calendar month.
     """
-    # Guard against duplicate concurrent syncs for the same CT
-    current = _sync_progress.get(ct_id, {})
-    if current.get("status") == "running":
-        logger.warning(f"Azure sync already running for CT {ct_id} — skipping duplicate trigger")
-        return
+    # Guard against duplicate concurrent syncs — check DB so it works across multiple workers
+    async with AsyncSessionLocal() as db:
+        from sqlalchemy import text as _guard_text
+        import uuid as _guard_uuid
+        _running = (await db.execute(
+            _guard_text("SELECT EXISTS(SELECT 1 FROM sync_logs WHERE control_tower_id = :ct_id AND status = 'started' AND started_at > NOW() - INTERVAL '30 minutes')")
+            .bindparams(ct_id=_guard_uuid.UUID(ct_id))
+        )).scalar()
+        if _running:
+            logger.warning(f"Azure sync already running for CT {ct_id} — skipping duplicate trigger")
+            return
     _sync_progress[ct_id] = {"percent": 0, "status": "running", "message": "Starting Azure sync"}
     sync_log_id = None
 
