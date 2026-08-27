@@ -30,7 +30,104 @@ function getCategoryForService(service: string): string {
   return "other";
 }
 
-function Spinner() {
+function getResourceDescription(r: any): { desc: string; attachment: string } {
+  const rid: string = r.resource_id || "";
+  const usageType: string = r.usage_type || "";
+  const operation: string = r.operation || "";
+  const ut = usageType.toLowerCase();
+  const at = r.attachment_tags || {};
+  const instanceType: string = r.instance_type || "";
+  const os: string = r.os || "";
+  const volumeType: string = r.volume_type || "";
+  const storageMedia: string = r.storage_media || "";
+  // usage_quantity is GB-months for EBS, hours for EC2
+  const qty: number = r.usage_quantity || 0;
+
+  const attachHint =
+    at["instance-id"] || at["instanceid"] || at["attached-to"] || at["attachedto"] ||
+    at["ec2-name"] || at["ec2name"] || at["source-instance"] || at["sourceinstance"] || "";
+  const volHint = at["volume-id"] || at["volumeid"] || at["source-volume"] || at["sourcevolume"] || "";
+
+  // EBS Volume
+  if (rid.startsWith("vol-")) {
+    // Prefer product/volumeApiName (gp3, io2 etc), fallback to usage_type parse
+    let vt = volumeType;
+    if (!vt) {
+      const m = usageType.match(/VolumeUsage\.?(\w+)?/i);
+      if (m?.[1]) vt = m[1];
+    }
+    const sizePart = qty > 0 ? ` · ${Math.round(qty)} GB` : "";
+    const mediaPart = storageMedia ? ` (${storageMedia})` : "";
+    const desc = vt ? `EBS Volume · ${vt}${mediaPart}${sizePart}` : `EBS Volume${mediaPart}${sizePart}`;
+    const attachment = attachHint ? `Attached to: ${attachHint}` : "";
+    return { desc, attachment };
+  }
+
+  // EBS Snapshot
+  if (rid.startsWith("snap-")) {
+    const sizePart = qty > 0 ? ` · ${Math.round(qty)} GB` : "";
+    const desc = `EBS Snapshot${sizePart}`;
+    const parts: string[] = [];
+    if (volHint) parts.push(`From volume: ${volHint}`);
+    if (attachHint) parts.push(`Instance: ${attachHint}`);
+    return { desc, attachment: parts.join(" · ") };
+  }
+
+  // EC2 Instance
+  if (rid.startsWith("i-")) {
+    // Prefer product/instanceType, fallback to usage_type parse
+    let itype = instanceType;
+    if (!itype) {
+      const m = usageType.match(/BoxUsage:(\S+)/i);
+      if (m) itype = m[1];
+    }
+    const osPart = os ? ` · ${os}` : "";
+    const desc = itype ? `EC2 Instance · ${itype}${osPart}` : `EC2 Instance${osPart}`;
+    return { desc, attachment: "" };
+  }
+
+  // Elastic IP
+  if (ut.includes("elasticip") || ut.includes("elastic-ip") || ut.includes("eip")) {
+    const idle = ut.includes("idle") || ut.includes("unassociated");
+    const desc = idle ? "Elastic IP · Idle / Unassociated" : "Elastic IP";
+    const attachment = attachHint ? `Associated with: ${attachHint}` : idle ? "Not attached to any instance" : "";
+    return { desc, attachment };
+  }
+
+  // ENI
+  if (rid.startsWith("eni-")) {
+    let desc = "Network Interface (ENI)";
+    if (ut.includes("natgateway") || ut.includes("nat-gateway")) desc = "NAT Gateway ENI";
+    else if (ut.includes("vpcendpoint") || ut.includes("vpc-endpoint")) desc = "VPC Endpoint ENI";
+    else if (ut.includes("transitgateway") || ut.includes("transit-gateway")) desc = "Transit Gateway ENI";
+    const attachment = attachHint ? `Attached to: ${attachHint}` : "";
+    return { desc, attachment };
+  }
+
+  // NAT Gateway
+  if (rid.startsWith("nat-") || ut.includes("natgateway")) {
+    const desc = ut.includes("bytes") ? "NAT Gateway · Data Transfer" : "NAT Gateway";
+    return { desc, attachment: "" };
+  }
+
+  // Load Balancer
+  if (rid.includes("loadbalancer") || rid.includes("app/") || rid.includes("net/")) {
+    let desc = "Load Balancer";
+    if (rid.includes("app/")) desc = "Application Load Balancer";
+    else if (rid.includes("net/")) desc = "Network Load Balancer";
+    return { desc, attachment: "" };
+  }
+
+  // RDS
+  if (rid.startsWith("db:") || rid.includes(":db:")) {
+    const desc = operation.toLowerCase().includes("snapshot") ? "RDS Snapshot" : "RDS Instance";
+    return { desc, attachment: "" };
+  }
+
+  return { desc: "", attachment: "" };
+}
+
+
   return (
     <div className="flex items-center justify-center h-48">
       <div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin border-blue-900" />
@@ -166,11 +263,18 @@ export default function AccountDetailPage() {
   const filteredResources = (selectedCategory
     ? resourcesByCategory[selectedCategory] || []
     : resourceData
-  ).filter((r: any) =>
-    !resourceSearch ||
-    r.resource_id?.toLowerCase().includes(resourceSearch.toLowerCase()) ||
-    r.service?.toLowerCase().includes(resourceSearch.toLowerCase())
-  );
+  ).filter((r: any) => {
+    if (!resourceSearch) return true;
+    const q = resourceSearch.toLowerCase();
+    const { desc, attachment } = getResourceDescription(r);
+    return (
+      r.resource_id?.toLowerCase().includes(q) ||
+      r.resource_name?.toLowerCase().includes(q) ||
+      r.service?.toLowerCase().includes(q) ||
+      desc.toLowerCase().includes(q) ||
+      attachment.toLowerCase().includes(q)
+    );
+  });
 
   const handleExport = async () => {
     try {
@@ -369,7 +473,7 @@ export default function AccountDetailPage() {
                 <input
                   value={resourceSearch}
                   onChange={(e) => setResourceSearch(e.target.value)}
-                  placeholder="Search resource ID or service..."
+                  placeholder="Search resource ID, name or service..."
                   className="w-full pl-9 pr-4 py-2 border border-gray-400 rounded-md text-sm text-black bg-white focus:outline-none focus:border-blue-900"
                 />
               </div>
@@ -404,11 +508,11 @@ export default function AccountDetailPage() {
 
             <div className="bg-white rounded-lg border border-gray-300 shadow-sm overflow-hidden">
               <div className="grid grid-cols-12 px-5 py-3 bg-gray-100 border-b-2 border-gray-300 text-xs font-bold uppercase tracking-wider text-black">
-                <span className="col-span-5">Resource ID</span>
+                <span className="col-span-3">Resource ID / Name</span>
+                <span className="col-span-3">Description / Attachment</span>
                 <span className="col-span-2">Service</span>
-                <span className="col-span-2">Account</span>
                 <span className="col-span-2">Region</span>
-                <span className="col-span-1 text-right">Cost</span>
+                <span className="col-span-2 text-right">Cost</span>
               </div>
               <div className="overflow-y-auto max-h-[500px]">
                 {resLoading ? (
@@ -419,17 +523,31 @@ export default function AccountDetailPage() {
                   <div className="text-center py-12 text-sm font-semibold text-black">
                     No resources found{resourceSearch ? ` for "${resourceSearch}"` : ""}.
                   </div>
-                ) : filteredResources.map((r: any, i: number) => (
-                  <div key={i} className="grid grid-cols-12 px-5 py-3 border-b border-gray-200 hover:bg-blue-50 transition">
-                    <span className="col-span-5 font-mono text-xs font-semibold text-black truncate">{r.resource_id}</span>
-                    <span className="col-span-2 text-xs font-semibold text-black truncate">{r.service}</span>
-                    <span className="col-span-2 text-xs font-semibold text-black truncate">{r.account_name || r.aws_account_id}</span>
-                    <span className="col-span-2 text-xs font-semibold text-black">{r.region || "—"}</span>
-                    <span className="col-span-1 text-right text-xs font-bold font-mono text-blue-900">
-                      ${r.cost.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
-                    </span>
-                  </div>
-                ))}
+                ) : filteredResources.map((r: any, i: number) => {
+                  const { desc, attachment } = getResourceDescription(r);
+                  return (
+                    <div key={i} className="grid grid-cols-12 px-5 py-3 border-b border-gray-200 hover:bg-blue-50 transition items-start">
+                      <span className="col-span-3 text-xs text-black">
+                        <span className="font-mono font-semibold truncate block">{r.resource_id}</span>
+                        {r.resource_name && (
+                          <span className="text-blue-700 font-semibold truncate block">{r.resource_name}</span>
+                        )}
+                      </span>
+                      <span className="col-span-3 text-xs text-black">
+                        {desc && <span className="font-semibold text-slate-700 block">{desc}</span>}
+                        {attachment && (
+                          <span className="text-amber-700 font-medium block truncate" title={attachment}>{attachment}</span>
+                        )}
+                        {!desc && !attachment && <span className="text-slate-300">—</span>}
+                      </span>
+                      <span className="col-span-2 text-xs font-semibold text-black truncate">{r.service}</span>
+                      <span className="col-span-2 text-xs font-semibold text-black">{r.region || "—"}</span>
+                      <span className="col-span-2 text-right text-xs font-bold font-mono text-blue-900">
+                        ${r.cost.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>

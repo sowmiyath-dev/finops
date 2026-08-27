@@ -307,6 +307,10 @@ async def resource_wise(f: ReportFilter, db: AsyncSession = Depends(get_db), use
             CostRecord.aws_account_id,
             CostRecord.account_name,
             CostRecord.region,
+            func.max(CostRecord.tags).label("tags"),
+            func.max(CostRecord.usage_type).label("usage_type"),
+            func.max(CostRecord.operation).label("operation"),
+            func.sum(CostRecord.usage_quantity).label("usage_quantity"),
             usage_cost_expr,
             actual_cost_expr,
         )
@@ -321,20 +325,43 @@ async def resource_wise(f: ReportFilter, db: AsyncSession = Depends(get_db), use
     result = await db.execute(stmt)
     rows = result.all()
 
-    return [
-        {
+    results = []
+    for row in rows:
+        try:
+            tags_dict = json.loads(row.tags) if row.tags else {}
+        except Exception:
+            tags_dict = {}
+        resource_name = tags_dict.get("Name") or tags_dict.get("name") or ""
+        # Collect attachment-related tags — common keys teams use
+        attachment_tags = {}
+        for k, v in tags_dict.items():
+            if k.lower() in {
+                "instance-id", "instanceid", "attached-to", "attachedto",
+                "ec2-name", "ec2name", "volume-id", "volumeid",
+                "source-instance", "sourceinstance", "source-volume", "sourcevolume",
+            }:
+                attachment_tags[k] = v
+        results.append({
             "resource_id": row.resource_id,
+            "resource_name": resource_name,
             "service": row.service,
             "aws_account_id": row.aws_account_id,
             "account_name": row.account_name or "",
             "region": row.region or "",
-            "cost": float(row.actual_cost or 0),  # backward compat
+            "usage_type": row.usage_type or "",
+            "operation": row.operation or "",
+            "attachment_tags": attachment_tags,
+            "instance_type": tags_dict.get("__instanceType", ""),
+            "os": tags_dict.get("__os", ""),
+            "volume_type": tags_dict.get("__volumeApiName") or tags_dict.get("__volumeType", ""),
+            "storage_media": tags_dict.get("__storageMedia", ""),
+            "usage_quantity": round(float(row.usage_quantity or 0), 2),
+            "cost": float(row.actual_cost or 0),
             "usage_cost": round(float(row.usage_cost or 0), 4),
             "actual_cost": round(float(row.actual_cost or 0), 4),
             "has_sp": round(float(row.actual_cost or 0), 4) != round(float(row.usage_cost or 0), 4),
-        }
-        for row in rows
-    ]
+        })
+    return results
 
 
 # ── Tag-wise report ───────────────────────────────────────────────────────────

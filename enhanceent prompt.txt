@@ -1,3 +1,12 @@
+psql "postgresql://finops:f1n0psdb123@finoptix-db.c3uq262eqkeg.ap-south-1.rds.amazonaws.com:5432/finops_db"
+
+
+
+
+
+
+
+
 my dashboard design has to e alterted in fromt page just control tower name list has to be there no sub account details . when i click on the control tower it has to show sub account names and Account wise cost breakdoen all that has to left navigation like aws portal and in all pages date selection has to be custom date range this month last month and custom date range and in left navigation panel has to be inside the account wise breakdown should have service wise cost resource wise cost and tag wise cost and in resource wise have filters to serach the resource and have category in resource for navigation like compute , network as in AWS portal. make sure to add filter search and custom date range + month selection option in all possible pages. i want to categorize the cost as service wise cost and in resorce cost make the category in 1st page like ec2 and inside the ec2 instance has to list simiaryly for other reources you can take aws app icon with category for reference. in cost trends the bar chart is unclar make the cost to appear when i touch the bar.
 
 ok now consider my application as a standalone application and i want to name this as Finoptix and i can host this is in either onprem/azure/aws/gcp and i want to integrate all clouds inside this application. i want to have the organization is a landing zone dashboard and inside that i want cloud(aws,azure,gcp) and according to my organization i want to add cummalative dashboard of all 3 cloud make that as a dashboard inside the organization and in dashboard i will later add many dashboard inside that now these control tower and reports get inside a cloud inside aws. and i want a feature to add custom tag to all resources in application not in portal and based on that tag i have to filter the cost for eg i have a project name samil in aws and azure and have an owner for it i want the cost fetch is like when i filter samil it have to show the project wise tag and add an option to add multiple tag to resources and make that as well to add bulk resources same tag at once. and inside a application make a left navigation bar add organization, alerts, setting --> user, group,alterts,email creation for alerts, optimization just now create a options with professional names later we add the functionality to it. after this i am planning to add azure cloud here.
@@ -85,6 +94,29 @@ and the finoptixcostexports container have cost exports folder inside we have
 finoptix-actualcost-june2026 - June actual cost 
 2. finoptix-amortizedcost this have 2 folder finoptix-amortizedcost-july2026 -July amortized cost
 finoptix-amortizedcost-june2026 - June amortized cost 
+
+https://finoptixcostexports.blob.core.windows.net/cost-exports/finoptix-actualcost/all-subs-actualcost-2026-01/20260101-20260131/all-subs-actualcost-2026-01_8523104a-c0b8-47d5-bb3f-193c6a0f0aeb.csv - Jan actual
+https://finoptixcostexports.blob.core.windows.net/cost-exports/finoptix-actualcost/all-subs-actualcost-2026-02/20260201-20260228/all-subs-actualcost-2026-02_2113ce18-06f7-42f1-9ae1-a9c63b1b298c.csv - Feb actual
+https://finoptixcostexports.blob.core.windows.net/cost-exports/finoptix-actualcost/all-subs-actualcost-2026-03/20260301-20260331/all-subs-actualcost-2026-03_75fe907c-b4f6-4f62-aa2f-d1f7558fcf5c.csv - March actual
+https://finoptixcostexports.blob.core.windows.net/cost-exports/finoptix-actualcost/all-subs-actualcost-2026-04/20260401-20260430/all-subs-actualcost-2026-04_7d7afb2e-d461-402e-a9c1-174415014f47.csv - April actual
+https://finoptixcostexports.blob.core.windows.net/cost-exports/finoptix-actualcost/all-subs-actualcost-2026-05/20260501-20260531/all-subs-actualcost-2026-05_cbddb6d5-0dba-4dec-ac3a-a181dd818dcc.csv - May actual
+
+https://finoptixcostexports.blob.core.windows.net/cost-exports/finoptix-amortizedcost/all-subs-amortizedcost-2026-01/20260101-20260131/all-subs-amortizedcost-2026-01_d438ad70-afea-4195-9fdd-30d67113506d.csv -Jan amortized
+https://finoptixcostexports.blob.core.windows.net/cost-exports/finoptix-amortizedcost/all-subs-amortizedcost-2026-01/20260101-20260131/all-subs-amortizedcost-2026-01_d438ad70-afea-4195-9fdd-30d67113506d.csv - Feb amortized
+https://finoptixcostexports.blob.core.windows.net/cost-exports/finoptix-amortizedcost/all-subs-amortizedcost-2026-03/20260301-20260331/all-subs-amortizedcost-2026-03_a785f2e1-f034-481d-995d-87bdfaf175ea.csv - March amortized
+https://finoptixcostexports.blob.core.windows.net/cost-exports/finoptix-amortizedcost/all-subs-amortizedcost-2026-04/20260401-20260430/all-subs-amortizedcost-2026-04_b79f1979-2579-4f03-8088-03fd88462a19.csv- April amortized
+https://finoptixcostexports.blob.core.windows.net/cost-exports/finoptix-amortizedcost/all-subs-amortizedcost-2026-05/20260501-20260531/all-subs-amortizedcost-2026-05_ceef18bc-7e37-484f-9fc6-f941de2f79ad.csv - May amortized
+
+https://finoptixcostexports.blob.core.windows.net/cost-exports/finoptix-daily-actualcost/all-subs-daily-actualcost/20260801-20260831/all-subs-daily-actualcost_0769feee-1220-445b-9ce4-8022611f7484.csv - august daily actual cost
+https://finoptixcostexports.blob.core.windows.net/cost-exports/finoptix-daily-amortizedcost/all-subs-daily-amortizedcost/20260801-20260831/all-subs-daily-amortizedcost_951a022f-af1c-4b3d-aaaa-9f9a6a2c1630.csv - august daily amortized
+
+https://finoptixcostexports.blob.core.windows.net/finoptixcostexports/cost-exports/finoptix-actualcost/finoptix-actualcost-july2026/finoptix-actualcost-july2026/20260701-20260731/finoptix-actualcost-july2026_3b5cd232-c7ce-4ee5-ae06-814bcbfb6901.csv - July 2026 actual cost
+https://finoptixcostexports.blob.core.windows.net/finoptixcostexports/cost-exports/finoptix-actualcost/finoptix-actualcost-june2026/finoptix-actualcost-june2026/20260601-20260630/finoptix-actualcost-june2026_55e0e591-cf63-48bf-9745-dccdcafa6c2b.csv - June 2026 actual cost
+
+https://finoptixcostexports.blob.core.windows.net/finoptixcostexports/cost-exports/finoptix-amortizedcost/finoptix-amortizedcost-july2026/finoptix-amortizedcost-july2026/20260701-20260731/finoptix-amortizedcost-july2026_978073e5-6fc1-4645-a684-4d2992be23dd.csv- July 2026 amortized cost
+
+https://finoptixcostexports.blob.core.windows.net/finoptixcostexports/cost-exports/finoptix-amortizedcost/finoptix-amortizedcost-june2026/finoptix-amortizedcost-june2026/20260601-20260630/finoptix-amortizedcost-june2026_80a899ec-cbb7-426d-8961-d219e9939ec7.csv - June 2026 amortized cost
+
 
 
 

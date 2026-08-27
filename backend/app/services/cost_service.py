@@ -131,6 +131,19 @@ def _parse_row(row: dict, start: date, end: date) -> Optional[dict]:
         if col.startswith("resourceTags/user:") and val:
             tags[col.replace("resourceTags/user:", "")] = val
 
+    # Capture product-level attributes useful for resource description
+    # stored under reserved keys prefixed with "__" to avoid collision with user tags
+    for src_col, tag_key in (
+        ("product/instanceType",    "__instanceType"),
+        ("product/operatingSystem", "__os"),
+        ("product/volumeType",      "__volumeType"),
+        ("product/volumeApiName",   "__volumeApiName"),
+        ("product/storageMedia",    "__storageMedia"),
+    ):
+        val = row.get(src_col, "").strip()
+        if val:
+            tags[tag_key] = val
+
     savings_arn = row.get("savingsPlan/SavingsPlanARN", "")
     reservation_id = row.get("reservation/SubscriptionId", "")
 
