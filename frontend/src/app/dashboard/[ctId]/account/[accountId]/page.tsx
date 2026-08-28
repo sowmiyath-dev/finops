@@ -127,7 +127,7 @@ function getResourceDescription(r: any): { desc: string; attachment: string } {
   return { desc: "", attachment: "" };
 }
 
-
+function Spinner() {
   return (
     <div className="flex items-center justify-center h-48">
       <div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin border-blue-900" />
