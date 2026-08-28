@@ -185,6 +185,7 @@ export default function CTDetailPage() {
   const [spResLoading, setSpResLoading] = useState(false);
   const [allSpResources, setAllSpResources] = useState<any[]>([]);
   const [allSpResLoading, setAllSpResLoading] = useState(false);
+  const [allSpResLoaded, setAllSpResLoaded] = useState(false);
 
   const openSpResources = async (accountId: string, accountName: string) => {
     setSpResourceModal({ accountId, accountName });
@@ -207,7 +208,7 @@ export default function CTDetailPage() {
       const res = await api.get("/reports/savings/resources", { params });
       setAllSpResources(res.data);
     } catch (e) { console.error(e); }
-    finally { setAllSpResLoading(false); }
+    finally { setAllSpResLoading(false); setAllSpResLoaded(true); }
   };
 
   useEffect(() => { if (!token) router.push("/auth"); }, [token]);
@@ -230,8 +231,7 @@ export default function CTDetailPage() {
   const ct = towers.find((t: any) => t.id === ctId);
   const subAccounts: any[] = ct?.sub_accounts || [];
 
-  // Removed auto-trigger — resource view loads only on explicit user click
-  useEffect(() => { setAllSpResources([]); }, [startDate, endDate, selectedAccounts]);
+  useEffect(() => { setAllSpResources([]); setAllSpResLoaded(false); }, [startDate, endDate, selectedAccounts]);
 
   const filter = {
     control_tower_ids: [ctId],
@@ -406,7 +406,7 @@ export default function CTDetailPage() {
                     Account Wise
                   </button>
                   <button
-                    onClick={() => { setAllSpResources([]); setTrueCostView("resource"); loadAllSpResources(); }}
+                    onClick={() => { setAllSpResources([]); setAllSpResLoaded(false); setTrueCostView("resource"); loadAllSpResources(); }}
                     className={`px-3 py-1 text-xs font-bold border-l border-gray-300 transition ${
                       trueCostView === "resource" ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-gray-50"
                     }`}>
@@ -603,13 +603,18 @@ export default function CTDetailPage() {
                       <div className="flex items-center justify-center h-32">
                         <RefreshCw className="w-5 h-5 animate-spin text-blue-900" />
                       </div>
-                    ) : allSpResources.length === 0 ? (
+                    ) : !allSpResLoaded ? (
                       <div className="p-10 text-center">
                         <p className="text-sm text-black mb-3">Click to load SP covered resources for this period.</p>
                         <button onClick={loadAllSpResources}
                           className="px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold rounded-md transition">
                           Load Resources
                         </button>
+                      </div>
+                    ) : allSpResources.length === 0 ? (
+                      <div className="p-10 text-center">
+                        <p className="text-sm text-black">No Savings Plan covered resources found for this period.</p>
+                        <p className="text-xs text-gray-500 mt-1">This account may not have any active Savings Plans.</p>
                       </div>
                     ) : (
                       <table className="w-full">
