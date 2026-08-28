@@ -177,6 +177,8 @@ export default function CTDetailPage() {
   const [selectedChargeTypes, setSelectedChargeTypes] = useState<string[]>(DEFAULT_CHARGE_TYPES);
   const [chargeFilterOpen, setChargeFilterOpen] = useState(false);
   const [accountDropdownOpen, setAccountDropdownOpen] = useState(false);
+  const [accountSearch, setAccountSearch] = useState("");
+  const [pendingAccounts, setPendingAccounts] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState("service");
   const [showTrueCost] = useState(true);
   const [trueCostView, setTrueCostView] = useState<"account" | "sp_resource">("account");
@@ -544,7 +546,7 @@ export default function CTDetailPage() {
                 </div>
                 <div className="relative">
                   <button
-                    onClick={() => setAccountDropdownOpen(!accountDropdownOpen)}
+                    onClick={() => { setPendingAccounts(selectedAccounts); setAccountSearch(""); setAccountDropdownOpen(!accountDropdownOpen); }}
                     className="flex items-center gap-2 px-3 py-1.5 border border-gray-400 rounded-md text-xs font-bold text-black bg-white hover:border-blue-900 transition min-w-[180px] justify-between">
                     <span>
                       {selectedAccounts.length === 0
@@ -554,49 +556,66 @@ export default function CTDetailPage() {
                     <ChevronRight className={`w-3.5 h-3.5 transition-transform ${accountDropdownOpen ? "rotate-90" : ""}`} />
                   </button>
                   {accountDropdownOpen && (
-                    <div className="absolute right-0 top-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-20 min-w-[220px]">
+                    <div className="absolute right-0 top-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-20 min-w-[240px]">
                       <div className="p-2 border-b border-gray-100">
+                        <input
+                          type="text"
+                          value={accountSearch}
+                          onChange={(e) => setAccountSearch(e.target.value)}
+                          placeholder="Search by name or account ID..."
+                          className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded-md outline-none focus:border-blue-900"
+                          autoFocus
+                        />
+                      </div>
+                      <div className="p-1.5 border-b border-gray-100">
                         <button
-                          onClick={() => { setSelectedAccounts([]); setAccountDropdownOpen(false); }}
+                          onClick={() => setPendingAccounts([])}
                           className={`w-full text-left px-3 py-1.5 text-xs font-bold rounded transition ${
-                            selectedAccounts.length === 0 ? "bg-blue-900 text-white" : "text-black hover:bg-gray-100"
+                            pendingAccounts.length === 0 ? "bg-blue-900 text-white" : "text-black hover:bg-gray-100"
                           }`}>
                           All Accounts
                         </button>
                       </div>
-                      <div className="max-h-48 overflow-y-auto p-2 space-y-0.5">
-                        {subAccounts.map((acc: any) => {
-                          const selected = selectedAccounts.includes(acc.aws_account_id);
-                          return (
-                            <label key={acc.aws_account_id}
-                              className="flex items-center gap-2 px-3 py-1.5 rounded cursor-pointer hover:bg-gray-50 transition">
-                              <input
-                                type="checkbox"
-                                checked={selected}
-                                onChange={() => setSelectedAccounts((prev) =>
-                                  selected
-                                    ? prev.filter((a) => a !== acc.aws_account_id)
-                                    : [...prev, acc.aws_account_id]
-                                )}
-                                className="w-3.5 h-3.5 accent-blue-900"
-                              />
-                              <div className="min-w-0">
-                                <div className="text-xs font-semibold text-black truncate">{acc.account_name}</div>
-                                <div className="text-[10px] font-mono text-gray-500">{acc.aws_account_id}</div>
-                              </div>
-                            </label>
-                          );
-                        })}
+                      <div className="max-h-48 overflow-y-auto p-1.5 space-y-0.5">
+                        {subAccounts
+                          .filter((acc: any) =>
+                            !accountSearch ||
+                            acc.account_name.toLowerCase().includes(accountSearch.toLowerCase()) ||
+                            acc.aws_account_id.includes(accountSearch)
+                          )
+                          .map((acc: any) => {
+                            const checked = pendingAccounts.includes(acc.aws_account_id);
+                            return (
+                              <label key={acc.aws_account_id}
+                                className="flex items-center gap-2 px-3 py-1.5 rounded cursor-pointer hover:bg-gray-50 transition">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => setPendingAccounts((prev) =>
+                                    checked ? prev.filter((a) => a !== acc.aws_account_id) : [...prev, acc.aws_account_id]
+                                  )}
+                                  className="w-3.5 h-3.5 accent-blue-900"
+                                />
+                                <div className="min-w-0">
+                                  <div className="text-xs font-semibold text-black truncate">{acc.account_name}</div>
+                                  <div className="text-[10px] font-mono text-gray-500">{acc.aws_account_id}</div>
+                                </div>
+                              </label>
+                            );
+                          })}
                       </div>
-                      {selectedAccounts.length > 0 && (
-                        <div className="p-2 border-t border-gray-100">
-                          <button
-                            onClick={() => setSelectedAccounts([])}
-                            className="w-full text-xs font-bold text-red-600 hover:text-red-700 transition">
-                            Clear selection
-                          </button>
-                        </div>
-                      )}
+                      <div className="p-2 border-t border-gray-100 flex items-center justify-between gap-2">
+                        <button
+                          onClick={() => setPendingAccounts([])}
+                          className="text-xs font-bold text-red-500 hover:text-red-700 transition">
+                          Clear
+                        </button>
+                        <button
+                          onClick={() => { setSelectedAccounts(pendingAccounts); setAccountDropdownOpen(false); }}
+                          className="px-4 py-1.5 bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold rounded-md transition">
+                          OK
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -837,8 +856,11 @@ export default function CTDetailPage() {
                       const rows = (tabData as any[]).map((r: any) => [r.service || "-", r.usage_cost?.toFixed(2) || "0", r.actual_cost?.toFixed(2) || "0"]);
                       downloadCSV(`service-wise-${ct?.name}-${startDate}-${endDate}.csv`, [headers, ...rows]);
                     } else if (activeTab === "resource") {
-                      const headers = ["Resource ID", "Service", "Region", "Usage Cost (USD)", "Actual Cost (USD)"];
-                      const rows = (tabData as any[]).map((r: any) => [r.resource_id || "-", r.service || "-", r.region || "-", r.usage_cost?.toFixed(2) || "0", r.actual_cost?.toFixed(2) || "0"]);
+                      const headers = ["Resource ID", "Resource Name", "Description", "Attachment", "Service", "Region", "Usage Cost (USD)", "True Cost incl SP (USD)"];
+                      const rows = (tabData as any[]).map((r: any) => {
+                        const { desc, attachment } = getResourceDescription(r);
+                        return [r.resource_id || "-", r.resource_name || "-", desc || "-", attachment || "-", r.service || "-", r.region || "-", r.usage_cost?.toFixed(2) || "0", r.actual_cost?.toFixed(2) || "0"];
+                      });
                       downloadCSV(`resource-wise-${ct?.name}-${startDate}-${endDate}.csv`, [headers, ...rows]);
                     } else {
                       const headers = ["Tag Key", "Tag Value", "Usage Cost (USD)", "Actual Cost (USD)"];
