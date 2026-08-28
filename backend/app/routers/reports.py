@@ -308,7 +308,13 @@ async def resource_wise(f: ReportFilter, db: AsyncSession = Depends(get_db), use
             CostRecord.account_name,
             CostRecord.region,
             func.max(CostRecord.tags).label("tags"),
-            func.max(CostRecord.usage_type).label("usage_type"),
+            func.max(
+                case(
+                    (CostRecord.usage_type.like("BoxUsage:%"), CostRecord.usage_type),
+                    (CostRecord.usage_type.like("%BoxUsage:%"), CostRecord.usage_type),
+                    else_=None,
+                )
+            ).label("usage_type"),
             func.max(CostRecord.operation).label("operation"),
             func.sum(CostRecord.usage_quantity).label("usage_quantity"),
             usage_cost_expr,

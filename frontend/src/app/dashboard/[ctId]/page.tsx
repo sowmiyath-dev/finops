@@ -120,22 +120,22 @@ function getResourceDescription(r: any): { desc: string; attachment: string } {
   if (rid.startsWith("vol-")) {
     let vt = volumeType;
     if (!vt) { const m = usageType.match(/VolumeUsage\.?(\w+)?/i); if (m?.[1]) vt = m[1]; }
-    const sizePart = qty > 0 ? ` · ${Math.round(qty)} GB` : "";
+    const sizePart = qty > 0 ? ` | ${Math.round(qty)} GB` : "";
     const mediaPart = storageMedia ? ` (${storageMedia})` : "";
-    const desc = vt ? `EBS Volume · ${vt}${mediaPart}${sizePart}` : `EBS Volume${mediaPart}${sizePart}`;
+    const desc = vt ? `EBS Volume | ${vt}${mediaPart}${sizePart}` : `EBS Volume${mediaPart}${sizePart}`;
     const attachment = attachedInstance ? `Attached to instance: ${attachedInstance}` : "";
     return { desc, attachment };
   }
 
   // EBS Snapshot
   if (rid.startsWith("snap-")) {
-    const sizePart = qty > 0 ? ` · ${Math.round(qty)} GB` : "";
-    const tier = r.snapshot_tier ? ` · ${r.snapshot_tier}` : "";
+    const sizePart = qty > 0 ? ` | ${Math.round(qty)} GB` : "";
+    const tier = r.snapshot_tier ? ` | ${r.snapshot_tier}` : "";
     const desc = `EBS Snapshot${sizePart}${tier}`;
     const parts: string[] = [];
     if (sourceVolume) parts.push(`Source volume: ${sourceVolume}`);
     if (attachedInstance) parts.push(`Instance: ${attachedInstance}`);
-    return { desc, attachment: parts.join(" · ") };
+    return { desc, attachment: parts.join(" | ") };
   }
 
   // AMI
@@ -149,8 +149,8 @@ function getResourceDescription(r: any): { desc: string; attachment: string } {
   if (rid.startsWith("i-")) {
     let itype = instanceType;
     if (!itype) { const m = usageType.match(/BoxUsage:(\S+)/i); if (m) itype = m[1]; }
-    const osPart = os ? ` · ${os}` : "";
-    return { desc: itype ? `EC2 Instance · ${itype}${osPart}` : `EC2 Instance${osPart}`, attachment: "" };
+    const osPart = os ? ` | ${os}` : "";
+    return { desc: itype ? `EC2 Instance | ${itype}${osPart}` : `EC2 Instance${osPart}`, attachment: "" };
   }
 
   // Elastic IP
@@ -158,7 +158,7 @@ function getResourceDescription(r: any): { desc: string; attachment: string } {
     const idle = ut.includes("idle") || ut.includes("unassociated");
     const assocInstance = tag("aws:ec2:association/instance-id", "instance-id", "instanceid", "attached-to");
     return {
-      desc: idle ? "Elastic IP · Idle / Unassociated" : "Elastic IP",
+      desc: idle ? "Elastic IP | Idle / Unassociated" : "Elastic IP",
       attachment: assocInstance ? `Associated with: ${assocInstance}` : idle ? "Not attached to any instance" : "",
     };
   }
@@ -174,7 +174,7 @@ function getResourceDescription(r: any): { desc: string; attachment: string } {
   }
 
   if (rid.startsWith("nat-") || ut.includes("natgateway"))
-    return { desc: ut.includes("bytes") ? "NAT Gateway · Data Transfer" : "NAT Gateway", attachment: "" };
+    return { desc: ut.includes("bytes") ? "NAT Gateway | Data Transfer" : "NAT Gateway", attachment: "" };
   if (rid.includes("loadbalancer") || rid.includes("app/") || rid.includes("net/"))
     return { desc: rid.includes("app/") ? "Application Load Balancer" : rid.includes("net/") ? "Network Load Balancer" : "Load Balancer", attachment: "" };
   if (rid.startsWith("db:") || rid.includes(":db:"))

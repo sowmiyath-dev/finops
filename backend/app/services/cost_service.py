@@ -149,6 +149,15 @@ def _parse_row(row: dict, start: date, end: date) -> Optional[dict]:
         if val:
             tags[tag_key] = val
 
+    # For EC2: if product/instanceType is missing, extract from lineItem/UsageType BoxUsage:TYPE
+    if not tags.get("__instanceType"):
+        ut = row.get("lineItem/UsageType", "")
+        if ":" in ut:
+            candidate = ut.split(":")[-1]
+            # Only use if it looks like an instance type (e.g. m5a.large, t3.micro)
+            if "." in candidate and not candidate.startswith("EBS"):
+                tags["__instanceType"] = candidate
+
     savings_arn = row.get("savingsPlan/SavingsPlanARN", "")
     reservation_id = row.get("reservation/SubscriptionId", "")
 
