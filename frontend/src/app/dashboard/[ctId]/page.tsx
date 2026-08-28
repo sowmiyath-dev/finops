@@ -270,7 +270,13 @@ export default function CTDetailPage() {
     : activeTab === "resource" ? "/reports/resource-wise"
     : "/reports/tag-wise";
 
-  const tabFilter = { ...filter, group_by: activeTab, granularity: "monthly" };
+  const tabFilter = {
+    ...filter,
+    group_by: activeTab,
+    granularity: "monthly",
+    // For resource tab always include SP rows so actual_cost reflects true cost (usage + SP amortized)
+    ...(activeTab === "resource" ? { charge_types: null } : {}),
+  };
 
   const { data: tabData = [], isLoading: tabLoading } = useQuery({
     queryKey: ["ct-tab", ctId, activeTab, startDate, endDate, selectedAccounts, selectedChargeTypes],
@@ -884,7 +890,8 @@ export default function CTDetailPage() {
                         )}
                         {activeTab === "resource" && (
                           <>
-                            <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Resource ID / Name</th>
+                            <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Resource ID</th>
+                            <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Resource Name</th>
                             <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Description</th>
                             <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Service</th>
                             <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Region</th>
@@ -897,7 +904,7 @@ export default function CTDetailPage() {
                           </>
                         )}
                         <th className="text-right text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Usage Cost</th>
-                        <th className="text-right text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Actual Cost</th>
+                        <th className="text-right text-xs font-bold uppercase tracking-wider text-black px-4 py-2">{activeTab === "resource" ? "True Cost (incl. SP)" : "Actual Cost"}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -908,11 +915,9 @@ export default function CTDetailPage() {
                           )}
                           {activeTab === "resource" && (
                             <>
+                              <td className="px-4 py-2.5 text-xs font-mono font-semibold text-black max-w-[160px] truncate">{row.resource_id}</td>
+                              <td className="px-4 py-2.5 text-xs text-blue-700 font-semibold max-w-[140px] truncate">{row.resource_name || <span className="text-gray-300">—</span>}</td>
                               <td className="px-4 py-2.5 text-xs text-black max-w-[180px]">
-                                <span className="font-mono font-semibold block truncate">{row.resource_id}</span>
-                                {row.resource_name && <span className="text-blue-700 font-semibold block truncate">{row.resource_name}</span>}
-                              </td>
-                              <td className="px-4 py-2.5 text-xs text-black max-w-[200px]">
                                 {(() => { const { desc, attachment } = getResourceDescription(row); return (<>
                                   {desc && <span className="font-semibold text-slate-700 block">{desc}</span>}
                                   {attachment && <span className="text-amber-700 font-medium block truncate" title={attachment}>{attachment}</span>}
