@@ -75,6 +75,67 @@ function downloadCSV(filename: string, rows: string[][]) {
 // Cost column header keywords — these columns get numeric cells + left alignment
 const COST_HEADERS = new Set(["Usage Cost", "SP Allocated", "True Cost", "Actual Cost", "Savings", "On-Demand Equiv", "On-Demand Cost", "Uncovered Cost", "Cost (USD)", "Usage Cost (USD)", "Actual Cost (USD)"]);
 
+function getResourceDescription(r: any): { desc: string; attachment: string } {
+  const rid: string = r.resource_id || "";
+  const usageType: string = r.usage_type || "";
+  const operation: string = r.operation || "";
+  const ut = usageType.toLowerCase();
+  const at = r.attachment_tags || {};
+  const instanceType: string = r.instance_type || "";
+  const os: string = r.os || "";
+  const volumeType: string = r.volume_type || "";
+  const storageMedia: string = r.storage_media || "";
+  const qty: number = r.usage_quantity || 0;
+
+  const attachHint =
+    at["instance-id"] || at["instanceid"] || at["attached-to"] || at["attachedto"] ||
+    at["ec2-name"] || at["ec2name"] || at["source-instance"] || at["sourceinstance"] || "";
+  const volHint = at["volume-id"] || at["volumeid"] || at["source-volume"] || at["sourcevolume"] || "";
+
+  if (rid.startsWith("vol-")) {
+    let vt = volumeType;
+    if (!vt) { const m = usageType.match(/VolumeUsage\.?(\w+)?/i); if (m?.[1]) vt = m[1]; }
+    const sizePart = qty > 0 ? ` · ${Math.round(qty)} GB` : "";
+    const mediaPart = storageMedia ? ` (${storageMedia})` : "";
+    const desc = vt ? `EBS Volume · ${vt}${mediaPart}${sizePart}` : `EBS Volume${mediaPart}${sizePart}`;
+    return { desc, attachment: attachHint ? `Attached to: ${attachHint}` : "" };
+  }
+  if (rid.startsWith("snap-")) {
+    const sizePart = qty > 0 ? ` · ${Math.round(qty)} GB` : "";
+    const parts: string[] = [];
+    if (volHint) parts.push(`From volume: ${volHint}`);
+    if (attachHint) parts.push(`Instance: ${attachHint}`);
+    return { desc: `EBS Snapshot${sizePart}`, attachment: parts.join(" · ") };
+  }
+  if (rid.startsWith("i-")) {
+    let itype = instanceType;
+    if (!itype) { const m = usageType.match(/BoxUsage:(\S+)/i); if (m) itype = m[1]; }
+    const osPart = os ? ` · ${os}` : "";
+    return { desc: itype ? `EC2 Instance · ${itype}${osPart}` : `EC2 Instance${osPart}`, attachment: "" };
+  }
+  if (ut.includes("elasticip") || ut.includes("elastic-ip")) {
+    const idle = ut.includes("idle") || ut.includes("unassociated");
+    return {
+      desc: idle ? "Elastic IP · Idle / Unassociated" : "Elastic IP",
+      attachment: attachHint ? `Associated with: ${attachHint}` : idle ? "Not attached to any instance" : "",
+    };
+  }
+  if (rid.startsWith("eni-")) {
+    let desc = "Network Interface (ENI)";
+    if (ut.includes("natgateway")) desc = "NAT Gateway ENI";
+    else if (ut.includes("vpcendpoint")) desc = "VPC Endpoint ENI";
+    else if (ut.includes("transitgateway")) desc = "Transit Gateway ENI";
+    return { desc, attachment: attachHint ? `Attached to: ${attachHint}` : "" };
+  }
+  if (rid.startsWith("nat-") || ut.includes("natgateway"))
+    return { desc: ut.includes("bytes") ? "NAT Gateway · Data Transfer" : "NAT Gateway", attachment: "" };
+  if (rid.includes("loadbalancer") || rid.includes("app/") || rid.includes("net/"))
+    return { desc: rid.includes("app/") ? "Application Load Balancer" : rid.includes("net/") ? "Network Load Balancer" : "Load Balancer", attachment: "" };
+  if (rid.startsWith("db:") || rid.includes(":db:"))
+    return { desc: operation.toLowerCase().includes("snapshot") ? "RDS Snapshot" : "RDS Instance", attachment: "" };
+  return { desc: "", attachment: "" };
+}
+
 function downloadMultiSheetXls(filename: string, sheets: { name: string; headers: string[]; rows: (string | number)[][] }[]) {
   const wb = XLSX.utils.book_new();
   for (const s of sheets) {
@@ -818,7 +879,8 @@ export default function CTDetailPage() {
                         )}
                         {activeTab === "resource" && (
                           <>
-                            <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Resource ID</th>
+                            <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Resource ID / Name</th>
+                            <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Description</th>
                             <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Service</th>
                             <th className="text-left text-xs font-bold uppercase tracking-wider text-black px-4 py-2">Region</th>
                           </>
@@ -841,7 +903,17 @@ export default function CTDetailPage() {
                           )}
                           {activeTab === "resource" && (
                             <>
-                              <td className="px-4 py-2.5 text-xs font-mono font-semibold text-black max-w-xs truncate">{row.resource_id}</td>
+                              <td className="px-4 py-2.5 text-xs text-black max-w-[180px]">
+                                <span className="font-mono font-semibold block truncate">{row.resource_id}</span>
+                                {row.resource_name && <span className="text-blue-700 font-semibold block truncate">{row.resource_name}</span>}
+                              </td>
+                              <td className="px-4 py-2.5 text-xs text-black max-w-[200px]">
+                                {(() => { const { desc, attachment } = getResourceDescription(row); return (<>
+                                  {desc && <span className="font-semibold text-slate-700 block">{desc}</span>}
+                                  {attachment && <span className="text-amber-700 font-medium block truncate" title={attachment}>{attachment}</span>}
+                                  {!desc && !attachment && <span className="text-gray-300">—</span>}
+                                </>); })()}
+                              </td>
                               <td className="px-4 py-2.5 text-xs font-semibold text-black">{row.service}</td>
                               <td className="px-4 py-2.5 text-xs text-black">{row.region || "-"}</td>
                             </>
