@@ -81,52 +81,98 @@ function getResourceDescription(r: any): { desc: string; attachment: string } {
   const operation: string = r.operation || "";
   const ut = usageType.toLowerCase();
   const at = r.attachment_tags || {};
+  const tags = r.tags_raw || at; // full tags dict passed from backend
   const instanceType: string = r.instance_type || "";
   const os: string = r.os || "";
   const volumeType: string = r.volume_type || "";
   const storageMedia: string = r.storage_media || "";
   const qty: number = r.usage_quantity || 0;
 
-  const attachHint =
-    at["instance-id"] || at["instanceid"] || at["attached-to"] || at["attachedto"] ||
-    at["ec2-name"] || at["ec2name"] || at["source-instance"] || at["sourceinstance"] || "";
-  const volHint = at["volume-id"] || at["volumeid"] || at["source-volume"] || at["sourcevolume"] || "";
+  // Helper: look up a value across multiple possible tag keys (user + AWS auto-tags)
+  const tag = (...keys: string[]): string => {
+    for (const k of keys) {
+      const v = at[k] || at[k.toLowerCase()] || at[k.toUpperCase()];
+      if (v) return v;
+    }
+    return "";
+  };
 
+  // Attachment to instance: user tags + AWS auto-tag aws:ec2:attachment/instance-id
+  const attachedInstance = tag(
+    "aws:ec2:attachment/instance-id",
+    "instance-id", "instanceid", "attached-to", "attachedto",
+    "ec2-name", "ec2name", "source-instance", "sourceinstance"
+  );
+
+  // Source volume for snapshots: user tags + AWS auto-tag aws:ec2:source-volume-id
+  const sourceVolume = tag(
+    "aws:ec2:source-volume-id",
+    "volume-id", "volumeid", "source-volume", "sourcevolume"
+  );
+
+  // Source instance for AMIs
+  const sourceInstance = tag(
+    "source-instance-id", "sourceinstanceid",
+    "created-from-instance", "instance-id", "instanceid"
+  );
+
+  // EBS Volume
   if (rid.startsWith("vol-")) {
     let vt = volumeType;
     if (!vt) { const m = usageType.match(/VolumeUsage\.?(\w+)?/i); if (m?.[1]) vt = m[1]; }
     const sizePart = qty > 0 ? ` · ${Math.round(qty)} GB` : "";
     const mediaPart = storageMedia ? ` (${storageMedia})` : "";
     const desc = vt ? `EBS Volume · ${vt}${mediaPart}${sizePart}` : `EBS Volume${mediaPart}${sizePart}`;
-    return { desc, attachment: attachHint ? `Attached to: ${attachHint}` : "" };
+    const attachment = attachedInstance ? `Attached to instance: ${attachedInstance}` : "";
+    return { desc, attachment };
   }
+
+  // EBS Snapshot
   if (rid.startsWith("snap-")) {
     const sizePart = qty > 0 ? ` · ${Math.round(qty)} GB` : "";
+    const tier = r.snapshot_tier ? ` · ${r.snapshot_tier}` : "";
+    const desc = `EBS Snapshot${sizePart}${tier}`;
     const parts: string[] = [];
-    if (volHint) parts.push(`From volume: ${volHint}`);
-    if (attachHint) parts.push(`Instance: ${attachHint}`);
-    return { desc: `EBS Snapshot${sizePart}`, attachment: parts.join(" · ") };
+    if (sourceVolume) parts.push(`Source volume: ${sourceVolume}`);
+    if (attachedInstance) parts.push(`Instance: ${attachedInstance}`);
+    return { desc, attachment: parts.join(" · ") };
   }
+
+  // AMI
+  if (rid.startsWith("ami-")) {
+    const desc = "AMI (Machine Image)";
+    const attachment = sourceInstance ? `Created from instance: ${sourceInstance}` : "";
+    return { desc, attachment };
+  }
+
+  // EC2 Instance
   if (rid.startsWith("i-")) {
     let itype = instanceType;
     if (!itype) { const m = usageType.match(/BoxUsage:(\S+)/i); if (m) itype = m[1]; }
     const osPart = os ? ` · ${os}` : "";
     return { desc: itype ? `EC2 Instance · ${itype}${osPart}` : `EC2 Instance${osPart}`, attachment: "" };
   }
+
+  // Elastic IP
   if (ut.includes("elasticip") || ut.includes("elastic-ip")) {
     const idle = ut.includes("idle") || ut.includes("unassociated");
+    const assocInstance = tag("aws:ec2:association/instance-id", "instance-id", "instanceid", "attached-to");
     return {
       desc: idle ? "Elastic IP · Idle / Unassociated" : "Elastic IP",
-      attachment: attachHint ? `Associated with: ${attachHint}` : idle ? "Not attached to any instance" : "",
+      attachment: assocInstance ? `Associated with: ${assocInstance}` : idle ? "Not attached to any instance" : "",
     };
   }
+
+  // ENI
   if (rid.startsWith("eni-")) {
     let desc = "Network Interface (ENI)";
     if (ut.includes("natgateway")) desc = "NAT Gateway ENI";
     else if (ut.includes("vpcendpoint")) desc = "VPC Endpoint ENI";
     else if (ut.includes("transitgateway")) desc = "Transit Gateway ENI";
-    return { desc, attachment: attachHint ? `Attached to: ${attachHint}` : "" };
+    const eniInstance = tag("aws:ec2:attachment/instance-id", "instance-id", "instanceid", "attached-to");
+    return { desc, attachment: eniInstance ? `Attached to instance: ${eniInstance}` : "" };
   }
+
   if (rid.startsWith("nat-") || ut.includes("natgateway"))
     return { desc: ut.includes("bytes") ? "NAT Gateway · Data Transfer" : "NAT Gateway", attachment: "" };
   if (rid.includes("loadbalancer") || rid.includes("app/") || rid.includes("net/"))

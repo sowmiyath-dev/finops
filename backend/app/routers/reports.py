@@ -332,15 +332,8 @@ async def resource_wise(f: ReportFilter, db: AsyncSession = Depends(get_db), use
         except Exception:
             tags_dict = {}
         resource_name = tags_dict.get("Name") or tags_dict.get("name") or ""
-        # Collect attachment-related tags — common keys teams use
-        attachment_tags = {}
-        for k, v in tags_dict.items():
-            if k.lower() in {
-                "instance-id", "instanceid", "attached-to", "attachedto",
-                "ec2-name", "ec2name", "volume-id", "volumeid",
-                "source-instance", "sourceinstance", "source-volume", "sourcevolume",
-            }:
-                attachment_tags[k] = v
+        # Pass all tags as attachment_tags so frontend can look up any key including AWS auto-tags
+        attachment_tags = {k: v for k, v in tags_dict.items() if not k.startswith("__")}
         results.append({
             "resource_id": row.resource_id,
             "resource_name": resource_name,
@@ -355,6 +348,7 @@ async def resource_wise(f: ReportFilter, db: AsyncSession = Depends(get_db), use
             "os": tags_dict.get("__os", ""),
             "volume_type": tags_dict.get("__volumeApiName") or tags_dict.get("__volumeType", ""),
             "storage_media": tags_dict.get("__storageMedia", ""),
+            "snapshot_tier": tags_dict.get("__snapshotTier", ""),
             "usage_quantity": round(float(row.usage_quantity or 0), 2),
             "cost": float(row.actual_cost or 0),
             "usage_cost": round(float(row.usage_cost or 0), 4),

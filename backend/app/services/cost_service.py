@@ -130,6 +130,10 @@ def _parse_row(row: dict, start: date, end: date) -> Optional[dict]:
     for col, val in row.items():
         if col.startswith("resourceTags/user:") and val:
             tags[col.replace("resourceTags/user:", "")] = val
+        # AWS auto-managed tags (aws: prefix) — capture attachment/source info
+        elif col.startswith("resourceTags/aws:") and val:
+            k = col.replace("resourceTags/aws:", "aws:")
+            tags[k] = val
 
     # Capture product-level attributes useful for resource description
     # stored under reserved keys prefixed with "__" to avoid collision with user tags
@@ -139,6 +143,7 @@ def _parse_row(row: dict, start: date, end: date) -> Optional[dict]:
         ("product/volumeType",      "__volumeType"),
         ("product/volumeApiName",   "__volumeApiName"),
         ("product/storageMedia",    "__storageMedia"),
+        ("product/snapshotArchiveTier", "__snapshotTier"),
     ):
         val = row.get(src_col, "").strip()
         if val:
