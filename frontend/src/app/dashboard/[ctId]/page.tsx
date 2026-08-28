@@ -179,7 +179,7 @@ export default function CTDetailPage() {
   const [accountDropdownOpen, setAccountDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("service");
   const [showTrueCost] = useState(true);
-  const [trueCostView, setTrueCostView] = useState<"account" | "resource">("account");
+  const [trueCostView, setTrueCostView] = useState<"account" | "sp_resource">("account");
   const [spResourceModal, setSpResourceModal] = useState<{ accountId: string; accountName: string } | null>(null);
   const [spResources, setSpResources] = useState<any[]>([]);
   const [spResLoading, setSpResLoading] = useState(false);
@@ -406,16 +406,16 @@ export default function CTDetailPage() {
                     Account Wise
                   </button>
                   <button
-                    onClick={() => { setAllSpResources([]); setAllSpResLoaded(false); setTrueCostView("resource"); loadAllSpResources(); }}
+                    onClick={() => { setAllSpResources([]); setAllSpResLoaded(false); setTrueCostView("sp_resource"); loadAllSpResources(); }}
                     className={`px-3 py-1 text-xs font-bold border-l border-gray-300 transition ${
-                      trueCostView === "resource" ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-gray-50"
+                      trueCostView === "sp_resource" ? "bg-blue-900 text-white" : "bg-white text-black hover:bg-gray-50"
                     }`}>
-                    Resource Wise
+                    SP Cost per Resource
                   </button>
                 </div>
                 <button
                   onClick={async () => {
-                    if (trueCostView === "resource") {
+                    if (trueCostView === "sp_resource") {
                       const xlsParams: any = { ct_id: ctId, start_date: startDate, end_date: endDate, limit: 2000 };
                       if (selectedAccounts.length > 0) xlsParams.account_ids = selectedAccounts.join(",");
                       const data = allSpResources.length > 0 ? allSpResources : await api.get("/reports/savings/resources", { params: xlsParams }).then((r: any) => r.data);
@@ -597,7 +597,7 @@ export default function CTDetailPage() {
               </div>
             </div>
 
-            {trueCostView === "resource" ? (
+            {trueCostView === "sp_resource" ? (
                   <>
                     {allSpResLoading ? (
                       <div className="flex items-center justify-center h-32">
