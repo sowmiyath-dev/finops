@@ -666,12 +666,11 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
 
         try:
             await _refresh_azure_monthly_summary(ct_id)
-            # Clear in-memory API cache so next request fetches fresh data from summary table
-            from app.routers.azure_costs import _cache
-            keys_to_clear = [k for k in _cache if k.startswith(("az_overview_", "az_summary_", "az_biz_costs_", "az_subs_", "az_browse_subs", "az_meta_subs"))]
-            for k in keys_to_clear:
-                _cache.pop(k, None)
-            logger.info(f"Azure API cache cleared after sync for CT {ct_id}: {len(keys_to_clear)} keys")
+            # Clear Redis cache so next request fetches fresh data
+            from app.services.cache_service import cache_delete_pattern
+            for pattern in ["az_overview_*", "az_summary_*", "az_biz_costs_*", "az_subs_*", "az_browse_subs", "az_meta_subs"]:
+                await cache_delete_pattern(pattern)
+            logger.info(f"Azure cache cleared after sync for CT {ct_id}")
         except Exception as cache_err:
             logger.warning(f"Azure monthly summary refresh failed (non-fatal): {cache_err}")
 
@@ -728,9 +727,10 @@ async def clear_all_azure_data(
         )
         await sdb.commit()
 
-    # Clear in-memory API cache
-    from app.routers.azure_costs import _cache
-    _cache.clear()
+    # Clear Redis cache
+    from app.services.cache_service import cache_delete_pattern
+    for pattern in ["az_overview_*", "az_summary_*", "az_biz_costs_*", "az_subs_*", "az_browse_subs", "az_meta_subs", "az_tag_keys"]:
+        await cache_delete_pattern(pattern)
     logger.info(f"Cleared ALL Azure data for {len(cts)} control tower(s)")
 
     # Trigger full-year resync for each CT (staggered by 5s to avoid DB overload)
@@ -782,8 +782,9 @@ async def clear_azure_data(
         )
         await sdb.commit()
 
-    from app.routers.azure_costs import _cache
-    _cache.clear()
+    from app.services.cache_service import cache_delete_pattern
+    for pattern in ["az_overview_*", "az_summary_*", "az_biz_costs_*", "az_subs_*", "az_browse_subs", "az_meta_subs", "az_tag_keys"]:
+        await cache_delete_pattern(pattern)
     logger.info(f"Cleared all Azure data for CT {ct_id}, triggering full resync")
 
     bg.add_task(_do_sync, ct_id, "clear-resync")
@@ -801,9 +802,10 @@ async def rebuild_azure_summary(
     if user.role == "viewer":
         raise HTTPException(status_code=403)
     bg.add_task(_rebuild_all_azure_summaries)
-    # Also clear in-memory cache immediately
-    from app.routers.azure_costs import _cache
-    _cache.clear()
+    # Clear Redis cache immediately
+    from app.services.cache_service import cache_delete_pattern
+    for pattern in ["az_overview_*", "az_summary_*", "az_subs_*", "az_meta_subs"]:
+        await cache_delete_pattern(pattern)
     return {"message": "Azure monthly summary rebuild started. All month data will be correct after completion."}
 
 

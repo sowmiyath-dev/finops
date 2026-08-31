@@ -1,5 +1,4 @@
 import asyncio
-import time
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
@@ -12,26 +11,16 @@ from app.models.database import get_azure_db
 from app.models.db_models import AzureCostRecord, AzureBusinessMapping, ControlTower
 from app.services.auth_service import get_current_user
 from app.models.db_models import User
+from app.services.cache_service import cache_get, cache_set, cache_delete_pattern
 
 router = APIRouter(prefix="/azure-costs", tags=["azure-costs"])
 
-# Simple in-memory cache
-_cache: dict = {}
-_CACHE_TTL = 300        # 5 min (was 1 hour — too stale after restart/sync)
-_CT_IDS_TTL = 300
+# TTL constants
+_CACHE_TTL = 300        # 5 min for current month
 _HIST_CACHE_TTL = 3600  # 1 hour for historical closed months
 
 def _is_historical(start: date, end: date) -> bool:
     return end < date.today().replace(day=1)
-
-def _cache_get(key: str, ttl: int = _CACHE_TTL):
-    e = _cache.get(key)
-    if e and time.time() - e["t"] < ttl:
-        return e["d"]
-    return None
-
-def _cache_set(key: str, data, ttl: int = _CACHE_TTL):
-    _cache[key] = {"d": data, "t": time.time(), "ttl": ttl}
 
 
 def _parse_dates(start_date: Optional[str], end_date: Optional[str]):
@@ -69,7 +58,7 @@ async def cost_overview(
     from app.models.db_models import AzureMonthlySummary
     start, end = _parse_dates(start_date, end_date)
     cache_key = f"az_overview_{start}_{end}"
-    if (cached := _cache_get(cache_key)) is not None:
+    if (cached := await cache_get(cache_key)) is not None:
         return cached
 
     # Build month list in range — fixed: increment after appending
@@ -150,7 +139,7 @@ async def cost_overview(
         },
         "subscriptions": subscriptions,
     }
-    _cache_set(cache_key, result, _HIST_CACHE_TTL if _is_historical(start, end) else _CACHE_TTL)
+    await cache_set(cache_key, result, _HIST_CACHE_TTL if _is_historical(start, end) else _CACHE_TTL)
     return result
 
 
@@ -167,7 +156,7 @@ async def cost_summary(
     from app.models.db_models import AzureMonthlySummary
     start, end = _parse_dates(start_date, end_date)
     cache_key = f"az_summary_{start}_{end}_{subscription_id}"
-    if (cached := _cache_get(cache_key)) is not None:
+    if (cached := await cache_get(cache_key)) is not None:
         return cached
 
     # Build month list — fixed increment order
@@ -204,7 +193,7 @@ async def cost_summary(
     savings = max(0, actual - amortized)
     result = {"actual_cost": actual, "amortized_cost": amortized, "savings": savings,
               "sp_allocated": amortized, "true_cost": amortized if amortized > 0 else actual}
-    _cache_set(cache_key, result, _HIST_CACHE_TTL if _is_historical(start, end) else _CACHE_TTL)
+    await cache_set(cache_key, result, _HIST_CACHE_TTL if _is_historical(start, end) else _CACHE_TTL)
     return result
 
 
@@ -219,7 +208,7 @@ async def cost_by_subscription(
 ):
     start, end = _parse_dates(start_date, end_date)
     cache_key = f"az_subs_{start}_{end}"
-    if (cached := _cache_get(cache_key)) is not None:
+    if (cached := await cache_get(cache_key)) is not None:
         return cached
     ca = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "actual"]
     cm = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "amortized"]
@@ -242,7 +231,7 @@ async def cost_by_subscription(
             "actual_cost": actual, "amortized_cost": amortized,
             "savings": savings, "true_cost": true_cost,
         })
-    _cache_set(cache_key, result, _HIST_CACHE_TTL if _is_historical(start, end) else _CACHE_TTL)
+    await cache_set(cache_key, result, _HIST_CACHE_TTL if _is_historical(start, end) else _CACHE_TTL)
     return result
 
 
@@ -258,7 +247,7 @@ async def cost_by_resource_group(
 ):
     start, end = _parse_dates(start_date, end_date)
     cache_key = f"az_rg_{start}_{end}_{subscription_id}"
-    if (cached := _cache_get(cache_key)) is not None:
+    if (cached := await cache_get(cache_key)) is not None:
         return cached
     ca = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "actual",
           AzureCostRecord.resource_group.isnot(None), AzureCostRecord.resource_group != ""]
@@ -287,7 +276,7 @@ async def cost_by_resource_group(
             "sp_allocated": amortized,
             "savings": savings, "true_cost": true_cost,
         })
-    _cache_set(cache_key, result, _HIST_CACHE_TTL if _is_historical(start, end) else _CACHE_TTL)
+    await cache_set(cache_key, result, _HIST_CACHE_TTL if _is_historical(start, end) else _CACHE_TTL)
     return result
 
 
@@ -304,7 +293,7 @@ async def cost_by_service(
 ):
     start, end = _parse_dates(start_date, end_date)
     cache_key = f"az_svc_{start}_{end}_{subscription_id}_{resource_group}"
-    if (cached := _cache_get(cache_key)) is not None:
+    if (cached := await cache_get(cache_key)) is not None:
         return cached
     ca = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "actual"]
     cm = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "amortized"]
@@ -331,7 +320,7 @@ async def cost_by_service(
             "actual_cost": actual, "amortized_cost": amortized,
             "savings": savings, "true_cost": true_cost,
         })
-    _cache_set(cache_key, result, _HIST_CACHE_TTL if _is_historical(start, end) else _CACHE_TTL)
+    await cache_set(cache_key, result, _HIST_CACHE_TTL if _is_historical(start, end) else _CACHE_TTL)
     return result
 
 
@@ -348,7 +337,7 @@ async def cost_by_tag(
 ):
     start, end = _parse_dates(start_date, end_date)
     cache_key = f"az_tags_{tag_key}_{start}_{end}_{subscription_id}"
-    if (cached := _cache_get(cache_key)) is not None:
+    if (cached := await cache_get(cache_key)) is not None:
         return cached
 
     # Use PostgreSQL JSON operator to extract tag value in SQL — avoids Python-side loop
@@ -398,7 +387,7 @@ async def cost_by_tag(
             "actual_cost": actual, "amortized_cost": amortized,
             "savings": savings, "true_cost": amortized if amortized > 0 else actual,
         })
-    _cache_set(cache_key, result, _HIST_CACHE_TTL if _is_historical(start, end) else _CACHE_TTL)
+    await cache_set(cache_key, result, _HIST_CACHE_TTL if _is_historical(start, end) else _CACHE_TTL)
     return result
 
 
@@ -407,7 +396,7 @@ async def get_tag_keys(
     db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
-    if (cached := _cache_get("az_tag_keys")) is not None:
+    if (cached := await cache_get("az_tag_keys")) is not None:
         return cached
     rows = (await db.execute(
         select(AzureCostRecord.tags)
@@ -421,7 +410,7 @@ async def get_tag_keys(
         except Exception:
             pass
     result = sorted(list(keys))
-    _cache_set("az_tag_keys", result)
+    await cache_set("az_tag_keys", result, _CACHE_TTL)
     return result
 
 
@@ -438,7 +427,7 @@ async def daily_trend(
 ):
     start, end = _parse_dates(start_date, end_date)
     cache_key = f"az_trend_{start}_{end}_{subscription_id}_{resource_group}"
-    if (cached := _cache_get(cache_key)) is not None:
+    if (cached := await cache_get(cache_key)) is not None:
         return cached
     ca = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "actual"]
     cm = [AzureCostRecord.date >= start, AzureCostRecord.date <= end, AzureCostRecord.cost_type == "amortized"]
@@ -468,7 +457,7 @@ async def daily_trend(
         }
         for r in actual_rows
     ]
-    _cache_set(cache_key, result, _HIST_CACHE_TTL if _is_historical(start, end) else _CACHE_TTL)
+    await cache_set(cache_key, result, _HIST_CACHE_TTL if _is_historical(start, end) else _CACHE_TTL)
     return result
 
 
@@ -582,7 +571,7 @@ async def list_subscriptions(
 ):
     from app.models.db_models import AzureMonthlySummary
     cache_key = "az_meta_subs"
-    if (cached := _cache_get(cache_key)) is not None:
+    if (cached := await cache_get(cache_key)) is not None:
         return cached
     rows = (await db.execute(
         select(AzureMonthlySummary.subscription_id, AzureMonthlySummary.subscription_name)
@@ -590,7 +579,7 @@ async def list_subscriptions(
         .order_by(AzureMonthlySummary.subscription_name)
     )).all()
     result = [{"subscription_id": r.subscription_id, "subscription_name": r.subscription_name or r.subscription_id} for r in rows]
-    _cache_set(cache_key, result)
+    await cache_set(cache_key, result, _CACHE_TTL)
     return result
 
 
@@ -762,7 +751,7 @@ async def browse_subscriptions(
     from app.models.db_models import AzureMonthlySummary
     from datetime import date as dt
     cache_key = "az_browse_subs"
-    if (cached := _cache_get(cache_key)) is not None:
+    if (cached := await cache_get(cache_key)) is not None:
         return cached
 
     n = dt.today()
@@ -793,7 +782,7 @@ async def browse_subscriptions(
             "resource_count": 0,
             "last_month_cost": cost_map.get(r.subscription_id, 0),
         } for r in rows]
-        _cache_set(cache_key, result)
+        await cache_set(cache_key, result, _CACHE_TTL)
         return result
 
     # Fallback: use ControlTower records with cloud_provider=azure
@@ -808,7 +797,7 @@ async def browse_subscriptions(
         "resource_count": 0,
         "last_month_cost": 0,
     } for r in ct_rows]
-    _cache_set(cache_key, result)
+    await cache_set(cache_key, result, _CACHE_TTL)
     return result
 
 
@@ -999,7 +988,7 @@ async def all_business_azure_costs(
 ):
     start, end = _parse_dates(start_date, end_date)
     cache_key = f"az_biz_costs_{start}_{end}"
-    if (cached := _cache_get(cache_key)) is not None:
+    if (cached := await cache_get(cache_key)) is not None:
         return cached
 
     mappings = (await db.execute(select(AzureBusinessMapping))).scalars().all()
@@ -1080,5 +1069,10 @@ async def all_business_azure_costs(
 
     # Remove zero-cost businesses
     result = {k: v for k, v in result.items() if v["actual_cost"] > 0 or v["true_cost"] > 0}
-    _cache_set(cache_key, result)
+    await cache_set(cache_key, result, _CACHE_TTL)
     return result
+
+
+
+
+

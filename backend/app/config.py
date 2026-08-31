@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 600  # 10 hours
     ADMIN_EMAIL: str = "admin@company.com"
     PORTAL_ACCOUNT_ID: str = ""
+    REDIS_URL: str = "redis://redis:6379/0"
 
     @property
     def effective_azure_db_url(self) -> str:
