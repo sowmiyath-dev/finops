@@ -6,7 +6,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func
 
-from app.models.database import get_db, AsyncSessionLocal, SyncSessionLocal
+from app.models.database import get_db, AsyncSessionLocal, SyncSessionLocal, AzureSessionLocal, AzureSyncSessionLocal
 from app.models.db_models import User, ControlTower, SubAccount, CostRecord, SyncLog, AzureCostRecord
 from app.models.schemas import OnboardKeys, OnboardRole, OnboardAzure, ControlTowerOut, SubAccountOut
 from app.services.auth_service import get_current_user
@@ -304,7 +304,7 @@ async def _refresh_azure_monthly_summary(ct_id: str):
     from sqlalchemy import text
     import uuid as _uuid
     try:
-        async with SyncSessionLocal() as db:
+        async with AzureSyncSessionLocal() as db:
             await db.execute(
                 text("DELETE FROM azure_monthly_summary WHERE control_tower_id = :ct_id")
                 .bindparams(ct_id=_uuid.UUID(ct_id))
@@ -360,7 +360,7 @@ async def _rebuild_all_azure_summaries():
     from sqlalchemy import text
     logger.info("Rebuilding ALL Azure monthly summaries from scratch")
     try:
-        async with SyncSessionLocal() as db:
+        async with AzureSyncSessionLocal() as db:
             # Truncate entire summary table and rebuild from raw records
             await db.execute(text("TRUNCATE TABLE azure_monthly_summary"))
             await db.execute(text("""
@@ -563,7 +563,7 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
             delete_end = date.fromisoformat(end_date)
 
         logger.info(f"Azure sync -- deleting {delete_start} to {delete_end} before re-insert")
-        async with SyncSessionLocal() as db:
+        async with AzureSyncSessionLocal() as db:
             await db.execute(
                 delete(AzureCostRecord).where(
                     AzureCostRecord.control_tower_id == ct_id,
@@ -602,7 +602,7 @@ async def _do_azure_sync(ct_id: str, triggered_by: str = "manual", force_start: 
                 for batch in batches:
                     if not batch:
                         continue
-                    async with SyncSessionLocal() as db:
+                    async with AzureSyncSessionLocal() as db:
                         await db.execute(_ins_text("""
                             INSERT INTO azure_cost_records
                                 (id, control_tower_id, subscription_id, subscription_name,
@@ -712,7 +712,7 @@ async def clear_all_azure_data(
     from sqlalchemy import text
     import uuid as _uuid
 
-    async with SyncSessionLocal() as sdb:
+    async with AzureSyncSessionLocal() as sdb:
         # Wipe all Azure cost data and summaries in one shot
         await sdb.execute(text("DELETE FROM azure_cost_records"))
         await sdb.execute(text("DELETE FROM azure_monthly_summary"))
@@ -763,7 +763,7 @@ async def clear_azure_data(
 
     from sqlalchemy import text
     import uuid as _uuid
-    async with SyncSessionLocal() as sdb:
+    async with AzureSyncSessionLocal() as sdb:
         await sdb.execute(
             text("DELETE FROM azure_cost_records WHERE control_tower_id = :ct_id")
             .bindparams(ct_id=_uuid.UUID(ct_id))

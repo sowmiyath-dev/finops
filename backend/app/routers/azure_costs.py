@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from datetime import date
 import json
 
-from app.models.database import get_db
+from app.models.database import get_azure_db
 from app.models.db_models import AzureCostRecord, AzureBusinessMapping, ControlTower
 from app.services.auth_service import get_current_user
 from app.models.db_models import User
@@ -62,7 +62,7 @@ def _build_row(actual, amortized_map, key):
 async def cost_overview(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     """Returns summary + subscriptions using pre-aggregated table for fast load."""
@@ -161,7 +161,7 @@ async def cost_summary(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     subscription_id: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     from app.models.db_models import AzureMonthlySummary
@@ -214,7 +214,7 @@ async def cost_summary(
 async def cost_by_subscription(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     start, end = _parse_dates(start_date, end_date)
@@ -253,7 +253,7 @@ async def cost_by_resource_group(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     subscription_id: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     start, end = _parse_dates(start_date, end_date)
@@ -299,7 +299,7 @@ async def cost_by_service(
     end_date: Optional[str] = None,
     subscription_id: Optional[str] = None,
     resource_group: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     start, end = _parse_dates(start_date, end_date)
@@ -343,7 +343,7 @@ async def cost_by_tag(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     subscription_id: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     start, end = _parse_dates(start_date, end_date)
@@ -404,7 +404,7 @@ async def cost_by_tag(
 
 @router.get("/tag-keys")
 async def get_tag_keys(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     if (cached := _cache_get("az_tag_keys")) is not None:
@@ -433,7 +433,7 @@ async def daily_trend(
     end_date: Optional[str] = None,
     subscription_id: Optional[str] = None,
     resource_group: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     start, end = _parse_dates(start_date, end_date)
@@ -480,7 +480,7 @@ async def savings_resources(
     end_date: Optional[str] = None,
     subscription_id: Optional[str] = None,
     limit: int = 200,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     """Resources with RI/SP pricing model — shows actual vs amortized cost and savings."""
@@ -544,7 +544,7 @@ async def cost_by_resource(
     end_date: Optional[str] = None,
     subscription_id: Optional[str] = None,
     resource_group: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     start, end = _parse_dates(start_date, end_date)
@@ -577,7 +577,7 @@ async def cost_by_resource(
 
 @router.get("/meta/subscriptions")
 async def list_subscriptions(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     from app.models.db_models import AzureMonthlySummary
@@ -597,7 +597,7 @@ async def list_subscriptions(
 @router.get("/meta/resource-groups")
 async def list_resource_groups(
     subscription_id: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     conditions = [AzureCostRecord.cost_type == "actual",
@@ -617,7 +617,7 @@ async def list_resource_groups(
 
 @router.get("/vertical/list-subscriptions")
 async def vertical_list_subscriptions(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     """No-cache, no date filter. Returns all subscriptions ever synced.
@@ -672,7 +672,7 @@ async def vertical_list_subscriptions(
 
 @router.get("/vertical/subscriptions")
 async def vertical_subscriptions(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     """Direct query — no cache. For vertical Add Azure Resources modal."""
@@ -694,7 +694,7 @@ async def vertical_subscriptions(
 @router.get("/vertical/resource-groups")
 async def vertical_resource_groups(
     subscription_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     """Direct query — no cache. Resource groups for a subscription."""
@@ -716,7 +716,7 @@ async def vertical_resource_groups(
 async def vertical_resources(
     subscription_id: str,
     resource_group: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     """Direct query — no cache. Resources for a subscription/resource group."""
@@ -755,7 +755,7 @@ async def vertical_resources(
 
 @router.get("/browse/subscriptions")
 async def browse_subscriptions(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     """List all subscriptions with their last month actual cost."""
@@ -815,7 +815,7 @@ async def browse_subscriptions(
 @router.get("/browse/resource-groups")
 async def browse_resource_groups(
     subscription_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     """List resource groups in a subscription."""
@@ -840,7 +840,7 @@ async def browse_resource_groups(
 async def browse_resources(
     subscription_id: str,
     resource_group: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     """List resources in a subscription/resource group."""
@@ -878,7 +878,7 @@ async def browse_resources(
 async def browse_azure_tag_values(
     tag_key: str,
     subscription_id: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     """List unique values for a given tag key in Azure records."""
@@ -940,7 +940,7 @@ class MappingCreate(BaseModel):
 @router.get("/mappings/{business_id}")
 async def get_business_mappings(
     business_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     rows = (await db.execute(
@@ -955,7 +955,7 @@ async def get_business_mappings(
 @router.post("/mappings", status_code=201)
 async def create_business_mapping(
     payload: MappingCreate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     if user.role == "viewer":
@@ -976,7 +976,7 @@ async def create_business_mapping(
 @router.delete("/mappings/{mapping_id}", status_code=204)
 async def delete_business_mapping(
     mapping_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     if user.role == "viewer":
@@ -994,7 +994,7 @@ async def delete_business_mapping(
 async def all_business_azure_costs(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_azure_db),
     user: User = Depends(get_current_user),
 ):
     start, end = _parse_dates(start_date, end_date)
