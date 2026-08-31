@@ -23,6 +23,14 @@ const PRESETS = [
   { label: "Last 30d", fn: () => { const n=new Date(); const s=new Date(n); s.setDate(s.getDate()-29); return { start: fmtD(s), end: fmtD(n) }; }},
 ];
 
+const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+function getMonthRange(year: number, month: number) {
+  const start = fmtD(new Date(year, month, 1));
+  const end = fmtD(new Date(year, month + 1, 0));
+  return { start, end };
+}
+
 type Tab = "subscriptions" | "resource-groups" | "services" | "tags";
 interface CostRow { label: string; sublabel?: string; subscription_id?: string; actual_cost: number; amortized_cost: number; sp_allocated: number; savings: number; true_cost: number; }
 interface SyncLog { id: string; status: string; triggered_by: string; records_synced: number; date_range_start: string; date_range_end: string; started_at: string; finished_at: string; error_message?: string; }
@@ -44,6 +52,17 @@ export default function AzureTenantDetail() {
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState("");
   const [tagKey, setTagKey] = useState("");
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
+  const [pickerYear, setPickerYear] = useState(() => new Date().getFullYear());
+  const monthPickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (monthPickerRef.current && !monthPickerRef.current.contains(e.target as Node)) setShowMonthPicker(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   // Fetch tenant name + tag keys in parallel, cached
   const { data: meta } = useQuery({
@@ -178,6 +197,40 @@ export default function AzureTenantDetail() {
           <p className="text-xs text-gray-500 mt-0.5">{startDate} → {endDate}</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Month picker dropdown */}
+          <div className="relative" ref={monthPickerRef}>
+            <button
+              onClick={() => setShowMonthPicker(!showMonthPicker)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-300 rounded-md text-xs font-bold text-black hover:border-blue-900 transition">
+              📅 Month
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+            </button>
+            {showMonthPicker && (
+              <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-gray-300 rounded-lg shadow-lg w-64 p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <button onClick={() => setPickerYear(y => y - 1)} className="px-2 py-1 text-xs font-bold text-black hover:bg-gray-100 rounded">‹</button>
+                  <span className="text-xs font-bold text-black">{pickerYear}</span>
+                  <button onClick={() => setPickerYear(y => y + 1)} className="px-2 py-1 text-xs font-bold text-black hover:bg-gray-100 rounded">›</button>
+                </div>
+                <div className="grid grid-cols-4 gap-1">
+                  {MONTH_NAMES.map((name, idx) => {
+                    const { start, end } = getMonthRange(pickerYear, idx);
+                    const isActive = startDate === start && endDate === end;
+                    return (
+                      <button key={name} onClick={() => {
+                        setStartDate(start); setEndDate(end);
+                        setActivePreset(`${name} ${pickerYear}`);
+                        setShowMonthPicker(false);
+                      }}
+                        className={`py-1.5 text-xs font-bold rounded transition ${
+                          isActive ? "bg-blue-900 text-white" : "hover:bg-blue-50 text-black"
+                        }`}>{name}</button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
           <div className="flex border border-gray-300 rounded-md overflow-hidden">
             {PRESETS.map((p) => (
               <button key={p.label} onClick={() => applyPreset(p)}
