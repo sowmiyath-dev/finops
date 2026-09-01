@@ -592,10 +592,15 @@ async def get_tag_keys(db: AsyncSession = Depends(get_db), user: User = Depends(
 
 @router.get("/sync-logs")
 async def get_sync_logs(limit: int = 100, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    ct_ids = await _get_user_ct_ids(db, user)
+    # Include both AWS and Azure CT IDs
+    if user.role == "viewer":
+        result = await db.execute(select(ControlTower.id))
+    else:
+        result = await db.execute(select(ControlTower.id).where(ControlTower.user_id == user.id))
+    all_ct_ids = [str(r[0]) for r in result.all()]
     result = await db.execute(
         select(SyncLog)
-        .where(SyncLog.control_tower_id.in_(ct_ids))
+        .where(SyncLog.control_tower_id.in_(all_ct_ids))
         .order_by(SyncLog.started_at.desc())
         .limit(limit)
     )

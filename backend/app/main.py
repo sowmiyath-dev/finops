@@ -52,7 +52,7 @@ app.include_router(azure_costs.router, prefix="/api")
 
 @app.on_event("startup")
 async def startup():
-    max_retries = 10
+    max_retries = 5
     for attempt in range(1, max_retries + 1):
         try:
             await init_db()
@@ -61,7 +61,7 @@ async def startup():
         except Exception as e:
             logger.warning(f"DB connection attempt {attempt}/{max_retries} failed: {e}")
             if attempt < max_retries:
-                await asyncio.sleep(10)
+                await asyncio.sleep(30)  # longer gap during RDS backup windows
             else:
                 logger.error("Could not connect to DB after all retries")
                 raise

@@ -20,6 +20,7 @@ engine = create_async_engine(
             "work_mem": "64MB",
         },
         "command_timeout": 120,
+        "timeout": 15,  # fail fast if RDS is in backup/maintenance
     },
 )
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -57,6 +58,7 @@ _azure_engine = create_async_engine(
             "work_mem": "64MB",
         },
         "command_timeout": 120,
+        "timeout": 15,  # fail fast if RDS is in backup/maintenance
     },
 )
 AzureSessionLocal = sessionmaker(_azure_engine, class_=AsyncSession, expire_on_commit=False)
@@ -79,11 +81,12 @@ AzureSyncSessionLocal = sessionmaker(_azure_sync_engine, class_=AsyncSession, ex
 
 
 async def init_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    # Init Azure DB schema (no-op if same DB or tables already exist)
-    async with _azure_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # Lightweight ping — avoids hanging during RDS backup windows
+    async with engine.connect() as conn:
+        await conn.execute(__import__('sqlalchemy', fromlist=['text']).text("SELECT 1"))
+    if settings.AZURE_DATABASE_URL:
+        async with _azure_engine.connect() as conn:
+            await conn.execute(__import__('sqlalchemy', fromlist=['text']).text("SELECT 1"))
 
 
 async def get_db():
