@@ -172,18 +172,22 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Option
                     result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
                     ct = result.scalar_one_or_none()
 
+                # Delete full month range using SyncSessionLocal (longer timeout for large tables)
+                full_month_start = p_start
+                full_month_end = p_end_raw - timedelta(days=1)
+
+                file_start = full_month_start.isoformat()
+                file_end = full_month_end.isoformat()
+
                 # Get list of files for this period
                 report_keys = await loop.run_in_executor(
-                    _executor, get_report_keys_for_period, ct, period
+                    _executor, lambda p=period, fs=file_start, fe=file_end: get_report_keys_for_period(ct, p, fs, fe)
                 )
 
                 if not report_keys:
                     logger.info(f"No files for period {period}, skipping")
                     continue
 
-                # Delete full month range using SyncSessionLocal (longer timeout for large tables)
-                full_month_start = p_start
-                full_month_end = p_end_raw - timedelta(days=1)
                 async with SyncSessionLocal() as db:
                     await db.execute(
                         delete(CostRecord).where(
@@ -194,9 +198,6 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Option
                     )
                     await db.commit()
                 logger.info(f"AWS deleted month {full_month_start} to {full_month_end} before re-insert")
-
-                file_start = full_month_start.isoformat()
-                file_end = full_month_end.isoformat()
 
                 # Process ONE FILE AT A TIME using streaming batches
                 for file_idx, report_key in enumerate(report_keys):
