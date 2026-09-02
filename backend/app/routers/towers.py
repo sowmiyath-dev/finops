@@ -172,23 +172,18 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Option
                     result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
                     ct = result.scalar_one_or_none()
 
-                # Delete full month range using SyncSessionLocal (longer timeout for large tables)
-                full_month_start = p_start
-                full_month_end = p_end_raw - timedelta(days=1)
-
-                file_start = full_month_start.isoformat()
-                file_end = full_month_end.isoformat()
-
                 # Get list of files for this period
                 report_keys = await loop.run_in_executor(
-                    _executor, lambda p=period, fs=file_start, fe=file_end: get_report_keys_for_period(ct, p, fs, fe)
+                    _executor, get_report_keys_for_period, ct, period
                 )
-                logger.info(f"CT {ct_id} period {period}: file_start={file_start} file_end={file_end} keys={report_keys}")
 
                 if not report_keys:
                     logger.info(f"No files for period {period}, skipping")
                     continue
 
+                # Delete full month range using SyncSessionLocal (longer timeout for large tables)
+                full_month_start = p_start
+                full_month_end = p_end_raw - timedelta(days=1)
                 async with SyncSessionLocal() as db:
                     await db.execute(
                         delete(CostRecord).where(
@@ -199,6 +194,9 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Option
                     )
                     await db.commit()
                 logger.info(f"AWS deleted month {full_month_start} to {full_month_end} before re-insert")
+
+                file_start = full_month_start.isoformat()
+                file_end = full_month_end.isoformat()
 
                 # Process ONE FILE AT A TIME using streaming batches
                 for file_idx, report_key in enumerate(report_keys):
@@ -1111,38 +1109,6 @@ async def sync_monthly(
     return {
         "message": f"Month-by-month sync started for {len(months_to_sync)} month(s)",
         "months": [f"{yr}-{mo:02d}" for yr, mo in months_to_sync],
-    }
-
-
-@router.post("/{ct_id}/resync-last-month")
-async def resync_last_month(
-    ct_id: str,
-    bg: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """Resync the previous calendar month for an AWS CUR (CSV or Parquet/Hive).
-    Deletes existing records for that month and re-ingests from S3.
-    """
-    if user.role == "viewer":
-        raise HTTPException(status_code=403, detail="Viewers cannot sync")
-    result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
-    ct = result.scalar_one_or_none()
-    if not ct or ct.cloud_provider != "aws":
-        raise HTTPException(status_code=404, detail="AWS control tower not found")
-
-    today = date.today()
-    first_of_this_month = today.replace(day=1)
-    last_month_end = first_of_this_month - timedelta(days=1)
-    last_month_start = last_month_end.replace(day=1)
-    start_date = last_month_start.isoformat()
-    end_date = last_month_end.isoformat()
-
-    bg.add_task(_do_sync, ct_id, "resync-last-month", start_date, end_date)
-    return {
-        "message": f"Resync started for last month: {start_date} to {end_date}",
-        "start_date": start_date,
-        "end_date": end_date,
     }
 
 
