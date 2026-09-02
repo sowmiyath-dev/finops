@@ -212,11 +212,11 @@ def _parse_row(row: dict, start: date, end: date) -> Optional[dict]:
 
 def _list_parquet_files_hive(ct: ControlTower, start_date: str, end_date: str) -> list[str]:
     """Discover Parquet files from Hive-partitioned CUR (no manifest).
-    Supports paths like: prefix/year=2026/month=6/*.parquet
+    Supports paths like: prefix/year=2026/month=6/*.snappy.parquet
     """
     s3 = _get_s3_client(ct)
     bucket = ct.cur_s3_bucket
-    prefix = ct.cur_s3_prefix.rstrip("/")
+    prefix = _clean_prefix(ct.cur_s3_prefix)
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
 
@@ -331,11 +331,13 @@ def _parse_cur_csv_gz(ct: ControlTower, report_key: str, start_date: str, end_da
 
 def is_parquet_cur(ct: ControlTower) -> bool:
     """Returns True if this CT's CUR is Parquet/Hive-partitioned (no manifest).
-    Probes S3 for year= subfolders under the prefix to detect Hive layout.
+    Checks prefix for 'year=' marker or ':parquet' format flag.
+    Falls back to S3 probe.
     """
     prefix = (ct.cur_s3_prefix or "").rstrip("/")
-    if "year=" in prefix or prefix.endswith(".parquet"):
+    if "year=" in prefix or prefix.endswith(".parquet") or prefix.endswith(":parquet"):
         return True
+    # Probe S3 for year= subfolders — indicates Hive-partitioned Parquet CUR
     try:
         s3 = _get_s3_client(ct)
         resp = s3.list_objects_v2(
@@ -348,6 +350,11 @@ def is_parquet_cur(ct: ControlTower) -> bool:
     except Exception as e:
         logger.warning(f"is_parquet_cur probe failed for {ct.name}: {e}")
     return False
+
+
+def _clean_prefix(prefix: str) -> str:
+    """Strip format flags from prefix before using in S3 paths."""
+    return prefix.rstrip("/").removesuffix(":parquet")
 
 
 def fetch_cur_from_s3(ct: ControlTower, start_date: str, end_date: str) -> list[dict]:
