@@ -1112,6 +1112,38 @@ async def sync_monthly(
     }
 
 
+@router.post("/{ct_id}/resync-last-month")
+async def resync_last_month(
+    ct_id: str,
+    bg: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Resync the previous calendar month for an AWS CUR (CSV or Parquet/Hive).
+    Deletes existing records for that month and re-ingests from S3.
+    """
+    if user.role == "viewer":
+        raise HTTPException(status_code=403, detail="Viewers cannot sync")
+    result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
+    ct = result.scalar_one_or_none()
+    if not ct or ct.cloud_provider != "aws":
+        raise HTTPException(status_code=404, detail="AWS control tower not found")
+
+    today = date.today()
+    first_of_this_month = today.replace(day=1)
+    last_month_end = first_of_this_month - timedelta(days=1)
+    last_month_start = last_month_end.replace(day=1)
+    start_date = last_month_start.isoformat()
+    end_date = last_month_end.isoformat()
+
+    bg.add_task(_do_sync, ct_id, "resync-last-month", start_date, end_date)
+    return {
+        "message": f"Resync started for last month: {start_date} to {end_date}",
+        "start_date": start_date,
+        "end_date": end_date,
+    }
+
+
 @router.post("/{ct_id}/sync")
 async def sync_tower(
     ct_id: str,

@@ -6,6 +6,13 @@ import logging
 from datetime import date, timedelta, timezone, time
 from typing import Optional
 
+try:
+    import pyarrow.parquet as pq
+    import pyarrow as pa
+    _PARQUET_AVAILABLE = True
+except ImportError:
+    _PARQUET_AVAILABLE = False
+
 _IST = timezone(timedelta(hours=5, minutes=30))
 from app.services.aws_session import get_boto3_session
 from app.models.db_models import ControlTower
@@ -203,6 +210,104 @@ def _parse_row(row: dict, start: date, end: date) -> Optional[dict]:
     }
 
 
+def _list_parquet_files_hive(ct: ControlTower, start_date: str, end_date: str) -> list[str]:
+    """Discover Parquet files from Hive-partitioned CUR (no manifest).
+    Supports paths like: prefix/year=2026/month=6/*.parquet
+    """
+    s3 = _get_s3_client(ct)
+    bucket = ct.cur_s3_bucket
+    prefix = ct.cur_s3_prefix.rstrip("/")
+    start = date.fromisoformat(start_date)
+    end = date.fromisoformat(end_date)
+
+    keys = []
+    # Iterate over each month in the range
+    current = start.replace(day=1)
+    while current <= end:
+        year_prefix = f"{prefix}/year={current.year}/month={current.month}/"
+        logger.info(f"Scanning Hive partition: s3://{bucket}/{year_prefix}")
+        try:
+            paginator = s3.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=bucket, Prefix=year_prefix):
+                for obj in page.get("Contents", []):
+                    if obj["Key"].endswith(".parquet"):
+                        keys.append(obj["Key"])
+        except Exception as e:
+            logger.warning(f"Could not list {year_prefix}: {e}")
+        # Advance to next month
+        if current.month == 12:
+            current = current.replace(year=current.year + 1, month=1)
+        else:
+            current = current.replace(month=current.month + 1)
+    logger.info(f"Found {len(keys)} Parquet files for range {start_date} → {end_date}")
+    return keys
+
+
+def _parse_cur_parquet(ct: ControlTower, report_key: str, start_date: str, end_date: str) -> list[dict]:
+    """Parse a CUR Parquet file from S3."""
+    if not _PARQUET_AVAILABLE:
+        raise RuntimeError("pyarrow is not installed. Run: pip install pyarrow")
+    s3 = _get_s3_client(ct)
+    records = []
+    start = date.fromisoformat(start_date)
+    end = date.fromisoformat(end_date)
+    try:
+        obj = s3.get_object(Bucket=ct.cur_s3_bucket, Key=report_key)
+        buf = io.BytesIO(obj["Body"].read())
+        table = pq.read_table(buf)
+        for batch in table.to_batches(max_chunksize=5000):
+            df = batch.to_pydict()
+            row_count = len(next(iter(df.values())))
+            for i in range(row_count):
+                row = {col: (df[col][i] if df[col][i] is not None else "") for col in df}
+                try:
+                    parsed = _parse_row(row, start, end)
+                    if parsed:
+                        records.append(parsed)
+                except Exception as e:
+                    logger.debug(f"Skipping row: {e}")
+        logger.info(f"Parsed {len(records)} records from Parquet {report_key}")
+    except Exception as e:
+        logger.error(f"Failed to parse Parquet {report_key}: {e}", exc_info=True)
+    return records
+
+
+def stream_parquet_file_batches(ct: ControlTower, report_key: str, start_date: str, end_date: str, batch_size: int = 5000):
+    """Stream-parse a CUR Parquet file and yield batches of records."""
+    if not _PARQUET_AVAILABLE:
+        raise RuntimeError("pyarrow is not installed. Run: pip install pyarrow")
+    s3 = _get_s3_client(ct)
+    start = date.fromisoformat(start_date)
+    end = date.fromisoformat(end_date)
+    batch = []
+    try:
+        logger.info(f"Streaming Parquet {report_key}...")
+        obj = s3.get_object(Bucket=ct.cur_s3_bucket, Key=report_key)
+        buf = io.BytesIO(obj["Body"].read())
+        table = pq.read_table(buf)
+        for arrow_batch in table.to_batches(max_chunksize=batch_size):
+            df = arrow_batch.to_pydict()
+            row_count = len(next(iter(df.values())))
+            for i in range(row_count):
+                row = {col: (df[col][i] if df[col][i] is not None else "") for col in df}
+                try:
+                    parsed = _parse_row(row, start, end)
+                    if parsed:
+                        batch.append(parsed)
+                        if len(batch) >= batch_size:
+                            yield batch
+                            batch = []
+                except Exception as e:
+                    logger.debug(f"Skipping row: {e}")
+        if batch:
+            yield batch
+        logger.info(f"Finished streaming Parquet {report_key}")
+    except Exception as e:
+        logger.error(f"Failed to stream Parquet {report_key}: {e}", exc_info=True)
+        if batch:
+            yield batch
+
+
 def _parse_cur_csv_gz(ct: ControlTower, report_key: str, start_date: str, end_date: str) -> list[dict]:
     s3 = _get_s3_client(ct)
     records = []
@@ -224,26 +329,44 @@ def _parse_cur_csv_gz(ct: ControlTower, report_key: str, start_date: str, end_da
     return records
 
 
+def is_parquet_cur(ct: ControlTower) -> bool:
+    """Returns True if this CT's CUR is Parquet/Hive-partitioned (no manifest)."""
+    prefix = (ct.cur_s3_prefix or "").rstrip("/")
+    return "year=" in prefix or (ct.cur_s3_prefix or "").endswith(".parquet")
+
+
 def fetch_cur_from_s3(ct: ControlTower, start_date: str, end_date: str) -> list[dict]:
     if not ct.cur_s3_bucket or not ct.cur_s3_prefix:
         raise ValueError(f"CUR S3 bucket/prefix not configured for CT: {ct.name}")
     all_records = []
-    billing_periods = _get_billing_periods_for_range(start_date, end_date)
-    logger.info(f"Fetching CUR for CT {ct.name} | periods: {billing_periods} | range: {start_date} → {end_date}")
-    for period in billing_periods:
-        manifest = _get_latest_manifest(ct, period)
-        if not manifest:
-            logger.warning(f"No manifest for period {period}, skipping")
-            continue
-        report_keys = manifest.get("reportKeys", [])
-        logger.info(f"Period {period}: found {len(report_keys)} CUR files")
-        for key in report_keys:
-            all_records.extend(_parse_cur_csv_gz(ct, key, start_date, end_date))
+    if is_parquet_cur(ct):
+        keys = _list_parquet_files_hive(ct, start_date, end_date)
+        for key in keys:
+            all_records.extend(_parse_cur_parquet(ct, key, start_date, end_date))
+    else:
+        billing_periods = _get_billing_periods_for_range(start_date, end_date)
+        logger.info(f"Fetching CUR for CT {ct.name} | periods: {billing_periods} | range: {start_date} → {end_date}")
+        for period in billing_periods:
+            manifest = _get_latest_manifest(ct, period)
+            if not manifest:
+                logger.warning(f"No manifest for period {period}, skipping")
+                continue
+            report_keys = manifest.get("reportKeys", [])
+            logger.info(f"Period {period}: found {len(report_keys)} CUR files")
+            for key in report_keys:
+                all_records.extend(_parse_cur_csv_gz(ct, key, start_date, end_date))
     logger.info(f"Total CUR records fetched for CT {ct.name}: {len(all_records)}")
     return all_records
 
 
-def get_report_keys_for_period(ct: ControlTower, period: str) -> list[str]:
+def get_report_keys_for_period(ct: ControlTower, period: str, start_date: str = None, end_date: str = None) -> list[str]:
+    """Returns file keys for a billing period. For Parquet/Hive CURs, uses date-based discovery."""
+    if is_parquet_cur(ct):
+        if not start_date or not end_date:
+            # Derive dates from period string e.g. "20260601-20260701"
+            start_date = f"{period[:4]}-{period[4:6]}-{period[6:8]}"
+            end_date = f"{period[9:13]}-{period[13:15]}-{period[15:17]}"
+        return _list_parquet_files_hive(ct, start_date, end_date)
     manifest = _get_latest_manifest(ct, period)
     if not manifest:
         return []
@@ -257,7 +380,11 @@ def fetch_cur_single_file(ct: ControlTower, report_key: str, start_date: str, en
 
 
 def stream_cur_file_batches(ct: ControlTower, report_key: str, start_date: str, end_date: str, batch_size: int = 5000):
-    """Stream-parse a CUR file and yield batches of records."""
+    """Stream-parse a CUR file (CSV.GZ or Parquet) and yield batches of records."""
+    if report_key.endswith(".parquet"):
+        yield from stream_parquet_file_batches(ct, report_key, start_date, end_date, batch_size)
+        return
+
     s3 = _get_s3_client(ct)
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
