@@ -146,6 +146,9 @@ def _normalize_parquet_row(row: dict) -> dict:
     normalized = {}
     for k, v in row.items():
         mapped = _PARQUET_COL_MAP.get(k)
+        # Convert datetime objects to ISO string
+        if hasattr(v, 'isoformat'):
+            v = v.isoformat()
         if mapped:
             normalized[mapped] = str(v) if v is not None else ""
         elif k.startswith("resource_tags_user_"):
