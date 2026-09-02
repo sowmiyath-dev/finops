@@ -341,7 +341,7 @@ export default function CTDetailPage() {
     })) || [];
   })();
 
-  const totalCost = summary?.total_cost || 0;
+  const totalCost = spDist?.total_true_cost || summary?.total_cost || 0;
 
   const byService: Record<string, any[]> = {};
   allSpResources.forEach((r: any) => {
