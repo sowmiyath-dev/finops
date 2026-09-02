@@ -111,8 +111,58 @@ def _get_billing_periods_for_range(start_date: str, end_date: str) -> list[str]:
     return sorted(list(periods))
 
 
+_PARQUET_COL_MAP = {
+    "line_item_usage_start_date":           "lineItem/UsageStartDate",
+    "line_item_usage_account_id":           "lineItem/UsageAccountId",
+    "line_item_product_code":               "lineItem/ProductCode",
+    "line_item_usage_type":                 "lineItem/UsageType",
+    "line_item_operation":                  "lineItem/Operation",
+    "line_item_resource_id":                "lineItem/ResourceId",
+    "line_item_line_item_type":             "lineItem/LineItemType",
+    "line_item_unblended_cost":             "lineItem/UnblendedCost",
+    "line_item_blended_cost":               "lineItem/BlendedCost",
+    "line_item_net_unblended_cost":         "lineItem/NetUnblendedCost",
+    "line_item_usage_amount":               "lineItem/UsageAmount",
+    "line_item_legal_entity":               "lineItem/LegalEntity",
+    "product_region":                       "product/region",
+    "product_region_code":                  "product/regionCode",
+    "product_product_name":                 "product/ProductName",
+    "product_instance_type":                "product/instanceType",
+    "product_operating_system":             "product/operatingSystem",
+    "product_volume_type":                  "product/volumeType",
+    "product_volume_api_name":              "product/volumeApiName",
+    "product_storage_media":                "product/storageMedia",
+    "pricing_unit":                         "pricing/unit",
+    "reservation_subscription_id":          "reservation/SubscriptionId",
+    "reservation_effective_cost":           "reservation/EffectiveCost",
+    "savings_plan_savings_plan_a_r_n":      "savingsPlan/SavingsPlanARN",
+    "savings_plan_savings_plan_effective_cost": "savingsPlan/SavingsPlanEffectiveCost",
+    "bill_billing_entity":                  "bill/BillingEntity",
+}
+
+
+def _normalize_parquet_row(row: dict) -> dict:
+    """Convert Parquet underscore column names to CSV slash notation."""
+    normalized = {}
+    for k, v in row.items():
+        mapped = _PARQUET_COL_MAP.get(k)
+        if mapped:
+            normalized[mapped] = str(v) if v is not None else ""
+        elif k.startswith("resource_tags_user_"):
+            tag_key = "resourceTags/user:" + k[len("resource_tags_user_"):]
+            normalized[tag_key] = str(v) if v else ""
+        else:
+            normalized[k] = str(v) if v is not None else ""
+    return normalized
+
+
 def _parse_row(row: dict, start: date, end: date) -> Optional[dict]:
-    """Parse a single CUR row. Returns None if row should be skipped."""
+    """Parse a single CUR row (CSV or Parquet). Returns None if row should be skipped."""
+    # Parquet CUR uses underscore column names; CSV uses slash notation
+    # Normalize to slash notation for unified parsing
+    if "line_item_usage_start_date" in row and "lineItem/UsageStartDate" not in row:
+        row = _normalize_parquet_row(row)
+
     usage_start = row.get("lineItem/UsageStartDate", "")
     if not usage_start:
         return None
