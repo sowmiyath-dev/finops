@@ -230,7 +230,7 @@ def _list_parquet_files_hive(ct: ControlTower, start_date: str, end_date: str) -
             paginator = s3.get_paginator("list_objects_v2")
             for page in paginator.paginate(Bucket=bucket, Prefix=year_prefix):
                 for obj in page.get("Contents", []):
-                    if obj["Key"].endswith(".parquet"):
+                    if obj["Key"].endswith(".parquet") or obj["Key"].endswith(".snappy.parquet"):
                         keys.append(obj["Key"])
         except Exception as e:
             logger.warning(f"Could not list {year_prefix}: {e}")
@@ -343,6 +343,7 @@ def fetch_cur_from_s3(ct: ControlTower, start_date: str, end_date: str) -> list[
         keys = _list_parquet_files_hive(ct, start_date, end_date)
         for key in keys:
             all_records.extend(_parse_cur_parquet(ct, key, start_date, end_date))
+
     else:
         billing_periods = _get_billing_periods_for_range(start_date, end_date)
         logger.info(f"Fetching CUR for CT {ct.name} | periods: {billing_periods} | range: {start_date} → {end_date}")
@@ -381,7 +382,7 @@ def fetch_cur_single_file(ct: ControlTower, report_key: str, start_date: str, en
 
 def stream_cur_file_batches(ct: ControlTower, report_key: str, start_date: str, end_date: str, batch_size: int = 5000):
     """Stream-parse a CUR file (CSV.GZ or Parquet) and yield batches of records."""
-    if report_key.endswith(".parquet"):
+    if report_key.endswith(".parquet") or report_key.endswith(".snappy.parquet"):
         yield from stream_parquet_file_batches(ct, report_key, start_date, end_date, batch_size)
         return
 
