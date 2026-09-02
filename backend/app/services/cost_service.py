@@ -437,12 +437,15 @@ def fetch_cur_from_s3(ct: ControlTower, start_date: str, end_date: str) -> list[
 
 def get_report_keys_for_period(ct: ControlTower, period: str, start_date: str = None, end_date: str = None) -> list[str]:
     """Returns file keys for a billing period. For Parquet/Hive CURs, uses date-based discovery."""
-    if is_parquet_cur(ct):
+    parquet = is_parquet_cur(ct)
+    logger.info(f"get_report_keys_for_period: CT={ct.name} prefix={ct.cur_s3_prefix} is_parquet={parquet} period={period} start={start_date} end={end_date}")
+    if parquet:
         if not start_date or not end_date:
-            # Derive dates from period string e.g. "20260601-20260701"
             start_date = f"{period[:4]}-{period[4:6]}-{period[6:8]}"
             end_date = f"{period[9:13]}-{period[13:15]}-{period[15:17]}"
-        return _list_parquet_files_hive(ct, start_date, end_date)
+        keys = _list_parquet_files_hive(ct, start_date, end_date)
+        logger.info(f"Parquet keys found: {keys}")
+        return keys
     manifest = _get_latest_manifest(ct, period)
     if not manifest:
         return []

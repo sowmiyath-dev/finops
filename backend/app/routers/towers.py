@@ -183,6 +183,7 @@ async def _do_sync(ct_id: str, triggered_by: str = "manual", force_start: Option
                 report_keys = await loop.run_in_executor(
                     _executor, lambda p=period, fs=file_start, fe=file_end: get_report_keys_for_period(ct, p, fs, fe)
                 )
+                logger.info(f"CT {ct_id} period {period}: file_start={file_start} file_end={file_end} keys={report_keys}")
 
                 if not report_keys:
                     logger.info(f"No files for period {period}, skipping")
