@@ -330,9 +330,24 @@ def _parse_cur_csv_gz(ct: ControlTower, report_key: str, start_date: str, end_da
 
 
 def is_parquet_cur(ct: ControlTower) -> bool:
-    """Returns True if this CT's CUR is Parquet/Hive-partitioned (no manifest)."""
+    """Returns True if this CT's CUR is Parquet/Hive-partitioned (no manifest).
+    Probes S3 for year= subfolders under the prefix to detect Hive layout.
+    """
     prefix = (ct.cur_s3_prefix or "").rstrip("/")
-    return "year=" in prefix or (ct.cur_s3_prefix or "").endswith(".parquet")
+    if "year=" in prefix or prefix.endswith(".parquet"):
+        return True
+    try:
+        s3 = _get_s3_client(ct)
+        resp = s3.list_objects_v2(
+            Bucket=ct.cur_s3_bucket, Prefix=prefix + "/", Delimiter="/", MaxKeys=20
+        )
+        for cp in resp.get("CommonPrefixes", []):
+            if "year=" in cp["Prefix"]:
+                logger.info(f"Detected Hive/Parquet CUR for {ct.name} via S3 probe")
+                return True
+    except Exception as e:
+        logger.warning(f"is_parquet_cur probe failed for {ct.name}: {e}")
+    return False
 
 
 def fetch_cur_from_s3(ct: ControlTower, start_date: str, end_date: str) -> list[dict]:
