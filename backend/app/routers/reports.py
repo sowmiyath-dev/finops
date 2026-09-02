@@ -553,9 +553,11 @@ async def get_services(db: AsyncSession = Depends(get_db), user: User = Depends(
     key = f"svc_{'_'.join(sorted(ct_ids))}"
     if (cached := _cache_get(key)) is not None:
         return cached
+    from sqlalchemy import text
+    await db.execute(text("SET LOCAL statement_timeout = '15s'"))
     result = await db.execute(select(CostRecord.service).where(CostRecord.control_tower_id.in_(ct_ids)).distinct())
     data = sorted([r[0] for r in result.all()])
-    _cache_set(key, data)
+    _cache_set(key, data, ttl=_HIST_CACHE_TTL)
     return data
 
 
@@ -565,9 +567,11 @@ async def get_regions(db: AsyncSession = Depends(get_db), user: User = Depends(g
     key = f"reg_{'_'.join(sorted(ct_ids))}"
     if (cached := _cache_get(key)) is not None:
         return cached
+    from sqlalchemy import text
+    await db.execute(text("SET LOCAL statement_timeout = '15s'"))
     result = await db.execute(select(CostRecord.region).where(CostRecord.control_tower_id.in_(ct_ids)).distinct())
     data = sorted([r[0] for r in result.all() if r[0]])
-    _cache_set(key, data)
+    _cache_set(key, data, ttl=_HIST_CACHE_TTL)
     return data
 
 
@@ -613,6 +617,8 @@ async def get_charge_types(db: AsyncSession = Depends(get_db), user: User = Depe
     key = f"ct_{'_'.join(sorted(ct_ids))}"
     if (cached := _cache_get(key)) is not None:
         return cached
+    from sqlalchemy import text
+    await db.execute(text("SET LOCAL statement_timeout = '15s'"))
     result = await db.execute(
         select(CostRecord.line_item_type).where(
             CostRecord.control_tower_id.in_(ct_ids),
@@ -620,7 +626,7 @@ async def get_charge_types(db: AsyncSession = Depends(get_db), user: User = Depe
         ).distinct()
     )
     data = sorted([r[0] for r in result.all() if r[0]])
-    _cache_set(key, data)
+    _cache_set(key, data, ttl=_HIST_CACHE_TTL)
     return data
 
 
