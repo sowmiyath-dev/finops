@@ -81,12 +81,16 @@ AzureSyncSessionLocal = sessionmaker(_azure_sync_engine, class_=AsyncSession, ex
 
 
 async def init_db():
+    from sqlalchemy import text
     # Lightweight ping — avoids hanging during RDS backup windows
     async with engine.connect() as conn:
-        await conn.execute(__import__('sqlalchemy', fromlist=['text']).text("SELECT 1"))
+        await conn.execute(text("SELECT 1"))
     if settings.AZURE_DATABASE_URL:
         async with _azure_engine.connect() as conn:
-            await conn.execute(__import__('sqlalchemy', fromlist=['text']).text("SELECT 1"))
+            await conn.execute(text("SELECT 1"))
+    # Auto-create any missing tables (safe — skips existing tables)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.create_all)
 
 
 async def get_db():

@@ -14,12 +14,6 @@ interface LicenseRow {
   dc_units: number;
   dr_units: number;
   uat_units: number;
-  // computed (read-only display)
-  dc_cost?: number;
-  dr_cost?: number;
-  uat_cost?: number;
-  total_units?: number;
-  total_cost?: number;
 }
 
 function compute(row: LicenseRow) {
@@ -41,36 +35,20 @@ function fmtINR(v: number) {
   return "₹ " + v.toLocaleString("en-IN", { maximumFractionDigits: 0 });
 }
 
-function NumCell({
-  value,
-  onChange,
-  prefix,
-  className,
-}: {
-  value: number;
-  onChange: (v: number) => void;
-  prefix?: string;
-  className?: string;
+function NumCell({ value, onChange, prefix, className }: {
+  value: number; onChange: (v: number) => void; prefix?: string; className?: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value));
   const ref = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (editing) ref.current?.select();
-  }, [editing]);
+  useEffect(() => { if (editing) ref.current?.select(); }, [editing]);
 
-  const commit = () => {
-    const n = parseFloat(draft);
-    onChange(isNaN(n) ? 0 : n);
-    setEditing(false);
-  };
+  const commit = () => { const n = parseFloat(draft); onChange(isNaN(n) ? 0 : n); setEditing(false); };
 
   if (editing) {
     return (
-      <input
-        ref={ref}
-        value={draft}
+      <input ref={ref} value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setDraft(String(value)); setEditing(false); } }}
@@ -79,10 +57,8 @@ function NumCell({
     );
   }
   return (
-    <div
-      onClick={() => { setDraft(String(value)); setEditing(true); }}
-      className={`text-right text-xs font-mono cursor-pointer hover:bg-blue-50 rounded px-1 py-0.5 select-none ${className ?? ""}`}
-    >
+    <div onClick={() => { setDraft(String(value)); setEditing(true); }}
+      className={`text-right text-xs font-mono cursor-pointer hover:bg-blue-50 rounded px-1 py-0.5 select-none ${className ?? ""}`}>
       {prefix}{value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
     </div>
   );
@@ -94,14 +70,11 @@ function TextCell({ value, onChange, className }: { value: string; onChange: (v:
   const ref = useRef<HTMLInputElement>(null);
 
   useEffect(() => { if (editing) ref.current?.select(); }, [editing]);
-
   const commit = () => { onChange(draft); setEditing(false); };
 
   if (editing) {
     return (
-      <input
-        ref={ref}
-        value={draft}
+      <input ref={ref} value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setDraft(value); setEditing(false); } }}
@@ -110,47 +83,41 @@ function TextCell({ value, onChange, className }: { value: string; onChange: (v:
     );
   }
   return (
-    <div
-      onClick={() => { setDraft(value); setEditing(true); }}
-      className={`text-xs cursor-pointer hover:bg-blue-50 rounded px-1 py-0.5 select-none truncate ${className ?? ""}`}
-    >
+    <div onClick={() => { setDraft(value); setEditing(true); }}
+      className={`text-xs cursor-pointer hover:bg-blue-50 rounded px-1 py-0.5 select-none truncate ${className ?? ""}`}>
       {value || <span className="text-slate-300 italic">click to edit</span>}
     </div>
   );
 }
 
-export default function ExternalLicenseModal({
-  appName,
-  onClose,
-}: {
-  appName: string;
-  onClose: () => void;
-}) {
+export default function ExternalLicenseModal({ appName, onClose }: { appName: string; onClose: () => void; }) {
   const [rows, setRows] = useState<LicenseRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
 
   const loadRows = () => {
     setLoading(true);
+    setLoadError(null);
     api.get(`/external-licenses/${encodeURIComponent(appName)}`)
-      .then((r) => setRows(r.data))
-      .catch(() => toast.error("Failed to load licenses"))
+      .then((r) => { setRows(r.data); })
+      .catch((e) => {
+        const status = e?.response?.status ?? "network error";
+        const detail = e?.response?.data?.detail ?? e?.message ?? "unknown";
+        setLoadError(`HTTP ${status}: ${detail}`);
+      })
       .finally(() => setLoading(false));
   };
 
   useEffect(() => { loadRows(); }, [appName]); // eslint-disable-line
 
-  const update = (i: number, patch: Partial<LicenseRow>) => {
+  const update = (i: number, patch: Partial<LicenseRow>) =>
     setRows((prev) => prev.map((r, idx) => idx === i ? { ...r, ...patch } : r));
-  };
 
   const addRow = () => {
     const nextSno = rows.length > 0 ? Math.max(...rows.map((r) => r.sno)) + 1 : 1;
-    setRows((prev) => [...prev, {
-      sno: nextSno, description: "", team: "", unit_cost_pa: 0, unit_cost_pm: 0,
-      dc_units: 0, dr_units: 0, uat_units: 0,
-    }]);
+    setRows((prev) => [...prev, { sno: nextSno, description: "", team: "", unit_cost_pa: 0, unit_cost_pm: 0, dc_units: 0, dr_units: 0, uat_units: 0 }]);
   };
 
   const deleteRow = (i: number) => setRows((prev) => prev.filter((_, idx) => idx !== i));
@@ -160,11 +127,9 @@ export default function ExternalLicenseModal({
     try {
       await api.put(`/external-licenses/${encodeURIComponent(appName)}`, { rows });
       toast.success("Saved");
-    } catch {
-      toast.error("Save failed");
-    } finally {
-      setSaving(false);
-    }
+    } catch (e: any) {
+      toast.error(`Save failed: ${e?.response?.data?.detail ?? e?.message ?? "unknown"}`);
+    } finally { setSaving(false); }
   };
 
   const resetToDefaults = async () => {
@@ -174,25 +139,13 @@ export default function ExternalLicenseModal({
       await api.post(`/external-licenses/${encodeURIComponent(appName)}/reset`);
       toast.success("Reset to defaults");
       loadRows();
-    } catch {
-      toast.error("Reset failed");
-    } finally {
-      setResetting(false);
-    }
+    } catch (e: any) {
+      toast.error(`Reset failed: ${e?.response?.data?.detail ?? e?.message ?? "unknown"}`);
+    } finally { setResetting(false); }
   };
 
-  // Totals
   const totals = rows.reduce(
-    (acc, r) => {
-      const c = compute(r);
-      return {
-        dc_cost: acc.dc_cost + c.dc_cost,
-        dr_cost: acc.dr_cost + c.dr_cost,
-        uat_cost: acc.uat_cost + c.uat_cost,
-        total_units: acc.total_units + c.total_units,
-        total_cost: acc.total_cost + c.total_cost,
-      };
-    },
+    (acc, r) => { const c = compute(r); return { dc_cost: acc.dc_cost + c.dc_cost, dr_cost: acc.dr_cost + c.dr_cost, uat_cost: acc.uat_cost + c.uat_cost, total_units: acc.total_units + c.total_units, total_cost: acc.total_cost + c.total_cost }; },
     { dc_cost: 0, dr_cost: 0, uat_cost: 0, total_units: 0, total_cost: 0 }
   );
 
@@ -213,11 +166,10 @@ export default function ExternalLicenseModal({
             <button onClick={addRow} className="flex items-center gap-1 px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white text-xs font-bold rounded-lg transition">
               <Plus className="w-3.5 h-3.5" /> Add Row
             </button>
-            <button onClick={resetToDefaults} disabled={resetting} className="flex items-center gap-1 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-lg transition disabled:opacity-60" title="Reset to 21 default licenses">
-              {resetting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
-              Reset
+            <button onClick={resetToDefaults} disabled={resetting} className="flex items-center gap-1 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-lg transition disabled:opacity-60">
+              {resetting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />} Reset
             </button>
-            <button onClick={save} disabled={saving} className="flex items-center gap-1 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg transition disabled:opacity-60">
+            <button onClick={save} disabled={saving || !!loadError} className="flex items-center gap-1 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg transition disabled:opacity-60">
               {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
               {saving ? "Saving..." : "Save"}
             </button>
@@ -225,20 +177,33 @@ export default function ExternalLicenseModal({
           </div>
         </div>
 
-        {/* Table */}
+        {/* Body */}
         <div className="overflow-auto flex-1">
           {loading ? (
-            <div className="flex items-center justify-center h-40 text-slate-400 text-sm">Loading...</div>
+            <div className="flex items-center justify-center h-48 gap-2 text-slate-400 text-sm">
+              <RefreshCw className="w-4 h-4 animate-spin" /> Loading...
+            </div>
+          ) : loadError ? (
+            <div className="flex flex-col items-center justify-center h-48 gap-3 px-6 text-center">
+              <p className="text-sm font-bold text-red-600">Failed to load licenses</p>
+              <p className="text-xs font-mono bg-red-50 border border-red-200 rounded px-3 py-1.5 text-red-700">{loadError}</p>
+              <p className="text-xs text-slate-500">The table may not exist yet. Run on the server:</p>
+              <code className="text-[11px] bg-slate-100 border border-slate-200 rounded px-3 py-1.5 text-slate-700 select-all">
+                docker exec -it finops-backend python migrate_external_licenses.py
+              </code>
+              <button onClick={loadRows} className="mt-1 px-4 py-1.5 bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold rounded-lg transition">
+                Retry
+              </button>
+            </div>
           ) : (
             <table className="w-full text-xs" style={{ borderCollapse: "collapse", minWidth: 1100 }}>
               <thead className="sticky top-0 z-10">
-                {/* Group header row */}
                 <tr style={{ background: "#0f2d5e" }}>
                   <th className={thCls} rowSpan={2} style={{ width: 36 }}>S.No</th>
                   <th className={thCls} rowSpan={2} style={{ minWidth: 160 }}>Description</th>
                   <th className={thCls} rowSpan={2} style={{ width: 70 }}>Team</th>
-                  <th className={thCls} rowSpan={2} style={{ width: 100 }}>Unit Cost P.A</th>
-                  <th className={thCls} rowSpan={2} style={{ width: 100 }}>Unit Cost P.M</th>
+                  <th className={thCls} rowSpan={2} style={{ width: 110 }}>Unit Cost P.A</th>
+                  <th className={thCls} rowSpan={2} style={{ width: 110 }}>Unit Cost P.M</th>
                   <th className={thCls} colSpan={2} style={{ background: "#1a4a8a" }}>MUM - DC</th>
                   <th className={thCls} colSpan={2} style={{ background: "#1a5c6e" }}>HYD - DR</th>
                   <th className={thCls} colSpan={2} style={{ background: "#2d5a1a" }}>UAT</th>
@@ -246,13 +211,13 @@ export default function ExternalLicenseModal({
                   <th className={thCls} rowSpan={2} style={{ width: 36 }}></th>
                 </tr>
                 <tr style={{ background: "#1e3a6e" }}>
-                  <th className={thCls} style={{ width: 70, background: "#1a4a8a" }}>Units</th>
-                  <th className={thCls} style={{ width: 100, background: "#1a4a8a" }}>Cost P.M</th>
-                  <th className={thCls} style={{ width: 70, background: "#1a5c6e" }}>Units</th>
-                  <th className={thCls} style={{ width: 100, background: "#1a5c6e" }}>Cost P.M</th>
-                  <th className={thCls} style={{ width: 70, background: "#2d5a1a" }}>Units</th>
-                  <th className={thCls} style={{ width: 100, background: "#2d5a1a" }}>Cost P.M</th>
-                  <th className={thCls} style={{ width: 70, background: "#5a1a1a" }}>Units</th>
+                  <th className={thCls} style={{ width: 70, background: "#1a4a8a" }}>No of Units</th>
+                  <th className={thCls} style={{ width: 110, background: "#1a4a8a" }}>Cost P.M</th>
+                  <th className={thCls} style={{ width: 70, background: "#1a5c6e" }}>No of Units</th>
+                  <th className={thCls} style={{ width: 110, background: "#1a5c6e" }}>Cost P.M</th>
+                  <th className={thCls} style={{ width: 70, background: "#2d5a1a" }}>No of Units</th>
+                  <th className={thCls} style={{ width: 110, background: "#2d5a1a" }}>Cost P.M</th>
+                  <th className={thCls} style={{ width: 70, background: "#5a1a1a" }}>No of Units</th>
                   <th className={thCls} style={{ width: 110, background: "#5a1a1a" }}>Cost P.M</th>
                 </tr>
               </thead>
@@ -263,18 +228,10 @@ export default function ExternalLicenseModal({
                   return (
                     <tr key={i} style={{ background: isEven ? "#fff" : "#f8faff", borderBottom: "1px solid #e2e8f0" }}>
                       <td className={tdCls + " text-center text-slate-400 font-mono"}>{row.sno}</td>
-                      <td className={tdCls}>
-                        <TextCell value={row.description} onChange={(v) => update(i, { description: v })} />
-                      </td>
-                      <td className={tdCls}>
-                        <TextCell value={row.team} onChange={(v) => update(i, { team: v })} className="text-center" />
-                      </td>
-                      <td className={tdCls}>
-                        <NumCell value={row.unit_cost_pa} onChange={(v) => update(i, { unit_cost_pa: v, unit_cost_pm: Math.round(v / 12) })} prefix="₹ " className="text-slate-700" />
-                      </td>
-                      <td className={tdCls}>
-                        <NumCell value={row.unit_cost_pm} onChange={(v) => update(i, { unit_cost_pm: v })} prefix="₹ " className="text-slate-700" />
-                      </td>
+                      <td className={tdCls}><TextCell value={row.description} onChange={(v) => update(i, { description: v })} /></td>
+                      <td className={tdCls}><TextCell value={row.team} onChange={(v) => update(i, { team: v })} className="text-center" /></td>
+                      <td className={tdCls}><NumCell value={row.unit_cost_pa} onChange={(v) => update(i, { unit_cost_pa: v, unit_cost_pm: Math.round(v / 12) })} prefix="₹ " className="text-slate-700" /></td>
+                      <td className={tdCls}><NumCell value={row.unit_cost_pm} onChange={(v) => update(i, { unit_cost_pm: v })} prefix="₹ " className="text-slate-700" /></td>
                       {/* DC */}
                       <td className={tdCls} style={{ background: isEven ? "#eef4ff" : "#e6f0ff" }}>
                         <NumCell value={row.dc_units} onChange={(v) => update(i, { dc_units: v })} className="text-blue-800" />
@@ -312,7 +269,6 @@ export default function ExternalLicenseModal({
                   );
                 })}
               </tbody>
-              {/* Totals row */}
               <tfoot>
                 <tr style={{ background: "#0f2d5e", borderTop: "2px solid #1a6fa8" }}>
                   <td colSpan={5} className="px-3 py-2 text-xs font-extrabold text-white">TOTAL</td>
@@ -331,10 +287,10 @@ export default function ExternalLicenseModal({
           )}
         </div>
 
-        {/* Footer hint */}
+        {/* Footer */}
         <div className="px-5 py-2 border-t border-slate-100 flex items-center justify-between">
           <p className="text-[10px] text-slate-400">
-            Cost P.M = Units × Unit Cost P.M &nbsp;·&nbsp; Total = DC + DR + UAT &nbsp;·&nbsp; Click any cell to edit
+            Cost P.M = No of Units × Unit Cost P.M &nbsp;·&nbsp; Total = DC + DR + UAT &nbsp;·&nbsp; Click any cell to edit
           </p>
           <p className="text-[10px] text-slate-400 font-mono">
             Grand Total: <span className="font-bold text-slate-700">{fmtINR(totals.total_cost)}</span>
