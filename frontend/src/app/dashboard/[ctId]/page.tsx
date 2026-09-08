@@ -380,7 +380,7 @@ export default function CTDetailPage() {
 
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm mb-5">
-        <Link href="/dashboard" className="text-black hover:text-blue-900 font-medium">
+        <Link href="/aws" className="text-black hover:text-blue-900 font-medium">
           AWS
         </Link>
         <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
