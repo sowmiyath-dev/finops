@@ -1308,6 +1308,26 @@ async def update_tower_name(
     return {"id": ct_id, "name": name}
 
 
+@router.patch("/{ct_id}/s3-path")
+async def update_s3_path(
+    ct_id: str,
+    cur_s3_bucket: str,
+    cur_s3_prefix: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if user.role == "viewer":
+        raise HTTPException(status_code=403)
+    result = await db.execute(select(ControlTower).where(ControlTower.id == ct_id))
+    ct = result.scalar_one_or_none()
+    if not ct:
+        raise HTTPException(status_code=404)
+    ct.cur_s3_bucket = cur_s3_bucket
+    ct.cur_s3_prefix = cur_s3_prefix
+    await db.commit()
+    return {"id": ct_id, "cur_s3_bucket": cur_s3_bucket, "cur_s3_prefix": cur_s3_prefix}
+
+
 @router.patch("/{ct_id}/auto-sync")
 async def toggle_auto_sync(ct_id: str, enabled: bool, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     if user.role == "viewer":

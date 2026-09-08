@@ -5,9 +5,10 @@ import { useParams, useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
+import toast from "react-hot-toast";
 import Link from "next/link";
 import {
-  ChevronRight, DollarSign, RefreshCw, TrendingDown, Download,
+  ChevronRight, DollarSign, RefreshCw, TrendingDown, Download, Pencil, X,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -234,6 +235,10 @@ export default function CTDetailPage() {
   const [allSpResources, setAllSpResources] = useState<any[]>([]);
   const [allSpResLoading, setAllSpResLoading] = useState(false);
   const [allSpResLoaded, setAllSpResLoaded] = useState(false);
+  const [s3EditOpen, setS3EditOpen] = useState(false);
+  const [s3Bucket, setS3Bucket] = useState("");
+  const [s3Prefix, setS3Prefix] = useState("");
+  const [s3Saving, setS3Saving] = useState(false);
 
   const openSpResources = async (accountId: string, accountName: string) => {
     setSpResourceModal({ accountId, accountName });
@@ -261,6 +266,25 @@ export default function CTDetailPage() {
 
   useEffect(() => { if (!token) router.push("/auth"); }, [token]);
   useEffect(() => { setAllSpResources([]); }, [startDate, endDate, selectedAccounts]);
+
+  const openS3Edit = () => {
+    setS3Bucket(ct?.cur_s3_bucket || "");
+    setS3Prefix(ct?.cur_s3_prefix || "");
+    setS3EditOpen(true);
+  };
+
+  const saveS3Path = async () => {
+    if (!s3Bucket.trim() || !s3Prefix.trim()) { toast.error("Bucket and prefix are required"); return; }
+    setS3Saving(true);
+    try {
+      await api.patch(`/towers/${ctId}/s3-path`, null, { params: { cur_s3_bucket: s3Bucket.trim(), cur_s3_prefix: s3Prefix.trim() } });
+      qc.invalidateQueries({ queryKey: ["towers"] });
+      toast.success("S3 path updated");
+      setS3EditOpen(false);
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || "Failed to update S3 path");
+    } finally { setS3Saving(false); }
+  };
 
   const { data: boundary } = useQuery({
     queryKey: ["boundary"],
@@ -368,6 +392,14 @@ export default function CTDetailPage() {
         <div>
           <h1 className="text-2xl font-bold text-black">{ct?.name}</h1>
           <p className="text-xs text-black mt-0.5 font-mono">{ct?.management_account_id} &middot; {ct?.management_account_name}</p>
+          <div className="flex items-center gap-1.5 mt-1">
+            <span className="text-[11px] font-mono text-gray-400">
+              {ct?.cur_s3_bucket ? `${ct.cur_s3_bucket} / ${ct.cur_s3_prefix}` : "S3 path not set"}
+            </span>
+            <button onClick={openS3Edit} title="Edit S3 path" className="p-0.5 rounded hover:bg-gray-100 transition">
+              <Pencil className="w-3 h-3 text-gray-400 hover:text-blue-900" />
+            </button>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
@@ -1025,6 +1057,50 @@ export default function CTDetailPage() {
             </div>
           </div>
         </>
+      )}
+
+      {/* S3 Path Edit Modal */}
+      {s3EditOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg border border-gray-300 shadow-lg w-full max-w-md">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
+              <h3 className="text-sm font-bold text-black">Edit CUR S3 Path — {ct?.name}</h3>
+              <button onClick={() => setS3EditOpen(false)} className="p-1 rounded hover:bg-gray-100">
+                <X className="w-4 h-4 text-gray-500" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-600 mb-1">S3 Bucket</label>
+                <input
+                  value={s3Bucket}
+                  onChange={(e) => setS3Bucket(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm font-mono outline-none focus:border-blue-900"
+                  placeholder="e.g. rilcurmall"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-600 mb-1">S3 Prefix</label>
+                <input
+                  value={s3Prefix}
+                  onChange={(e) => setS3Prefix(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm font-mono outline-none focus:border-blue-900"
+                  placeholder="e.g. rilcurmall/rilcurmall26NN"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-200">
+              <button onClick={() => setS3EditOpen(false)}
+                className="px-4 py-2 text-xs font-bold text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 transition">
+                Cancel
+              </button>
+              <button onClick={saveS3Path} disabled={s3Saving}
+                className="px-4 py-2 text-xs font-bold text-white bg-blue-900 hover:bg-blue-800 rounded-md transition disabled:opacity-50">
+                {s3Saving ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* SP Resources Modal */}
