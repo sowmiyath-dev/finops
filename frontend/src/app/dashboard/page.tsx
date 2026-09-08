@@ -122,22 +122,13 @@ function MappingRow({
           {rate > 0 ? fmtINR(inrCost) : <span className="text-xs text-slate-300">enter rate</span>}
         </td>
         <td className="px-4 py-3 text-right">
-          {licenseTotal != null && licenseTotal > 0 ? (
-            <button
-              onClick={onOpenLicense}
-              className="text-sm font-bold font-mono text-purple-700 hover:text-purple-900 hover:underline transition flex items-center gap-1 ml-auto"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              ₹{licenseTotal.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
-            </button>
-          ) : (
-            <button
-              onClick={onOpenLicense}
-              className="text-xs text-slate-400 hover:text-purple-600 transition flex items-center gap-1 ml-auto"
-            >
-              <FileSpreadsheet className="w-3 h-3" /> Set
-            </button>
-          )}
+          <button
+            onClick={onOpenLicense}
+            className="text-sm font-bold font-mono text-purple-700 hover:text-purple-900 hover:underline transition flex items-center gap-1 ml-auto"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            {licenseTotal != null ? `₹${licenseTotal.toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : "₹ 0"}
+          </button>
         </td>
         <td className="px-4 py-3 text-right text-sm font-bold font-mono text-orange-700">
           {totalCost != null ? `₹${totalCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : <span className="text-xs text-slate-300">enter rate</span>}
