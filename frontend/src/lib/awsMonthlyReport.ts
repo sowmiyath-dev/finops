@@ -43,6 +43,7 @@ function buildMasterSheet(
   rate: number,
   mappings: AppMapping[],
   novacTotalCostMap: Map<string, number>,
+  licenseTotals?: Record<string, number>,
 ): XLSX.WorkSheet {
   const accMap = new Map<string, number>();
   for (const ct of ctDataList) {
@@ -52,11 +53,12 @@ function buildMasterSheet(
   }
 
   const rows: any[][] = [
-    [boldStr("Application Name"), boldStr("Vertical"), boldStr("Cost (USD)"), boldStr("Cost in INR"), boldStr("Note")],
+    [boldStr("Application Name"), boldStr("Vertical"), boldStr("Cost (USD)"), boldStr("Cost in INR"), boldStr("Ext. License (INR)"), boldStr("Total Cost (INR)"), boldStr("Note")],
   ];
 
   let grandTotalUsd = 0;
   let grandTotalInr = 0;
+  let grandTotalLic = 0;
   for (const m of mappings) {
     let costUsd = 0;
     for (const { accountId, fraction = 1 } of m.accounts) {
@@ -69,22 +71,24 @@ function buildMasterSheet(
       } else if (accountId === NOVAC_PAYER_ID) {
         costUsd += (accMap.get(accountId) || 0) * fraction;
       } else if (novacTotalCostMap.has(accountId)) {
-        // totalCostMap stores INR already — convert back to USD for USD column
         costUsd += ((novacTotalCostMap.get(accountId) || 0) / rate) * fraction;
       } else {
         costUsd += (accMap.get(accountId) || 0) * fraction;
       }
     }
     const costInr = costUsd * rate;
+    const licCost = licenseTotals?.[m.appName] || 0;
+    const totalCost = costInr + licCost;
     grandTotalUsd += costUsd;
     grandTotalInr += costInr;
+    grandTotalLic += licCost;
     const vertical = APP_VERTICAL_MAP[m.appName] || "";
-    rows.push([m.appName, vertical, usdCell(costUsd), inrCell(costInr), m.note]);
+    rows.push([m.appName, vertical, usdCell(costUsd), inrCell(costInr), inrCell(licCost), inrCell(totalCost), m.note]);
   }
-  rows.push([boldStr("Total"), "", usdCell(grandTotalUsd), inrCell(grandTotalInr), ""]);
+  rows.push([boldStr("Total"), "", usdCell(grandTotalUsd), inrCell(grandTotalInr), inrCell(grandTotalLic), inrCell(grandTotalInr + grandTotalLic), ""]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  setWidths(ws, [28, 14, 16, 18, 52]);
+  setWidths(ws, [28, 14, 16, 18, 18, 18, 52]);
   return ws;
 }
 
@@ -258,7 +262,8 @@ export function generateCtReport(
   rate: number,
   monthLabel: string,
   servicesByCt: Map<string, ServiceCost[]>,
-  selectedAccountIds?: string[], // if provided, only include these accounts
+  selectedAccountIds?: string[],
+  licenseTotals?: Record<string, number>,
 ) {
   const wb = XLSX.utils.book_new();
   const accounts = selectedAccountIds && selectedAccountIds.length > 0
@@ -283,6 +288,22 @@ export function generateCtReport(
   const accWs = XLSX.utils.aoa_to_sheet(accRows);
   setWidths(accWs, [18, 26, 16, 16, 16]);
   XLSX.utils.book_append_sheet(wb, accWs, "Summary");
+
+  // External License sheet
+  if (licenseTotals && Object.keys(licenseTotals).length > 0) {
+    const licRows: any[][] = [
+      [boldStr("Application"), boldStr("Ext. License Cost (INR)"), boldStr("AWS Cost (INR)"), boldStr("Total Cost (INR)")],
+    ];
+    let licGrand = 0;
+    for (const [appName, licCost] of Object.entries(licenseTotals)) {
+      licGrand += licCost;
+      licRows.push([appName, inrCell(licCost), "", ""]);
+    }
+    licRows.push([boldStr("Total"), inrCell(licGrand), "", ""]);
+    const licWs = XLSX.utils.aoa_to_sheet(licRows);
+    setWidths(licWs, [28, 22, 18, 18]);
+    XLSX.utils.book_append_sheet(wb, licWs, "External License");
+  }
 
   // One sheet per sub-account: service-wise
   for (const acc of accounts) {
@@ -316,32 +337,45 @@ export function generateAwsMonthlyReport(
   rate: number,
   monthLabel: string,
   mappings: AppMapping[],
+  licenseTotals?: Record<string, number>,
 ) {
   const wb = XLSX.utils.book_new();
 
-  // Build Novac sheet first to get totalCostMap for master
   const novacCT = ctDataList.find(
     (c) => c.ctName.toLowerCase().includes("novac") &&
            !c.ctName.toLowerCase().includes("wonder") &&
            !c.ctName.toLowerCase().includes("credit")
   );
   let novacTotalCostMap = new Map<string, number>();
-
   if (novacCT) {
     const { totalCostMap } = buildNovacSheet(novacCT, rate);
     novacTotalCostMap = totalCostMap;
   }
 
-  // Sheet 1: Master — cost pulled from totalCost (costInINR + sharedCost)
-  XLSX.utils.book_append_sheet(wb, buildMasterSheet(ctDataList, rate, mappings, novacTotalCostMap), "Master");
+  XLSX.utils.book_append_sheet(wb, buildMasterSheet(ctDataList, rate, mappings, novacTotalCostMap, licenseTotals), "Master");
 
-  // Remaining sheets
+  // External License sheet — all apps with their license costs
+  if (licenseTotals && Object.keys(licenseTotals).length > 0) {
+    const licRows: any[][] = [
+      [boldStr("Application"), boldStr("Ext. License Cost (INR)")],
+    ];
+    let licGrand = 0;
+    for (const m of mappings) {
+      const licCost = licenseTotals[m.appName] || 0;
+      licGrand += licCost;
+      licRows.push([m.appName, inrCell(licCost)]);
+    }
+    licRows.push([boldStr("Total"), inrCell(licGrand)]);
+    const licWs = XLSX.utils.aoa_to_sheet(licRows);
+    setWidths(licWs, [28, 22]);
+    XLSX.utils.book_append_sheet(wb, licWs, "External License");
+  }
+
   for (const ct of ctDataList) {
     const nameL = ct.ctName.toLowerCase();
     if (nameL.includes("novac") && !nameL.includes("wonder") && !nameL.includes("credit")) {
       const { ws } = buildNovacSheet(ct, rate);
       XLSX.utils.book_append_sheet(wb, ws, ct.ctName.slice(0, 31));
-      // SFL sheet — separate sheet for SFL-PROD and SFL-UAT with shared split
       XLSX.utils.book_append_sheet(wb, buildSflSheet(ct, rate), "SFL");
     } else {
       XLSX.utils.book_append_sheet(wb, buildGenericSheet(ct, rate), ct.ctName.slice(0, 31));

@@ -93,6 +93,7 @@ function MappingRow({
   const vertical = APP_VERTICAL_MAP[row.appName] || "—";
   const fmtUSD = (v: number | null) => v != null ? `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—";
   const fmtINR = (v: number | null) => v != null ? `₹${v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—";
+  const totalCost = (inrCost != null && rate > 0) ? (inrCost + (licenseTotal || 0)) : null;
 
   if (!editing) {
     return (
@@ -138,6 +139,9 @@ function MappingRow({
             </button>
           )}
         </td>
+        <td className="px-4 py-3 text-right text-sm font-bold font-mono text-orange-700">
+          {totalCost != null ? `₹${totalCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : <span className="text-xs text-slate-300">enter rate</span>}
+        </td>
         <td className="px-4 py-3">
           <div className="flex gap-1 justify-end">
             <button onClick={() => setEditing(true)} className="p-1.5 rounded hover:bg-blue-100 text-blue-600 transition"><Pencil className="w-3.5 h-3.5" /></button>
@@ -176,6 +180,7 @@ function MappingRow({
       <td className="px-4 py-2 text-right text-[11px] font-mono text-blue-700">{fmtUSD(usdCost)}</td>
       <td className="px-4 py-2 text-right text-[11px] font-mono text-emerald-700">{rate > 0 ? fmtINR(inrCost) : "—"}</td>
       <td className="px-4 py-2 text-right text-[11px] font-mono text-purple-600">{licenseTotal != null && licenseTotal > 0 ? `₹${licenseTotal.toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : "—"}</td>
+      <td className="px-4 py-2 text-right text-[11px] font-mono text-orange-700">{totalCost != null ? `₹${totalCost.toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : "—"}</td>
       <td className="px-3 py-2">
         <div className="flex gap-1 justify-end">
           <button onClick={save} className="p-1 rounded hover:bg-green-100 text-green-700"><Check className="w-3 h-3" /></button>
@@ -337,7 +342,7 @@ export default function DashboardPage() {
     setReportLoading(true);
     try {
       const ctDataList = await fetchCtData(awsTowers, reportEffectiveStart, reportEffectiveEnd);
-      generateAwsMonthlyReport(ctDataList, rate, reportEffectiveLabel, mappings);
+      generateAwsMonthlyReport(ctDataList, rate, reportEffectiveLabel, mappings, licenseTotals);
       toast.success("Report downloaded");
       setDlDone(true); setTimeout(() => setDlDone(false), 2000);
     } catch (e) { console.error(e); toast.error("Failed to generate report"); }
@@ -384,6 +389,7 @@ export default function DashboardPage() {
       generateCtReport(
         ctData, rate, monthLabel, servicesByCt,
         selectedSubAccounts.length > 0 ? selectedSubAccounts : undefined,
+        licenseTotals,
       );
       toast.success(`${ct.name} report downloaded`);
       setDlDone(true); setTimeout(() => setDlDone(false), 2000);
@@ -687,11 +693,12 @@ export default function DashboardPage() {
           {/* Table */}
           <table className="w-full" style={{ borderCollapse: "collapse" }}>
             <colgroup>
-              <col style={{ width: "26%" }} />
-              <col style={{ width: "10%" }} />
-              <col style={{ width: "18%" }} />
-              <col style={{ width: "18%" }} />
-              <col style={{ width: "18%" }} />
+              <col style={{ width: "22%" }} />
+              <col style={{ width: "9%" }} />
+              <col style={{ width: "14%" }} />
+              <col style={{ width: "14%" }} />
+              <col style={{ width: "14%" }} />
+              <col style={{ width: "17%" }} />
               <col style={{ width: "10%" }} />
             </colgroup>
             <thead>
@@ -703,6 +710,7 @@ export default function DashboardPage() {
                   Cost (INR){costLoading && <span className="ml-1 text-[9px] text-blue-200 font-normal animate-pulse">loading...</span>}
                 </th>
                 <th className="text-right text-xs font-bold uppercase tracking-wider text-white px-4 py-3">Ext. License (₹)</th>
+                <th className="text-right text-xs font-bold uppercase tracking-wider text-white px-4 py-3">Total Cost (₹)</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
@@ -735,6 +743,9 @@ export default function DashboardPage() {
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-extrabold font-mono text-purple-700">
                       {grandLic > 0 ? `₹${grandLic.toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-right text-sm font-extrabold font-mono text-orange-700">
+                      {rate > 0 ? `₹${(filteredGrandINR + grandLic).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : <span className="text-xs text-slate-300">enter rate</span>}
                     </td>
                     <td />
                   </tr>
