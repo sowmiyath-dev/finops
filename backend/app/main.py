@@ -7,6 +7,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.models.database import init_db
 from app.routers import auth, towers, reports, admin, tags, verticals
 from app.routers import azure_costs
+from app.routers import external_licenses
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ app.include_router(admin.router, prefix="/api")
 app.include_router(tags.router, prefix="/api")
 app.include_router(verticals.router, prefix="/api")
 app.include_router(azure_costs.router, prefix="/api")
+app.include_router(external_licenses.router, prefix="/api")
 
 
 @app.on_event("startup")

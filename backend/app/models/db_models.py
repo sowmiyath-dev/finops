@@ -319,6 +319,24 @@ class VerticalCostCache(Base):
     refreshed_at = Column(DateTime(timezone=True), default=utcnow)
 
 
+class ExternalLicense(Base):
+    """External license cost table — one row per license item per application."""
+    __tablename__ = "external_licenses"
+    __table_args__ = (Index("ix_el_app_name", "app_name"),)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    app_name = Column(String, nullable=False)          # application name (matches AppMapping.appName)
+    sno = Column(Integer, nullable=False, default=0)   # display order
+    description = Column(String, nullable=False)
+    team = Column(String, nullable=True)
+    unit_cost_pa = Column(Numeric(18, 2), default=0)   # unit cost per annum
+    unit_cost_pm = Column(Numeric(18, 2), default=0)   # unit cost per month
+    dc_units = Column(Numeric(10, 2), default=0)       # MUM-DC units
+    dr_units = Column(Numeric(10, 2), default=0)       # HYD-DR units
+    uat_units = Column(Numeric(10, 2), default=0)      # UAT units
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
 class ResourceTagMapping(Base):
     """Maps application custom tags to resource IDs across any cloud."""
     __tablename__ = "resource_tag_mappings"

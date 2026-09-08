@@ -5,7 +5,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
-import { RefreshCw, Download, IndianRupee, Plus, Trash2, Pencil, Check, X } from "lucide-react";
+import { RefreshCw, Download, IndianRupee, Plus, Trash2, Pencil, Check, X, FileSpreadsheet } from "lucide-react";
+import ExternalLicenseModal from "@/components/ExternalLicenseModal";
 import { generateAwsMonthlyReport, generateCtReport, CTData, ServiceCost } from "@/lib/awsMonthlyReport";
 import { DEFAULT_APP_MAPPINGS, AppMapping, APP_VERTICAL_MAP } from "@/lib/awsMonthlyReportConfig";
 
@@ -71,7 +72,7 @@ async function fetchCtData(towers: any[], start: string, end: string): Promise<C
 
 // ── Editable mapping row ──────────────────────────────────────────────────────
 function MappingRow({
-  row, index, onUpdate, onDelete, allAccounts, usdCost, inrCost, rate,
+  row, index, onUpdate, onDelete, allAccounts, usdCost, inrCost, rate, licenseTotal, onOpenLicense,
 }: {
   row: AppMapping; index: number;
   onUpdate: (i: number, updated: AppMapping) => void;
@@ -80,6 +81,8 @@ function MappingRow({
   usdCost: number | null;
   inrCost: number | null;
   rate: number;
+  licenseTotal?: number;
+  onOpenLicense: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<AppMapping>(row);
@@ -116,6 +119,24 @@ function MappingRow({
         <td className="px-4 py-3 text-right text-sm font-bold font-mono text-blue-700">{fmtUSD(usdCost)}</td>
         <td className="px-4 py-3 text-right text-sm font-bold font-mono text-emerald-700">
           {rate > 0 ? fmtINR(inrCost) : <span className="text-xs text-slate-300">enter rate</span>}
+        </td>
+        <td className="px-4 py-3 text-right">
+          {licenseTotal != null && licenseTotal > 0 ? (
+            <button
+              onClick={onOpenLicense}
+              className="text-sm font-bold font-mono text-purple-700 hover:text-purple-900 hover:underline transition flex items-center gap-1 ml-auto"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              ₹{licenseTotal.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+            </button>
+          ) : (
+            <button
+              onClick={onOpenLicense}
+              className="text-xs text-slate-400 hover:text-purple-600 transition flex items-center gap-1 ml-auto"
+            >
+              <FileSpreadsheet className="w-3 h-3" /> Set
+            </button>
+          )}
         </td>
         <td className="px-4 py-3">
           <div className="flex gap-1 justify-end">
@@ -154,6 +175,7 @@ function MappingRow({
       </td>
       <td className="px-4 py-2 text-right text-[11px] font-mono text-blue-700">{fmtUSD(usdCost)}</td>
       <td className="px-4 py-2 text-right text-[11px] font-mono text-emerald-700">{rate > 0 ? fmtINR(inrCost) : "—"}</td>
+      <td className="px-4 py-2 text-right text-[11px] font-mono text-purple-600">{licenseTotal != null && licenseTotal > 0 ? `₹${licenseTotal.toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : "—"}</td>
       <td className="px-3 py-2">
         <div className="flex gap-1 justify-end">
           <button onClick={save} className="p-1 rounded hover:bg-green-100 text-green-700"><Check className="w-3 h-3" /></button>
@@ -198,6 +220,8 @@ export default function DashboardPage() {
   const [costLoading, setCostLoading]   = useState(false);
   const [sflFilter, setSflFilter]       = useState<"all" | "SFL" | "Non - SFL">("all");
   const [dlDone, setDlDone]             = useState(false);
+  const [licenseApp, setLicenseApp]     = useState<string | null>(null);
+  const [licenseTotals, setLicenseTotals] = useState<Record<string, number>>({});
 
   // ── Individual CT download state ──────────────────────────────────────────
   const [ctStart, setCtStart]           = useState(lastMonth.start);
@@ -391,6 +415,19 @@ export default function DashboardPage() {
   };
 
   const filteredMappings = sflFilter === "all" ? mappings : mappings.filter((m) => (APP_VERTICAL_MAP[m.appName] || "Non - SFL") === sflFilter);
+
+  // Load external license totals for all apps
+  const loadLicenseTotal = async (appName: string) => {
+    try {
+      const res = await api.get(`/external-licenses/${encodeURIComponent(appName)}`);
+      const total = (res.data as any[]).reduce((s: number, r: any) => s + (r.total_cost || 0), 0);
+      setLicenseTotals((prev) => ({ ...prev, [appName]: total }));
+    } catch { /* ignore */ }
+  };
+
+  useEffect(() => {
+    for (const m of mappings) loadLicenseTotal(m.appName);
+  }, [mappings.length]); // eslint-disable-line
 
   const filteredGrandUSD = ctDataCache.length > 0
     ? filteredMappings.reduce((s, m) => s + computeMappingCostUSD(m, ctDataCache), 0)
@@ -650,11 +687,12 @@ export default function DashboardPage() {
           {/* Table */}
           <table className="w-full" style={{ borderCollapse: "collapse" }}>
             <colgroup>
-              <col style={{ width: "30%" }} />
-              <col style={{ width: "12%" }} />
-              <col style={{ width: "22%" }} />
-              <col style={{ width: "22%" }} />
-              <col style={{ width: "14%" }} />
+              <col style={{ width: "26%" }} />
+              <col style={{ width: "10%" }} />
+              <col style={{ width: "18%" }} />
+              <col style={{ width: "18%" }} />
+              <col style={{ width: "18%" }} />
+              <col style={{ width: "10%" }} />
             </colgroup>
             <thead>
               <tr style={{ background: "linear-gradient(90deg,#0f2d5e 0%,#1e4d8c 50%,#0f2d5e 100%)", backgroundSize: "200% 100%", animation: "headerShimmer 4s ease infinite" }}>
@@ -664,6 +702,7 @@ export default function DashboardPage() {
                 <th className="text-right text-xs font-bold uppercase tracking-wider text-white px-4 py-3">
                   Cost (INR){costLoading && <span className="ml-1 text-[9px] text-blue-200 font-normal animate-pulse">loading...</span>}
                 </th>
+                <th className="text-right text-xs font-bold uppercase tracking-wider text-white px-4 py-3">Ext. License (₹)</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
@@ -672,30 +711,47 @@ export default function DashboardPage() {
                 const globalIndex = mappings.indexOf(row);
                 const usdCost = ctDataCache.length > 0 ? computeMappingCostUSD(row, ctDataCache) : null;
                 const inrCost = rate > 0 && ctDataCache.length > 0 ? computeMappingCost(row, ctDataCache, rate) : null;
+                const licTotal = licenseTotals[row.appName];
                 return (
                   <MappingRow key={globalIndex} row={row} index={globalIndex} onUpdate={updateMapping} onDelete={deleteMapping} allAccounts={[]}
-                    usdCost={usdCost} inrCost={inrCost} rate={rate} />
+                    usdCost={usdCost} inrCost={inrCost} rate={rate}
+                    licenseTotal={licTotal}
+                    onOpenLicense={() => setLicenseApp(row.appName)}
+                  />
                 );
               })}
-              {ctDataCache.length > 0 && (
-                <tr style={{ background: "#e8f0fe", borderTop: "2px solid #3b82f6" }}>
-                  <td className="px-4 py-3 text-sm font-extrabold text-slate-800" colSpan={2}>
-                    Total {sflFilter !== "all" && <span className="ml-1 text-xs font-semibold text-blue-600">({sflFilter})</span>}
-                  </td>
-                  <td className="px-4 py-3 text-right text-sm font-extrabold font-mono text-blue-800">
-                    ${filteredGrandUSD.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </td>
-                  <td className="px-4 py-3 text-right text-sm font-extrabold font-mono text-emerald-700">
-                    {rate > 0 ? `₹${filteredGrandINR.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : <span className="text-xs text-slate-300">enter rate</span>}
-                  </td>
-                  <td />
-                </tr>
-              )}
+              {ctDataCache.length > 0 && (() => {
+                const grandLic = filteredMappings.reduce((s, m) => s + (licenseTotals[m.appName] || 0), 0);
+                return (
+                  <tr style={{ background: "#e8f0fe", borderTop: "2px solid #3b82f6" }}>
+                    <td className="px-4 py-3 text-sm font-extrabold text-slate-800" colSpan={2}>
+                      Total {sflFilter !== "all" && <span className="ml-1 text-xs font-semibold text-blue-600">({sflFilter})</span>}
+                    </td>
+                    <td className="px-4 py-3 text-right text-sm font-extrabold font-mono text-blue-800">
+                      ${filteredGrandUSD.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-4 py-3 text-right text-sm font-extrabold font-mono text-emerald-700">
+                      {rate > 0 ? `₹${filteredGrandINR.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : <span className="text-xs text-slate-300">enter rate</span>}
+                    </td>
+                    <td className="px-4 py-3 text-right text-sm font-extrabold font-mono text-purple-700">
+                      {grandLic > 0 ? `₹${grandLic.toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : "—"}
+                    </td>
+                    <td />
+                  </tr>
+                );
+              })()}
             </tbody>
           </table>
         </div>
 
       </div>
+
+      {licenseApp && (
+        <ExternalLicenseModal
+          appName={licenseApp}
+          onClose={() => { setLicenseApp(null); loadLicenseTotal(licenseApp); }}
+        />
+      )}
     </div>
   );
 }
