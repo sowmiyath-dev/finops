@@ -17,15 +17,18 @@ interface LicenseRow {
 }
 
 function compute(row: LicenseRow) {
-  const pm = row.unit_cost_pm;
-  const dc_cost = row.dc_units * pm;
-  const dr_cost = row.dr_units * pm;
-  const uat_cost = row.uat_units * pm;
+  const pm = Number(row.unit_cost_pm) || 0;
+  const dc = Number(row.dc_units) || 0;
+  const dr = Number(row.dr_units) || 0;
+  const uat = Number(row.uat_units) || 0;
+  const dc_cost = dc * pm;
+  const dr_cost = dr * pm;
+  const uat_cost = uat * pm;
   return {
     dc_cost,
     dr_cost,
     uat_cost,
-    total_units: row.dc_units + row.dr_units + row.uat_units,
+    total_units: dc + dr + uat,
     total_cost: dc_cost + dr_cost + uat_cost,
   };
 }
@@ -44,7 +47,11 @@ function NumCell({ value, onChange, prefix, className }: {
 
   useEffect(() => { if (editing) ref.current?.select(); }, [editing]);
 
-  const commit = () => { const n = parseFloat(draft); onChange(isNaN(n) ? 0 : n); setEditing(false); };
+  const commit = () => {
+    const n = parseFloat(draft);
+    onChange(isNaN(n) ? 0 : Number(n));
+    setEditing(false);
+  };
 
   if (editing) {
     return (
