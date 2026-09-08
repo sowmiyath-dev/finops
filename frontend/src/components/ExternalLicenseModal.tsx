@@ -38,8 +38,8 @@ function fmtINR(v: number) {
   return "₹ " + v.toLocaleString("en-IN", { maximumFractionDigits: 0 });
 }
 
-function NumCell({ value, onChange, prefix, className }: {
-  value: number; onChange: (v: number) => void; prefix?: string; className?: string;
+function NumCell({ value, onChange, prefix, className, onFocus }: {
+  value: number; onChange: (v: number) => void; prefix?: string; className?: string; onFocus?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value));
@@ -64,7 +64,7 @@ function NumCell({ value, onChange, prefix, className }: {
     );
   }
   return (
-    <div onClick={() => { setDraft(String(value)); setEditing(true); }}
+    <div onClick={() => { setDraft(String(value)); setEditing(true); onFocus?.(); }}
       className={`text-right text-xs font-mono cursor-pointer hover:bg-blue-50 rounded px-1 py-0.5 select-none ${className ?? ""}`}>
       {prefix}{value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
     </div>
@@ -97,12 +97,16 @@ function TextCell({ value, onChange, className }: { value: string; onChange: (v:
   );
 }
 
+type EditableField = "unit_cost_pa" | "unit_cost_pm" | "dc_units" | "dr_units" | "uat_units";
+
 export default function ExternalLicenseModal({ appName, onClose }: { appName: string; onClose: () => void; }) {
   const [rows, setRows] = useState<LicenseRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [activeCell, setActiveCell] = useState<{ row: number; field: EditableField } | null>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
 
   const loadRows = () => {
     setLoading(true);
@@ -121,6 +125,40 @@ export default function ExternalLicenseModal({ appName, onClose }: { appName: st
 
   const update = (i: number, patch: Partial<LicenseRow>) =>
     setRows((prev) => prev.map((r, idx) => idx === i ? { ...r, ...patch } : r));
+
+  const handleTablePaste = (e: React.ClipboardEvent<HTMLTableElement>) => {
+    if (!activeCell) return;
+    const text = e.clipboardData.getData("text");
+    // Parse Excel-style paste: rows separated by \n, cols by \t
+    const pasteRows = text.trimEnd().split(/\r?\n/).map((line) => line.split("\t"));
+    const cols = pasteRows[0].length;
+    const fields: EditableField[] = ["unit_cost_pa", "unit_cost_pm", "dc_units", "dr_units", "uat_units"];
+    const startCol = fields.indexOf(activeCell.field);
+    if (startCol === -1) return; // not a numeric field
+    e.preventDefault();
+    setRows((prev) => {
+      const next = [...prev];
+      pasteRows.forEach((pasteRow, ri) => {
+        const rowIdx = activeCell.row + ri;
+        if (rowIdx >= next.length) return;
+        pasteRow.forEach((val, ci) => {
+          const fieldIdx = startCol + ci;
+          if (fieldIdx >= fields.length) return;
+          const field = fields[fieldIdx];
+          const n = parseFloat(val.replace(/,/g, ""));
+          if (!isNaN(n)) {
+            next[rowIdx] = { ...next[rowIdx], [field]: n };
+            // sync unit_cost_pm when unit_cost_pa is pasted
+            if (field === "unit_cost_pa") {
+              next[rowIdx] = { ...next[rowIdx], unit_cost_pm: Math.round(n / 12) };
+            }
+          }
+        });
+      });
+      return next;
+    });
+    void cols; // suppress unused warning
+  };
 
   const addRow = () => {
     const nextSno = rows.length > 0 ? Math.max(...rows.map((r) => r.sno)) + 1 : 1;
@@ -203,7 +241,7 @@ export default function ExternalLicenseModal({ appName, onClose }: { appName: st
               </button>
             </div>
           ) : (
-            <table className="w-full text-xs" style={{ borderCollapse: "collapse", minWidth: 1100 }}>
+            <table ref={tableRef} className="w-full text-xs" style={{ borderCollapse: "collapse", minWidth: 1100 }} onPaste={handleTablePaste}>
               <thead className="sticky top-0 z-10">
                 <tr style={{ background: "#0f2d5e" }}>
                   <th className={thCls} rowSpan={2} style={{ width: 36 }}>S.No</th>
@@ -237,25 +275,25 @@ export default function ExternalLicenseModal({ appName, onClose }: { appName: st
                       <td className={tdCls + " text-center text-slate-400 font-mono"}>{row.sno}</td>
                       <td className={tdCls}><TextCell value={row.description} onChange={(v) => update(i, { description: v })} /></td>
                       <td className={tdCls}><TextCell value={row.team} onChange={(v) => update(i, { team: v })} className="text-center" /></td>
-                      <td className={tdCls}><NumCell value={row.unit_cost_pa} onChange={(v) => update(i, { unit_cost_pa: v, unit_cost_pm: Math.round(v / 12) })} prefix="₹ " className="text-slate-700" /></td>
-                      <td className={tdCls}><NumCell value={row.unit_cost_pm} onChange={(v) => update(i, { unit_cost_pm: v })} prefix="₹ " className="text-slate-700" /></td>
+                      <td className={tdCls}><NumCell value={row.unit_cost_pa} onChange={(v) => update(i, { unit_cost_pa: v, unit_cost_pm: Math.round(v / 12) })} prefix="₹ " className="text-slate-700" onFocus={() => setActiveCell({ row: i, field: "unit_cost_pa" })} /></td>
+                      <td className={tdCls}><NumCell value={row.unit_cost_pm} onChange={(v) => update(i, { unit_cost_pm: v })} prefix="₹ " className="text-slate-700" onFocus={() => setActiveCell({ row: i, field: "unit_cost_pm" })} /></td>
                       {/* DC */}
                       <td className={tdCls} style={{ background: isEven ? "#eef4ff" : "#e6f0ff" }}>
-                        <NumCell value={row.dc_units} onChange={(v) => update(i, { dc_units: v })} className="text-blue-800" />
+                        <NumCell value={row.dc_units} onChange={(v) => update(i, { dc_units: v })} className="text-blue-800" onFocus={() => setActiveCell({ row: i, field: "dc_units" })} />
                       </td>
                       <td className={tdCls} style={{ background: isEven ? "#eef4ff" : "#e6f0ff" }}>
                         <div className="text-right text-xs font-mono text-blue-700 px-1 py-0.5">{fmtINR(c.dc_cost)}</div>
                       </td>
                       {/* DR */}
                       <td className={tdCls} style={{ background: isEven ? "#edfaf8" : "#e0f5f2" }}>
-                        <NumCell value={row.dr_units} onChange={(v) => update(i, { dr_units: v })} className="text-teal-800" />
+                        <NumCell value={row.dr_units} onChange={(v) => update(i, { dr_units: v })} className="text-teal-800" onFocus={() => setActiveCell({ row: i, field: "dr_units" })} />
                       </td>
                       <td className={tdCls} style={{ background: isEven ? "#edfaf8" : "#e0f5f2" }}>
                         <div className="text-right text-xs font-mono text-teal-700 px-1 py-0.5">{fmtINR(c.dr_cost)}</div>
                       </td>
                       {/* UAT */}
                       <td className={tdCls} style={{ background: isEven ? "#f0fae8" : "#e8f5e0" }}>
-                        <NumCell value={row.uat_units} onChange={(v) => update(i, { uat_units: v })} className="text-green-800" />
+                        <NumCell value={row.uat_units} onChange={(v) => update(i, { uat_units: v })} className="text-green-800" onFocus={() => setActiveCell({ row: i, field: "uat_units" })} />
                       </td>
                       <td className={tdCls} style={{ background: isEven ? "#f0fae8" : "#e8f5e0" }}>
                         <div className="text-right text-xs font-mono text-green-700 px-1 py-0.5">{fmtINR(c.uat_cost)}</div>
