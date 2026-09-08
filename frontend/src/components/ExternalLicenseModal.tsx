@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { X, Plus, Trash2, Save, RefreshCw } from "lucide-react";
+import { X, Plus, Trash2, Save, RefreshCw, RotateCcw } from "lucide-react";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
 
@@ -129,14 +129,17 @@ export default function ExternalLicenseModal({
   const [rows, setRows] = useState<LicenseRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
-  useEffect(() => {
+  const loadRows = () => {
     setLoading(true);
     api.get(`/external-licenses/${encodeURIComponent(appName)}`)
       .then((r) => setRows(r.data))
       .catch(() => toast.error("Failed to load licenses"))
       .finally(() => setLoading(false));
-  }, [appName]);
+  };
+
+  useEffect(() => { loadRows(); }, [appName]); // eslint-disable-line
 
   const update = (i: number, patch: Partial<LicenseRow>) => {
     setRows((prev) => prev.map((r, idx) => idx === i ? { ...r, ...patch } : r));
@@ -161,6 +164,20 @@ export default function ExternalLicenseModal({
       toast.error("Save failed");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const resetToDefaults = async () => {
+    if (!confirm("Reset to default 21 licenses? All custom changes will be lost.")) return;
+    setResetting(true);
+    try {
+      await api.post(`/external-licenses/${encodeURIComponent(appName)}/reset`);
+      toast.success("Reset to defaults");
+      loadRows();
+    } catch {
+      toast.error("Reset failed");
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -195,6 +212,10 @@ export default function ExternalLicenseModal({
           <div className="flex items-center gap-2">
             <button onClick={addRow} className="flex items-center gap-1 px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white text-xs font-bold rounded-lg transition">
               <Plus className="w-3.5 h-3.5" /> Add Row
+            </button>
+            <button onClick={resetToDefaults} disabled={resetting} className="flex items-center gap-1 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-lg transition disabled:opacity-60" title="Reset to 21 default licenses">
+              {resetting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+              Reset
             </button>
             <button onClick={save} disabled={saving} className="flex items-center gap-1 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg transition disabled:opacity-60">
               {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}

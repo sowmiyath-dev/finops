@@ -12,27 +12,27 @@ from app.services.auth_service import get_current_user
 router = APIRouter(prefix="/external-licenses", tags=["external-licenses"])
 
 DEFAULT_LICENSES = [
-    {"sno": 1,  "description": "RHEL",                        "team": "DCEBS", "unit_cost_pa": 0,        "unit_cost_pm": 0},
-    {"sno": 2,  "description": "MSSQL Ent",                   "team": "DCEBS", "unit_cost_pa": 278196,   "unit_cost_pm": 23183},
-    {"sno": 3,  "description": "MSSQL Std",                   "team": "DCEBS", "unit_cost_pa": 89068,    "unit_cost_pm": 7422},
-    {"sno": 4,  "description": "Fortigate License",           "team": "NOC",   "unit_cost_pa": 142000,   "unit_cost_pm": 11833},
-    {"sno": 5,  "description": "Security",                    "team": "SOC",   "unit_cost_pa": 40000,    "unit_cost_pm": 3333},
-    {"sno": 6,  "description": "Dynatrace",                   "team": "DCEBS", "unit_cost_pa": 100000,   "unit_cost_pm": 8333},
-    {"sno": 7,  "description": "Veeam Backup",                "team": "DCEBS", "unit_cost_pa": 16260,    "unit_cost_pm": 1355},
-    {"sno": 8,  "description": "Site24/7",                    "team": "DCEBS", "unit_cost_pa": 740,      "unit_cost_pm": 62},
-    {"sno": 9,  "description": "OpsRamp",                     "team": "DCEBS", "unit_cost_pa": 6500,     "unit_cost_pm": 542},
-    {"sno": 10, "description": "Color Token",                 "team": "NOC",   "unit_cost_pa": 11500,    "unit_cost_pm": 958},
-    {"sno": 11, "description": "CSPM",                        "team": "SOC",   "unit_cost_pa": 3400,     "unit_cost_pm": 283},
-    {"sno": 12, "description": "Manage Engine Patch manager", "team": "DCEBS", "unit_cost_pa": 564,      "unit_cost_pm": 47},
-    {"sno": 13, "description": "ME Service Desk plus",        "team": "DCEBS", "unit_cost_pa": 805,      "unit_cost_pm": 67},
-    {"sno": 14, "description": "SIEM",                        "team": "SOC",   "unit_cost_pa": 900000,   "unit_cost_pm": 75000},
-    {"sno": 15, "description": "EDR",                         "team": "SOC",   "unit_cost_pa": 4500,     "unit_cost_pm": 375},
-    {"sno": 16, "description": "F5 DXC",                      "team": "SOC",   "unit_cost_pa": 800000,   "unit_cost_pm": 66667},
-    {"sno": 17, "description": "VAPT (GBT, BBT, VA/PT)",      "team": "SOC",   "unit_cost_pa": 195000,   "unit_cost_pm": 16250},
-    {"sno": 18, "description": "Brand Monitoring",            "team": "SOC",   "unit_cost_pa": 0,        "unit_cost_pm": 0},
-    {"sno": 19, "description": "Recon Service",               "team": "SOC",   "unit_cost_pa": 500000,   "unit_cost_pm": 41667},
-    {"sno": 20, "description": "MSSP",                        "team": "SOC",   "unit_cost_pa": 1800000,  "unit_cost_pm": 150000},
-    {"sno": 21, "description": "PIM",                         "team": "SOC",   "unit_cost_pa": 20000,    "unit_cost_pm": 1700},
+    {"sno": 1,  "description": "RHEL",                        "team": "DCEBS", "unit_cost_pa": 0,        "unit_cost_pm": 0,      "dc_units": 0, "dr_units": 0, "uat_units": 0},
+    {"sno": 2,  "description": "MSSQL Ent",                   "team": "DCEBS", "unit_cost_pa": 278196,   "unit_cost_pm": 23183,  "dc_units": 0, "dr_units": 0, "uat_units": 0},
+    {"sno": 3,  "description": "MSSQL Std",                   "team": "DCEBS", "unit_cost_pa": 89068,    "unit_cost_pm": 7422,   "dc_units": 0, "dr_units": 0, "uat_units": 0},
+    {"sno": 4,  "description": "Fortigate License",           "team": "NOC",   "unit_cost_pa": 142000,   "unit_cost_pm": 11833,  "dc_units": 0, "dr_units": 0, "uat_units": 0},
+    {"sno": 5,  "description": "Security",                    "team": "SOC",   "unit_cost_pa": 40000,    "unit_cost_pm": 3333,   "dc_units": 0, "dr_units": 0, "uat_units": 0},
+    {"sno": 6,  "description": "Dynatrace",                   "team": "DCEBS", "unit_cost_pa": 100000,   "unit_cost_pm": 8333,   "dc_units": 0, "dr_units": 0, "uat_units": 0},
+    {"sno": 7,  "description": "Veeam Backup",                "team": "DCEBS", "unit_cost_pa": 16260,    "unit_cost_pm": 1355,   "dc_units": 0, "dr_units": 0, "uat_units": 0},
+    {"sno": 8,  "description": "Site24/7",                    "team": "DCEBS", "unit_cost_pa": 740,      "unit_cost_pm": 62,     "dc_units": 0, "dr_units": 0, "uat_units": 0},
+    {"sno": 9,  "description": "OpsRamp",                     "team": "DCEBS", "unit_cost_pa": 6500,     "unit_cost_pm": 542,    "dc_units": 0, "dr_units": 0, "uat_units": 0},
+    {"sno": 10, "description": "Color Token",                 "team": "NOC",   "unit_cost_pa": 11500,    "unit_cost_pm": 958,    "dc_units": 0, "dr_units": 0, "uat_units": 0},
+    {"sno": 11, "description": "CSPM",                        "team": "SOC",   "unit_cost_pa": 3400,     "unit_cost_pm": 283,    "dc_units": 0, "dr_units": 0, "uat_units": 0},
+    {"sno": 12, "description": "Manage Engine Patch manager", "team": "DCEBS", "unit_cost_pa": 564,      "unit_cost_pm": 47,     "dc_units": 0, "dr_units": 0, "uat_units": 0},
+    {"sno": 13, "description": "ME Service Desk plus",        "team": "DCEBS", "unit_cost_pa": 805,      "unit_cost_pm": 67,     "dc_units": 0, "dr_units": 0, "uat_units": 0},
+    {"sno": 14, "description": "SIEM",                        "team": "SOC",   "unit_cost_pa": 900000,   "unit_cost_pm": 75000,  "dc_units": 0, "dr_units": 0, "uat_units": 0},
+    {"sno": 15, "description": "EDR",                         "team": "SOC",   "unit_cost_pa": 4500,     "unit_cost_pm": 375,    "dc_units": 0, "dr_units": 0, "uat_units": 0},
+    {"sno": 16, "description": "F5 DXC",                      "team": "SOC",   "unit_cost_pa": 800000,   "unit_cost_pm": 66667,  "dc_units": 0, "dr_units": 0, "uat_units": 0},
+    {"sno": 17, "description": "VAPT (GBT, BBT, VA/PT)",      "team": "SOC",   "unit_cost_pa": 195000,   "unit_cost_pm": 16250,  "dc_units": 0, "dr_units": 0, "uat_units": 0},
+    {"sno": 18, "description": "Brand Monitoring",            "team": "SOC",   "unit_cost_pa": 0,        "unit_cost_pm": 0,      "dc_units": 0, "dr_units": 0, "uat_units": 0},
+    {"sno": 19, "description": "Recon Service",               "team": "SOC",   "unit_cost_pa": 500000,   "unit_cost_pm": 41667,  "dc_units": 0, "dr_units": 0, "uat_units": 0},
+    {"sno": 20, "description": "MSSP",                        "team": "SOC",   "unit_cost_pa": 1800000,  "unit_cost_pm": 150000, "dc_units": 0, "dr_units": 0, "uat_units": 0},
+    {"sno": 21, "description": "PIM",                         "team": "SOC",   "unit_cost_pa": 20000,    "unit_cost_pm": 1700,   "dc_units": 0, "dr_units": 0, "uat_units": 0},
 ]
 
 
@@ -77,6 +77,27 @@ def _row_to_dict(r: ExternalLicense) -> dict:
         "total_units": total_units,
         "total_cost": total_cost,
     }
+
+
+@router.post("/{app_name}/reset", status_code=200)
+async def reset_licenses(
+    app_name: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Delete all rows for this app and re-seed from defaults."""
+    if user.role == "viewer":
+        raise HTTPException(403)
+    existing = (await db.execute(
+        select(ExternalLicense).where(ExternalLicense.app_name == app_name)
+    )).scalars().all()
+    for r in existing:
+        await db.delete(r)
+    await db.flush()
+    for d in DEFAULT_LICENSES:
+        db.add(ExternalLicense(app_name=app_name, **d))
+    await db.commit()
+    return {"reset": True, "rows": len(DEFAULT_LICENSES)}
 
 
 @router.get("/{app_name}")
