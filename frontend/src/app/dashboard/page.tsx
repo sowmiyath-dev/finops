@@ -7,7 +7,7 @@ import api from "@/lib/api";
 import toast from "react-hot-toast";
 import { RefreshCw, Download, IndianRupee, Plus, Trash2, Pencil, Check, X, FileSpreadsheet } from "lucide-react";
 import ExternalLicenseModal from "@/components/ExternalLicenseModal";
-import { generateAwsMonthlyReport, generateCtReport, CTData, ServiceCost } from "@/lib/awsMonthlyReport";
+import { generateAwsMonthlyReport, generateCtReport, CTData, ServiceCost, AppLicenseData } from "@/lib/awsMonthlyReport";
 import { DEFAULT_APP_MAPPINGS, AppMapping, APP_VERTICAL_MAP } from "@/lib/awsMonthlyReportConfig";
 
 function fmtDate(d: Date) {
@@ -362,10 +362,29 @@ export default function DashboardPage() {
       const ctDataList = await fetchCtData([ct], ctStart, ctEnd);
       const ctData = ctDataList[0];
 
-      // Use selected sub-accounts or all if none selected
       const accountsToDownload = selectedSubAccounts.length > 0
         ? ctData.accounts.filter((a) => selectedSubAccounts.includes(a.accountId))
         : ctData.accounts;
+
+      const accountIdSet = new Set(accountsToDownload.map((a) => a.accountId));
+
+      // Find apps whose accounts belong to this CT
+      const ctAppNames = mappings
+        .filter((m) => m.accounts.some((a) => accountIdSet.has(a.accountId)))
+        .map((m) => m.appName);
+
+      // Fetch full license rows for each matching app
+      const appLicenses: AppLicenseData[] = [];
+      await Promise.all(
+        ctAppNames.map(async (appName) => {
+          try {
+            const res = await api.get(`/external-licenses/${encodeURIComponent(appName)}`);
+            if (res.data?.length > 0) {
+              appLicenses.push({ appName, rows: res.data });
+            }
+          } catch { /* skip */ }
+        })
+      );
 
       const servicesByCt = new Map<string, ServiceCost[]>();
       await Promise.all(
@@ -389,7 +408,7 @@ export default function DashboardPage() {
       generateCtReport(
         ctData, rate, monthLabel, servicesByCt,
         selectedSubAccounts.length > 0 ? selectedSubAccounts : undefined,
-        licenseTotals,
+        appLicenses.length > 0 ? appLicenses : undefined,
       );
       toast.success(`${ct.name} report downloaded`);
       setDlDone(true); setTimeout(() => setDlDone(false), 2000);

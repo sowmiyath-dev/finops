@@ -15,7 +15,28 @@ export interface AccountCost {
 export interface CTData { ctName: string; ctId: string; accounts: AccountCost[]; }
 export interface ServiceCost { service: string; usageCost: number; trueCost: number; }
 
-// ── Cell helpers ──────────────────────────────────────────────────────────────
+export interface LicenseRowData {
+  sno: number;
+  description: string;
+  team: string;
+  unit_cost_pa: number;
+  unit_cost_pm: number;
+  dc_units: number;
+  dr_units: number;
+  uat_units: number;
+  dc_cost: number;
+  dr_cost: number;
+  uat_cost: number;
+  total_units: number;
+  total_cost: number;
+}
+
+export interface AppLicenseData {
+  appName: string;
+  rows: LicenseRowData[];
+}
+
+
 function inrCell(v: number): XLSX.CellObject {
   return { t: "n", v, z: "₹#,##0.00", s: { alignment: { horizontal: "left" } } };
 }
@@ -254,6 +275,88 @@ function buildGenericSheet(ct: CTData, rate: number): XLSX.WorkSheet {
   return ws;
 }
 
+// ── Sheet: External License (detailed) ───────────────────────────────────────────
+function buildExternalLicenseSheet(appLicenses: AppLicenseData[]): XLSX.WorkSheet {
+  const rows: any[][] = [];
+
+  // Group header
+  rows.push([
+    boldStr("S.No"), boldStr("Description"), boldStr("Team"),
+    boldStr("Unit Cost P.A"), boldStr("Unit Cost P.M"),
+    boldStr("MUM - DC"), "",
+    boldStr("HYD - DR"), "",
+    boldStr("UAT"), "",
+    boldStr("TOTAL"), "",
+  ]);
+  rows.push([
+    "", "", "", "", "",
+    boldStr("No of Units"), boldStr("Cost P.M"),
+    boldStr("No of Units"), boldStr("Cost P.M"),
+    boldStr("No of Units"), boldStr("Cost P.M"),
+    boldStr("No of Units"), boldStr("Cost P.M"),
+  ]);
+
+  let grandDcCost = 0, grandDrCost = 0, grandUatCost = 0, grandTotalUnits = 0, grandTotalCost = 0;
+
+  for (const app of appLicenses) {
+    // App name separator row
+    rows.push([boldStr(`Application: ${app.appName}`), "", "", "", "", "", "", "", "", "", "", "", ""]);
+
+    let appDcCost = 0, appDrCost = 0, appUatCost = 0, appTotalUnits = 0, appTotalCost = 0;
+
+    for (const r of app.rows) {
+      const pm = Number(r.unit_cost_pm) || 0;
+      const dc = Number(r.dc_units) || 0;
+      const dr = Number(r.dr_units) || 0;
+      const uat = Number(r.uat_units) || 0;
+      const dcCost = dc * pm;
+      const drCost = dr * pm;
+      const uatCost = uat * pm;
+      const totalUnits = dc + dr + uat;
+      const totalCost = dcCost + drCost + uatCost;
+
+      appDcCost += dcCost; appDrCost += drCost; appUatCost += uatCost;
+      appTotalUnits += totalUnits; appTotalCost += totalCost;
+
+      rows.push([
+        r.sno, r.description, r.team || "",
+        inrCell(Number(r.unit_cost_pa) || 0),
+        inrCell(pm),
+        dc, inrCell(dcCost),
+        dr, inrCell(drCost),
+        uat, inrCell(uatCost),
+        totalUnits, inrCell(totalCost),
+      ]);
+    }
+
+    // App subtotal
+    rows.push([
+      "", boldStr(`${app.appName} Total`), "", "", "",
+      "", inrCell(appDcCost),
+      "", inrCell(appDrCost),
+      "", inrCell(appUatCost),
+      appTotalUnits, inrCell(appTotalCost),
+    ]);
+    rows.push([]);
+
+    grandDcCost += appDcCost; grandDrCost += appDrCost; grandUatCost += appUatCost;
+    grandTotalUnits += appTotalUnits; grandTotalCost += appTotalCost;
+  }
+
+  // Grand total
+  rows.push([
+    "", boldStr("GRAND TOTAL"), "", "", "",
+    "", inrCell(grandDcCost),
+    "", inrCell(grandDrCost),
+    "", inrCell(grandUatCost),
+    grandTotalUnits, inrCell(grandTotalCost),
+  ]);
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  setWidths(ws, [6, 28, 10, 14, 14, 12, 14, 12, 14, 12, 14, 12, 14]);
+  return ws;
+}
+
 // ── Individual CT download ────────────────────────────────────────────────────
 // Sheet 1: account-wise summary
 // Sheet per sub-account: service-wise breakdown
@@ -263,7 +366,7 @@ export function generateCtReport(
   monthLabel: string,
   servicesByCt: Map<string, ServiceCost[]>,
   selectedAccountIds?: string[],
-  licenseTotals?: Record<string, number>,
+  appLicenses?: AppLicenseData[],
 ) {
   const wb = XLSX.utils.book_new();
   const accounts = selectedAccountIds && selectedAccountIds.length > 0
@@ -289,20 +392,9 @@ export function generateCtReport(
   setWidths(accWs, [18, 26, 16, 16, 16]);
   XLSX.utils.book_append_sheet(wb, accWs, "Summary");
 
-  // External License sheet
-  if (licenseTotals && Object.keys(licenseTotals).length > 0) {
-    const licRows: any[][] = [
-      [boldStr("Application"), boldStr("Ext. License Cost (INR)"), boldStr("AWS Cost (INR)"), boldStr("Total Cost (INR)")],
-    ];
-    let licGrand = 0;
-    for (const [appName, licCost] of Object.entries(licenseTotals)) {
-      licGrand += licCost;
-      licRows.push([appName, inrCell(licCost), "", ""]);
-    }
-    licRows.push([boldStr("Total"), inrCell(licGrand), "", ""]);
-    const licWs = XLSX.utils.aoa_to_sheet(licRows);
-    setWidths(licWs, [28, 22, 18, 18]);
-    XLSX.utils.book_append_sheet(wb, licWs, "External License");
+  // External License sheet — detailed with all rows per app
+  if (appLicenses && appLicenses.length > 0) {
+    XLSX.utils.book_append_sheet(wb, buildExternalLicenseSheet(appLicenses), "External License");
   }
 
   // One sheet per sub-account: service-wise
