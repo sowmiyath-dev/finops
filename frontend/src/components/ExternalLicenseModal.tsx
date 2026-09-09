@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { X, Plus, Trash2, Save, RefreshCw, RotateCcw } from "lucide-react";
+import { X, Plus, Trash2, Save, RefreshCw, RotateCcw, Download } from "lucide-react";
+import * as XLSX from "xlsx";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
 
@@ -177,6 +178,38 @@ export default function ExternalLicenseModal({ appName, onClose }: { appName: st
     } finally { setSaving(false); }
   };
 
+  const downloadExcel = () => {
+    const wb = XLSX.utils.book_new();
+    const header = [
+      "S.No", "Description", "Team", "Unit Cost P.A", "Unit Cost P.M",
+      "MUM-DC Units", "MUM-DC Cost P.M",
+      "HYD-DR Units", "HYD-DR Cost P.M",
+      "UAT Units", "UAT Cost P.M",
+      "Total Units", "Total Cost P.M",
+    ];
+    const data = rows.map((row) => {
+      const c = compute(row);
+      return [
+        row.sno, row.description, row.team, row.unit_cost_pa, row.unit_cost_pm,
+        row.dc_units, c.dc_cost,
+        row.dr_units, c.dr_cost,
+        row.uat_units, c.uat_cost,
+        c.total_units, c.total_cost,
+      ];
+    });
+    data.push([
+      "", "TOTAL", "", "", "",
+      "", totals.dc_cost,
+      "", totals.dr_cost,
+      "", totals.uat_cost,
+      totals.total_units, totals.total_cost,
+    ]);
+    const ws = XLSX.utils.aoa_to_sheet([header, ...data]);
+    ws["!cols"] = [8, 30, 12, 16, 16, 14, 16, 14, 16, 12, 16, 14, 16].map((w) => ({ wch: w }));
+    XLSX.utils.book_append_sheet(wb, ws, "External License Cost");
+    XLSX.writeFile(wb, `${appName} External License Cost.xlsx`);
+  };
+
   const resetToDefaults = async () => {
     if (!confirm("Reset to default 21 licenses? All custom changes will be lost.")) return;
     setResetting(true);
@@ -210,6 +243,9 @@ export default function ExternalLicenseModal({ appName, onClose }: { appName: st
           <div className="flex items-center gap-2">
             <button onClick={addRow} className="flex items-center gap-1 px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white text-xs font-bold rounded-lg transition">
               <Plus className="w-3.5 h-3.5" /> Add Row
+            </button>
+            <button onClick={downloadExcel} disabled={!!loadError || loading} className="flex items-center gap-1 px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white text-xs font-bold rounded-lg transition disabled:opacity-60">
+              <Download className="w-3.5 h-3.5" /> Download
             </button>
             <button onClick={resetToDefaults} disabled={resetting} className="flex items-center gap-1 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-lg transition disabled:opacity-60">
               {resetting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />} Reset
