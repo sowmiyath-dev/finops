@@ -90,7 +90,7 @@ async def init_db():
             await conn.execute(text("SELECT 1"))
     # Auto-create any missing tables (safe — skips existing tables)
     async with engine.begin() as conn:
-        await conn.run_sync(Base.create_all)
+        await conn.run_sync(Base.metadata.create_all)
 
 
 async def get_db():
